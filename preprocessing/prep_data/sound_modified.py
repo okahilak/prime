@@ -7,6 +7,7 @@
 # ------------------- NB! -----------------------------------
 
 # Authors: Tuomas Mutanen, Olli-Pekka Kahilakoski, Matilda Makkonen, Johanna Metsomaa
+# Modified by Oskari Ahola and Lisa Haxel
  
 import multiprocessing
 import time
