@@ -40,7 +40,7 @@ def sound(eeg_samples, baseline_correction, sigmas, num_of_channels, lfm, iterat
     #################### Run beamformer SOUND #####################################################
     # See Metsomaa et al. 2024 Brain Topography for equations
 
-    dataCov = np.matmul(data, data.T) / data.shape[1] # Estimate the data covariance matrix as sample covariance
+    dataCov = np.matmul(data, data.T) / data.shape[1] # Estimate the data covariance matrix (sample covariance in the paper)
     
     # Estimate the neuronal covariance
     LL = lfm @ (lfm.T)
