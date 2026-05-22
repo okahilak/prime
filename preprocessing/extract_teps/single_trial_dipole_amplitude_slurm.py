@@ -406,7 +406,6 @@ def run_dipole_calculation_for_subject(
         )
         orientation_identifier = 'free_ori' if fixed_orientation is None else 'fixed_ori'
         subject_response_extraction_info[f'trial_dipoles_{orientation_identifier}'] = dipoles_for_trials
-        subject_response_extraction_info[f'dipoles_{orientation_identifier}_extraction_times'] = extraction_times
         # Add the informative print statement back
         print(f"Average {orientation_identifier} dipole extraction times {np.mean(extraction_times)*1e3:.2f} ms")
 
