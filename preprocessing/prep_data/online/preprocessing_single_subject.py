@@ -6,7 +6,6 @@ from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 import warnings
-import matplotlib.pyplot as plt
 import time
 import argparse
 import gc
@@ -79,7 +78,6 @@ def _detect_bad_channels_once(epochs, z_mad_thresh, z_power_thresh, freq_range, 
         mad_vals = median_abs_deviation(flattened, axis=1)
         z_mad = zscore(mad_vals)
         bad_mad = np.where((z_mad > z_mad_thresh[1]) | (z_mad < z_mad_thresh[0]))[0]
-        _print_rejected_channels(epochs, bad_mad, "MAD")
         bad_indices = np.union1d(bad_indices, bad_mad)
 
     if z_power_thresh:
@@ -87,14 +85,12 @@ def _detect_bad_channels_once(epochs, z_mad_thresh, z_power_thresh, freq_range, 
         mean_psd = np.mean(np.mean(psds, axis=0), axis=-1)
         z_psd = zscore(mean_psd)
         bad_power = np.where(z_psd > z_power_thresh)[0]
-        _print_rejected_channels(epochs, bad_power, "high-frequency power")
         bad_indices = np.union1d(bad_indices, bad_power)
 
     if z_autocorr_thresh:
         autocorrs = [np.mean([_autocorr(data[t, c, :]) for t in range(n_trials)]) for c in range(n_channels)]
         z_ac = np.abs(zscore(autocorrs))
         bad_ac = np.where(z_ac > z_autocorr_thresh)[0]
-        _print_rejected_channels(epochs, bad_ac, "autocorrelation")
         bad_indices = np.union1d(bad_indices, bad_ac)
 
     if z_auc_thresh:
@@ -102,7 +98,6 @@ def _detect_bad_channels_once(epochs, z_mad_thresh, z_power_thresh, freq_range, 
         auc_vals = [np.trapz(np.abs(evoked[c, :])) for c in range(n_channels)]
         z_auc = zscore(auc_vals)
         bad_auc = np.where(z_auc > z_auc_thresh)[0]
-        _print_rejected_channels(epochs, bad_auc, "AUC")
         bad_indices = np.union1d(bad_indices, bad_auc)
 
     bad_indices = bad_indices.astype(int)
@@ -115,11 +110,6 @@ def _autocorr(data, lag=1):
 
 def compute_psd(data, sfreq, fmin, fmax):
     return mne.time_frequency.psd_array_multitaper(data, sfreq, fmin=fmin, fmax=fmax, verbose=False)
-
-
-def _print_rejected_channels(epochs, indices, metric):
-    if len(indices) > 0:
-        print(f"Rejected channels {[epochs.ch_names[i] for i in indices]} due to {metric}.")
 
 
 def detect_bad_channels_pre(epochs, options, filter_opts):
@@ -297,28 +287,20 @@ def detect_bad_emg_trials(epochs_emg, pre_innerv_opts, ptp_opts, line_freq):
     }
 
     bad_trials = []
-    all_ptps = []
-    all_pre_innervations = []
 
     for ch_idx in range(n_channels):
-        ch_ptps = []
-        ch_pre_innervations = []
         for trial_idx in range(n_trials):
-            has_pre_innerv, valid_ptp, ptp, data = process_single_emg_trial(
+            has_pre_innerv, valid_ptp, _, data = process_single_emg_trial(
                 data, trial_idx, ch_idx, pre_innerv_mask, line_freq,
                 pre_stim_times, times, pre_innerv_opts, ptp_mask, ptp_opts,
                 epochs_emg.info['sfreq']
             )
             if has_pre_innerv or not valid_ptp:
                 bad_trials.append(trial_idx)
-            ch_ptps.append(ptp)
-            ch_pre_innervations.append(has_pre_innerv)
-        all_ptps.append(ch_ptps)
-        all_pre_innervations.append(ch_pre_innervations)
 
     bad_trials = np.unique(bad_trials)
     epochs_emg = mne.EpochsArray(data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
-    return bad_trials, epochs_emg, all_ptps, all_pre_innervations, time_info
+    return bad_trials, epochs_emg, time_info
 
 
 def process_single_emg_trial(data, trial_idx, ch_idx, pre_innerv_mask, line_freq,
@@ -333,10 +315,6 @@ def process_single_emg_trial(data, trial_idx, ch_idx, pre_innerv_mask, line_freq
                 sine_fit = _fit_line_freq_sine(pre_data, pre_stim_times, full_times, sine_model)
                 data[trial_idx, ch_idx, :] -= sine_fit
             except scipy.optimize.OptimizeWarning:
-                if data.shape[0] > 1:
-                    print(f"Sine fit failed: ch {ch_idx}, trial {trial_idx}, {line_freq}Hz harmonic {harmonic}")
-                else:
-                    print(f"Sine fit failed: ch {ch_idx}, {line_freq}Hz harmonic {harmonic}")
                 break
 
     has_pre_innerv = _check_pre_innervation(data[trial_idx, ch_idx, pre_innerv_mask], pre_innerv_opts['threshold'])
@@ -575,41 +553,30 @@ def preprocess_calibration(epochs, epochs_emg, pre_time_cfg, post_time_cfg, emg_
     emg_data = epochs_emg.get_data(copy=True)
     emg_data = apply_filter(emg_data, emg_filt_coeffs, filter_opts_emg['pad_time'], epochs_emg.info['sfreq'])
     epochs_emg = mne.EpochsArray(emg_data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
-    bad_emg, epochs_emg, all_ptps, all_pre_innervations, emg_time_info = detect_bad_emg_trials(
+    bad_emg, epochs_emg, emg_time_info = detect_bad_emg_trials(
         epochs_emg, emg_reject_opts['pre_innervation_options'], emg_reject_opts['ptp_options'], line_freq)
 
     info['emg_filter'] = emg_filt_coeffs
     info['emg_prep_times'] = emg_time_info
     info['bad_trials_emg'] = bad_emg
-    info['bad_trials_emg_peak_to_peak'] = [[t for t in range(len(ch_ptps)) if ch_ptps[t] is False] for ch_ptps in all_ptps]
-    info['bad_trials_emg_pre_innervation_trials'] = [[t for t in range(len(ch_pi)) if ch_pi[t] is True] for ch_pi in all_pre_innervations]
     info['trials_before_emg_rejection'] = epochs_emg.get_data(copy=True).shape[0]
 
     epochs_pre, epochs_post, epochs_emg = drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_emg)
-    all_ptps = np.array([[ptp for i, ptp in enumerate(ch_ptps) if i not in bad_emg] for ch_ptps in all_ptps])
-    info['n_trials_left'] = epochs_emg.get_data(copy=True).shape[0]
+    info['n_trials_left'] = epochs_pre.get_data(copy=True).shape[0]
 
     if info['n_trials_left'] < n_trials_goal:
         return n_trials_goal - info['n_trials_left']
 
-    return epochs_pre, epochs_post, epochs_emg, ica, all_ptps, info
+    return epochs_pre, epochs_post, ica, info
 
 
 # ==================== Single-Trial Processing ====================
 
-def preprocess_pre_trial(epoch_pre, info, trial_reject_opts, ica, filter_opts, ica_opts, use_ica_on_pre):
+def preprocess_pre_trial(epoch_pre, info, trial_reject_opts, filter_opts, use_ica_on_pre):
     """Preprocess a single pre-stimulus trial using calibrated parameters."""
-    print("\n--- Starting single trial pre-stimulus processing ---")
-    timings = {}
-    t_total = time.perf_counter()
-
     # Interpolate bad channels
     if info['bad_channels']:
-        t0 = time.perf_counter()
         epoch_pre, _ = interpolate_bad_channels(epoch_pre, info['bad_channels'], info['channel_interpolation_info'])
-        dt = (time.perf_counter() - t0) * 1e3
-        timings['1. Interpolate Bad Channels'] = dt
-        print(f"Step 1 'Interpolate Bad Channels': {dt:.3f}ms")
 
     if use_ica_on_pre:
         raise NotImplementedError("Applying ICA to pre-stimulus in single-trials is not currently implemented")
@@ -617,93 +584,48 @@ def preprocess_pre_trial(epoch_pre, info, trial_reject_opts, ica, filter_opts, i
     data = epoch_pre.get_data(copy=True)
 
     # Apply filter
-    t0 = time.perf_counter()
     data = apply_filter(data, info['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['2. Apply Filter'] = dt
-    print(f"Step 2 'Apply Filter': {dt:.3f}ms")
 
     # Mean subtraction (average reference)
-    t0 = time.perf_counter()
     data -= np.mean(data, axis=1)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['3. Mean Subtraction'] = dt
-    print(f"Step 3 'Mean Subtraction': {dt:.3f}ms")
 
     # Global MAD check
-    t0 = time.perf_counter()
     mad_val = median_abs_deviation(data, axis=(1, 2))[0]
     z_mad = compute_zscore(mad_val, info['good_trial_stats_pre']['mads_mean'], info['good_trial_stats_pre']['mads_std'])
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['4. Global MAD Check'] = dt
-    print(f"Step 4 'Global MAD Check': {dt:.3f}ms")
 
     thresh = trial_reject_opts['pre']['global_zscore_threshold']
     if z_mad < thresh[0] or z_mad > thresh[1]:
-        print(f"Rejected: global MAD z={z_mad:.2f} outside {thresh}")
-        timings['Total (rejected)'] = (time.perf_counter() - t_total) * 1e3
-        return False, timings
+        return False
 
     # Local MAD check
-    t0 = time.perf_counter()
     local_mad = median_abs_deviation(data, axis=2)
     z_local = zscore(local_mad, axis=1)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['5. Local MAD Check'] = dt
-    print(f"Step 5 'Local MAD Check': {dt:.3f}ms")
 
     local_thresh = trial_reject_opts['pre']['local_zscore_threshold']
     if np.any(np.abs(z_local) > local_thresh):
-        print(f"Rejected: local MAD z min/max {np.min(z_local):.2f}/{np.max(z_local):.2f} outside ±{local_thresh}")
-        timings['Total (rejected)'] = (time.perf_counter() - t_total) * 1e3
-        return False, timings
+        return False
 
     # Rebuild epoch
     epoch_pre = mne.EpochsArray(data, info=epoch_pre.info, events=epoch_pre.events, tmin=epoch_pre.times[0], verbose=False)
-
-    total_dt = (time.perf_counter() - t_total) * 1e3
-    timings['Total (accepted)'] = total_dt
-    print(f"--- Total (accepted): {total_dt / 1e3:.4f}s ---")
-    return epoch_pre, timings
+    return epoch_pre
 
 
 def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range):
     """Preprocess a single post-stimulus trial using calibrated parameters."""
-    print("\n--- Starting single trial post-stimulus processing ---")
-    timings = {}
-    t_total = time.perf_counter()
-
     # Baseline correction
-    t0 = time.perf_counter()
     epoch_post.apply_baseline(baseline)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['1. Baseline'] = dt
-    print(f"Step 1 'Baseline': {dt:.3f}ms")
 
     # First artifact interpolation
-    t0 = time.perf_counter()
     epoch_post = mne.preprocessing.fix_stim_artifact(epoch_post, tmin=artifact_window_1[0], tmax=artifact_window_1[1], mode='window')
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['2. Artifact Interpolation 1'] = dt
-    print(f"Step 2 'Artifact Interpolation 1': {dt:.3f}ms")
 
     # Interpolate bad channels
     if info['bad_channels']:
-        t0 = time.perf_counter()
         epoch_post, _ = interpolate_bad_channels(epoch_post, info['bad_channels'], info['channel_interpolation_info'])
-        dt = (time.perf_counter() - t0) * 1e3
-        timings['3. Interpolate Bad Channels'] = dt
-        print(f"Step 3 'Interpolate Bad Channels': {dt:.3f}ms")
 
     # Average reference
-    t0 = time.perf_counter()
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['4. Average Reference'] = dt
-    print(f"Step 4 'Average Reference': {dt:.3f}ms")
 
     # Check ocular ICA components
-    t0 = time.perf_counter()
     source_tc = ica.get_sources(epoch_post)
     source_data = source_tc.get_data(copy=True)
     for comp_idx in info['ocular_thresholds_post']:
@@ -711,113 +633,64 @@ def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, ar
         z_comp = compute_zscore(np.abs(source_data[0, comp_idx, comp_info['time_indices_of_interest']]),
                                 comp_info['mean'], comp_info['std'])
         if np.median(z_comp) > trial_reject_opts['ocular']['z_thresh']:
-            print(f"Rejected: ocular z={np.median(z_comp):.2f} > {trial_reject_opts['ocular']['z_thresh']}")
-            timings['Total (rejected)'] = (time.perf_counter() - t_total) * 1e3
-            return False, timings
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['5. ICA Ocular Check'] = dt
-    print(f"Step 5 'ICA Ocular Check': {dt:.3f}ms")
+            return False
 
     # Apply ICA
-    t0 = time.perf_counter()
     ica.apply(epoch_post)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['6. Apply ICA'] = dt
-    print(f"Step 6 'Apply ICA': {dt:.3f}ms")
 
     # Re-baseline and crop
-    t0 = time.perf_counter()
     epoch_post.apply_baseline(baseline).set_eeg_reference('average', projection=False, verbose=False)
     epoch_post.crop(info['post_mintime'], None)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['7. Re-baseline & Crop'] = dt
-    print(f"Step 7 'Re-baseline & Crop': {dt:.3f}ms")
 
     # Apply SOUND
-    t0 = time.perf_counter()
     data = epoch_post.get_data(copy=True)
     data = np.matmul(info['sound_filter'], data)
     epoch_post = mne.EpochsArray(data, epoch_post.info, events=epoch_post.events, tmin=epoch_post.times[0], verbose=False)
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['8. Apply SOUND'] = dt
-    print(f"Step 8 'Apply SOUND': {dt:.3f}ms")
 
     # Apply SSP-SIR
-    t0 = time.perf_counter()
     data = epoch_post.get_data(copy=True)
     data = ssp_sir_single_trial(data[0, :, :], info['sspsir_suppression_matrix_P'],
                                 info['sspsir_sir_projmat_suppr'], info['sspsir_sir_projmat_orig'],
                                 info['sspsir_filter_kernel'])
     epoch_post = mne.EpochsArray(data.reshape(1, data.shape[0], data.shape[1]), epoch_post.info,
                                  events=epoch_post.events, tmin=epoch_post.times[0])
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['9. Apply SSP-SIR'] = dt
-    print(f"Step 9 'Apply SSP-SIR': {dt:.3f}ms")
 
     # Second artifact interpolation
-    t0 = time.perf_counter()
     epoch_post = mne.preprocessing.fix_stim_artifact(epoch_post, tmin=info['post_mintime'], tmax=artifact_window_2[1], mode='window')
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['10. Artifact Interpolation 2'] = dt
-    print(f"Step 10 'Artifact Interpolation 2': {dt:.3f}ms")
 
     # Global MAD check
-    t0 = time.perf_counter()
     reject_data = epoch_post.copy().crop(reject_range[0], reject_range[1]).get_data(copy=True)
     mad_val = median_abs_deviation(reject_data, axis=(1, 2))[0]
     z_mad = compute_zscore(mad_val, info['good_trial_stats_post']['mads_mean'], info['good_trial_stats_post']['mads_std'])
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['11. Global MAD Check'] = dt
-    print(f"Step 11 'Global MAD Check': {dt:.3f}ms")
 
     thresh = trial_reject_opts['post']['global_zscore_threshold']
     if z_mad < thresh[0] or z_mad > thresh[1]:
-        print(f"Rejected: global MAD z={z_mad:.2f} outside {thresh}")
-        timings['Total (rejected)'] = (time.perf_counter() - t_total) * 1e3
-        return False, timings
+        return False
 
     # Local MAD check
-    t0 = time.perf_counter()
     local_mad = median_abs_deviation(reject_data, axis=2)
     z_local = zscore(local_mad, axis=1)
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['12. Local MAD Check'] = dt
-    print(f"Step 12 'Local MAD Check': {dt:.3f}ms")
 
     local_thresh = trial_reject_opts['post']['local_zscore_threshold']
     if np.any(np.abs(z_local) > local_thresh):
-        print(f"Rejected: local MAD min/max {np.min(z_local):.2f}/{np.max(z_local):.2f} outside ±{local_thresh}")
-        timings['Total (rejected)'] = (time.perf_counter() - t_total) * 1e3
-        return False, timings
+        return False
 
-    total_dt = (time.perf_counter() - t_total) * 1e3
-    timings['Total (accepted)'] = total_dt
-    print(f"--- Total (accepted): {total_dt / 1e3:.4f}s ---")
-    return epoch_post, timings
+    return epoch_post
 
 
 def preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, info, line_freq):
     """Preprocess a single EMG trial and determine MEP validity."""
-    print("\n--- Starting single trial EMG processing ---")
-    timings = {}
-    t_total = time.perf_counter()
-
     full_times = info['emg_prep_times']['full_emg_times']
     pre_stim_times = full_times[info['emg_prep_times']['pre_innervation_time_indices']]
     data = epoch_emg.get_data(copy=True)
 
     # Apply filter
-    t0 = time.perf_counter()
     data = apply_filter(data, info['emg_filter'], filter_opts_emg['pad_time'], epoch_emg.info['sfreq'])
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['1. Apply EMG Filter'] = dt
-    print(f"Step 1 'Apply EMG Filter': {dt:.3f}ms")
 
     # Check pre-innervation and MEP
-    t0 = time.perf_counter()
-    has_pre_innerv, valid_ptp, ptp, data = process_single_emg_trial(
+    has_pre_innerv, valid_ptp, _, data = process_single_emg_trial(
         data, 0, 0,
         info['emg_prep_times']['pre_innervation_time_indices'],
         line_freq, pre_stim_times, full_times,
@@ -826,21 +699,11 @@ def preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, info, line
         emg_reject_opts['ptp_options'],
         epoch_emg.info['sfreq']
     )
-    dt = (time.perf_counter() - t0) * 1e3
-    timings['2. Pre-Innervation & MEP Check'] = dt
-    print(f"Step 2 'Pre-Innervation & MEP Check': {dt:.3f}ms")
 
-    epoch_emg = mne.EpochsArray(data, info=epoch_emg.info, events=epoch_emg.events, tmin=epoch_emg.times[0], verbose=False)
-
-    total_dt = (time.perf_counter() - t_total) * 1e3
     if has_pre_innerv or not valid_ptp:
-        print(f"Rejected EMG: pre_innervation={has_pre_innerv}, valid_ptp={valid_ptp}")
-        timings['Total (rejected)'] = total_dt
-        return False, False, timings
-    else:
-        timings['Total (accepted)'] = total_dt
-        print(f"--- Total (accepted): {total_dt / 1e3:.4f}s ---")
-        return epoch_emg, ptp, timings
+        return False
+
+    return True
 
 
 # ==================== Subject-Level Runner ====================
@@ -850,7 +713,6 @@ def run_subject_processing(site_id: str, subject_id: str):
     # Paths
     data_path = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
     use_ica_on_pre = False
-    save_results = True
     output_path = _PREP_ROOT / f"data_processed_pre_ica_{use_ica_on_pre}_v4"
 
     # Time ranges
@@ -923,15 +785,11 @@ def run_subject_processing(site_id: str, subject_id: str):
     n_trials_goal = 100
 
     # --- Load data ---
-    print(f"--- Starting processing: site={site_id}, subject={subject_id} ---")
-    t_start = time.time()
-
     subject_path = data_path / site_id / subject_id
     subject_output = output_path / subject_id
 
     if not subject_path.exists():
-        print(f"ERROR: Subject directory not found at {subject_path}. Skipping.")
-        return
+        raise FileNotFoundError(f"Subject directory not found at {subject_path}")
 
     os.makedirs(subject_output, exist_ok=True)
 
@@ -954,37 +812,19 @@ def run_subject_processing(site_id: str, subject_id: str):
     picked_channel, emg_filt_coeffs = select_best_emg_channel(check_emg, ptp_opts, filter_opts_emg)
     epochs_emg.pick(picked_channel)
 
-    calibration_times = []
-    calibration_trial_counts = []
     while True:
-        t0 = time.time()
         out = preprocess_calibration(
             epochs[0:n_trials_use], epochs_emg[0:n_trials_use],
             pre_time_cfg, post_time_cfg, emg_time_range,
             ch_reject_opts, ica_opts, trial_reject_opts, emg_reject_opts,
             sound_opts, ssp_sir_opts, leadfield, filter_opts, filter_opts_emg,
             line_freq, target_sfreq, n_trials_goal, use_ica_on_pre, emg_filt_coeffs)
-        calibration_times.append(time.time() - t0)
-        calibration_trial_counts.append(n_trials_use)
         if isinstance(out, int):
             n_trials_use += out
-            print(f"Adjusting n_trials_use to {n_trials_use}")
         else:
             break
 
-    processing_times = {
-        'pre': {'good': [], 'bad': [], 'all': []},
-        'post': {'good': [], 'bad': [], 'all': []},
-        'emg': {'good': [], 'bad': [], 'all': []},
-        'calibration_processing_times': calibration_times,
-        'trials_in_calibration': calibration_trial_counts,
-        'n_calibration_iterations': len(calibration_trial_counts),
-    }
-
-    print(f"\nCalibration results: {n_trials_use} trials used")
-    input("Press Enter to continue to single-trial processing...")
-
-    epochs_pre_cal, epochs_post_cal, epochs_emg_cal, ica, mep_ptps, preprocessing_info = out
+    epochs_pre_cal, epochs_post_cal, ica, preprocessing_info = out
 
     preprocessing_info['n_trials_calibration'] = len(epochs_pre_cal)
     preprocessing_info['used_emg_channel'] = picked_channel
@@ -994,13 +834,11 @@ def run_subject_processing(site_id: str, subject_id: str):
     # --- Single-trial processing ---
     pre_list = [epochs_pre_cal]
     post_list = [epochs_post_cal]
-    emg_list = [epochs_emg_cal]
     bad_trials_online = []
-    online_ptps = []
-    preprocessing_info['n_trials_to_process_with_calibrated_filters'] = len(epochs) - n_trials_use
+    n_total = len(epochs) - n_trials_use
 
-    for trial_idx in range(n_trials_use, len(epochs)):
-        print(f"Processing trial {trial_idx}...")
+    for i, trial_idx in enumerate(range(n_trials_use, len(epochs))):
+        print(f"Trial {i + 1}/{n_total}")
         epoch = mne.EpochsArray(
             epochs.get_data(item=trial_idx), info=epochs.info,
             events=epochs.events[trial_idx:trial_idx + 1], tmin=epochs.tmin, verbose=False)
@@ -1010,44 +848,25 @@ def run_subject_processing(site_id: str, subject_id: str):
 
         # Pre-stim
         ep_pre = epoch.copy().crop(pre_range[0], pre_range[1]).resample(target_sfreq, method='polyphase')
-        t_pre_start = time.perf_counter()
-        result_pre, times_pre = preprocess_pre_trial(ep_pre, preprocessing_info, trial_reject_opts, ica, filter_opts, ica_opts, use_ica_on_pre)
-        t_pre_end = time.perf_counter()
-        processing_times['pre']['all'].append(times_pre)
+        result_pre = preprocess_pre_trial(ep_pre, preprocessing_info, trial_reject_opts, filter_opts, use_ica_on_pre)
 
         # Post-stim
         ep_post = epoch.copy().crop(post_range[0], post_range[1]).resample(target_sfreq, method='polyphase')
-        t_post_start = time.perf_counter()
-        result_post, times_post = preprocess_post_trial(ep_post, preprocessing_info, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
-        t_post_end = time.perf_counter()
-        processing_times['post']['all'].append(times_post)
+        result_post = preprocess_post_trial(ep_post, preprocessing_info, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
 
         # EMG
         epoch_emg.crop(emg_time_range[0], emg_time_range[1]).resample(target_sfreq, method='polyphase')
-        t_emg_start = time.perf_counter()
-        result_emg, mep_ptp, times_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, preprocessing_info, line_freq)
-        t_emg_end = time.perf_counter()
-        processing_times['emg']['all'].append(times_emg)
+        result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, preprocessing_info, line_freq)
 
-        if result_pre and result_post and result_emg:
+        if result_pre is not False and result_post is not False and result_emg is not False:
             pre_list.append(result_pre)
             post_list.append(result_post)
-            emg_list.append(result_emg)
-            online_ptps.append(mep_ptp)
-            processing_times['pre']['good'].append(t_pre_end - t_pre_start)
-            processing_times['post']['good'].append(t_post_end - t_post_start)
-            processing_times['emg']['good'].append(t_emg_end - t_emg_start)
         else:
             bad_trials_online.append(trial_idx)
-            processing_times['pre']['bad'].append(t_pre_end - t_pre_start)
-            processing_times['post']['bad'].append(t_post_end - t_post_start)
-            processing_times['emg']['bad'].append(t_emg_end - t_emg_start)
 
     preprocessing_info['bad_trials_calibrated'] = bad_trials_online
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
-    epochs_emg_final = mne.concatenate_epochs(emg_list)
-    mep_ptps = np.append(mep_ptps, online_ptps)
 
     # Block identifiers bookkeeping
     bad_keys = ['bad_trials_ocular', 'bad_trials_pre', 'bad_trials_post', 'bad_trials_emg']
@@ -1062,40 +881,17 @@ def run_subject_processing(site_id: str, subject_id: str):
     preprocessing_info['n_trials_final'] = len(epochs_pre_final)
 
     # --- Save results ---
-    if save_results:
-        for ep, label in zip([epochs_pre_final, epochs_post_final, epochs_emg_final], ['pre', 'post', 'emg']):
-            ep.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
+    for ep, label in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
+        ep.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
 
-        ica.save(os.path.join(subject_output, f'{subject_id}_ica.fif'), overwrite=True)
-        np.savez(os.path.join(subject_output, f'{subject_id}_preprocessing_info.npz'), **preprocessing_info)
-        np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
-        np.save(os.path.join(subject_output, f'{subject_id}_MEPs.npy'), mep_ptps)
-
-        try:
-            fig = epochs_post_final.average().plot_joint(show=False)
-            fig.savefig(os.path.join(subject_output, f'{subject_id}_post_joint.png'))
-            plt.close(fig)
-
-            fig, ax = plt.subplots()
-            ax.plot(mep_ptps * 1e6)
-            ax.set_title(f'MEP PTP values for {subject_id}')
-            ax.set_xlabel('Trial')
-            ax.set_ylabel('PTP (\u00b5V)')
-            fig.savefig(os.path.join(subject_output, f'{subject_id}_mep_ptp.png'))
-            plt.close(fig)
-
-            fig = epochs_emg_final.average().crop(-0.01, 0.1).plot(show=False)
-            fig.savefig(os.path.join(subject_output, f'{subject_id}_emg_avg.png'))
-            plt.close(fig)
-        except Exception as e:
-            print(f"Could not generate plots for {subject_id}: {e}")
+    np.savez(os.path.join(subject_output, f'{subject_id}_preprocessing_info.npz'), **preprocessing_info)
+    np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
 
     # Cleanup
-    print(f"--- Finished {subject_id}. Total time: {time.time() - t_start:.2f}s ---")
-    del epochs, epochs_emg, epochs_pre_final, epochs_post_final, epochs_emg_final
-    del pre_list, post_list, emg_list
-    del epochs_pre_cal, epochs_post_cal, epochs_emg_cal
-    del preprocessing_info, processing_times, ica, mep_ptps, online_ptps
+    del epochs, epochs_emg, epochs_pre_final, epochs_post_final
+    del pre_list, post_list
+    del epochs_pre_cal, epochs_post_cal
+    del preprocessing_info, ica
     gc.collect()
 
 
@@ -1105,7 +901,6 @@ def main():
     parser.add_argument("--site", required=True, type=str, help="Site identifier.")
     parser.add_argument("--subject", required=True, type=str, help="Subject identifier.")
     args = parser.parse_args()
-    print(f"Arguments: site='{args.site}', subject='{args.subject}'")
     run_subject_processing(site_id=args.site, subject_id=args.subject)
 
 
