@@ -13,6 +13,9 @@ import matplotlib.pyplot as plt
 import time 
 import pandas as pd
 import argparse
+from pathlib import Path
+
+_PREP_ROOT = Path(__file__).resolve().parents[1]
 
 
 def dipoles_for_times(evoked, forward, tmin, tmax):
@@ -440,13 +443,10 @@ def main():
     parser.add_argument("--subject", required=True, type=str, help="The subject identifier (e.g., 'sub-001').")
     args = parser.parse_args()
 
-    # --- Configuration ---
-    # Define a base directory for easier path management
-    base_dir = "/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing"
-    
-    subjects_directory_eeg = os.path.join(base_dir, "data_processed_final_pre_ica_False_final_v4")
-    subjects_directory_dipoles = os.path.join(base_dir, "dipoles_with_calibration_final_v4")
-    subjects_dir_fsaverage = os.path.join(base_dir, "extracted_files", "subjects_dir_fsaverage")
+    # --- Configuration (repo-local; matches preprocessing_single_subject.py) ---
+    subjects_directory_eeg = str(_PREP_ROOT / "data_processed_pre_ica_False_v4")
+    subjects_directory_dipoles = str(_PREP_ROOT / "dipoles_pre_ica_False_v4")
+    subjects_dir_fsaverage = str(_PREP_ROOT / "subjects_dir_fsaverage")
     fsaverage_forward_path = os.path.join(subjects_dir_fsaverage, "fsaverage", "fsaverage-fwd.fif")
 
     # This list defines the desired channel set and order
