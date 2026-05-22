@@ -358,7 +358,8 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
                            filter_opts, filter_opts_emg, line_freq, target_sfreq,
                            n_trials_goal, use_ica_on_pre, emg_filter_coefficients):
     """Full calibration preprocessing pipeline for pre-stim, post-stim, and EMG epochs."""
-    info = {}
+    calibration_params = {}
+    rejected_trials = {}
     ica_time_range = ica_opts['pre_timerange']
 
     # Crop into segments
@@ -378,14 +379,9 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
 
     # Detect and interpolate bad channels
     bad_channels_pre, pre_filter_coefficients = _detect_bad_channels_pre(epochs_pre, channel_reject_opts['pre'], filter_opts)
-    info['pre_stim_filter'] = pre_filter_coefficients
+    calibration_params['pre_stim_filter'] = pre_filter_coefficients
     bad_channels_post = _detect_bad_channels_post(epochs_post, channel_reject_opts['post'], reject_range)
     bad_channels = list(np.union1d(bad_channels_pre, bad_channels_post))
-
-    info['channels_before_rejection'] = epochs_post.ch_names
-    info['bad_channels_pre'] = bad_channels_pre
-    info['bad_channels_post'] = bad_channels_post
-    info['bad_channels'] = bad_channels
 
     if bad_channels:
         epochs_pre, interpolation_info = _interpolate_bad_channels(epochs_pre, bad_channels, None)
@@ -393,26 +389,24 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
         epochs_post, _ = _interpolate_bad_channels(epochs_post, bad_channels, interpolation_info)
     else:
         interpolation_info = None
-    info['channel_interpolation_info'] = interpolation_info
+    calibration_params['bad_channels'] = bad_channels
+    calibration_params['channel_interpolation_info'] = interpolation_info
 
     # ICA calibration on filtered pre-stim
     ica_data = epochs_pre_ica.get_data(copy=True)
-    ica_data, ica_filter_coefficients = _butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
+    ica_data, _ = _butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
                                                epochs_pre_ica.info['sfreq'], ica_opts['filtering']['order_bandpass'],
                                                ica_opts['filtering']['pad_time_bandpass'])
-    info['epochs_pre_ica_filter'] = ica_filter_coefficients
     epochs_pre_ica_filtered = mne.EpochsArray(ica_data, info=epochs_pre_ica.info, events=epochs_pre_ica.events, tmin=epochs_pre_ica.times[0])
 
     epochs_post.set_eeg_reference('average', projection=False, verbose=False)
     epochs_pre_ica_filtered.set_eeg_reference('average', projection=False, verbose=False)
 
     n_components = get_number_of_components(epochs_pre_ica_filtered.get_data(copy=True), ica_opts['pc_threshold'])
-    ica, excluded_components, ica_component_labels = get_ica(epochs_pre_ica_filtered, n_components, None,
+    ica, excluded_components, _ = get_ica(epochs_pre_ica_filtered, n_components, None,
                                              ica_opts['bad_component_thresholds'],
                                              ica_opts['n_min_comps_to_reject'],
                                              ica_opts['threshold_min_components_to_reject'])
-    info['ica_comps_excluded'] = excluded_components
-    info['ic_label_dict'] = ica_component_labels
     del epochs_pre_ica_filtered
 
     # Filter pre-stim
@@ -425,11 +419,9 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
 
     # Detect ocular artifact trials
     if use_ica_on_pre:
-        bad_ocular_pre, ocular_threshold_pre = _detect_ocular_trials(
+        bad_ocular_pre, _ = _detect_ocular_trials(
             ica, epochs_pre, trial_reject_opts['ocular']['pre_timerange_min'], None,
             excluded_components['eye blink'], trial_reject_opts['ocular']['z_thresh'])
-        info['bad_trials_ocular_pre'] = bad_ocular_pre
-        info['ocular_thresholds_pre'] = ocular_threshold_pre
 
     bad_ocular_post, ocular_threshold_post = _detect_ocular_trials(
         ica, epochs_post, trial_reject_opts['ocular']['post_timerange'][0],
@@ -441,10 +433,8 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     else:
         bad_ocular = bad_ocular_post
 
-    info['bad_trials_ocular_post'] = bad_ocular_post
-    info['ocular_thresholds_post'] = ocular_threshold_post
-    info['bad_trials_ocular'] = bad_ocular
-    info['trials_before_ocular_rejection'] = epochs_pre.get_data(copy=True).shape[0]
+    rejected_trials['bad_trials_ocular'] = bad_ocular
+    calibration_params['ocular_thresholds_post'] = ocular_threshold_post
 
     # Apply ICA
     if use_ica_on_pre:
@@ -458,21 +448,20 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     # Detect bad pre-stim trials
     bad_pre, stats_pre = _find_bad_trials(epochs_pre, trial_reject_opts['pre']['global_zscore_threshold'],
                                           trial_reject_opts['pre']['local_zscore_threshold'], False, False)
-    info['trials_before_pre_eeg_rejection'] = epochs_pre.get_data(copy=True).shape[0]
-    info['bad_trials_pre'] = bad_pre
-    info['good_trial_stats_pre'] = stats_pre
+    rejected_trials['bad_trials_pre'] = bad_pre
+    calibration_params['good_trial_stats_pre'] = stats_pre
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_pre)
 
     # Apply SOUND to post-stim
     epochs_post.apply_baseline(baseline).set_eeg_reference('average', projection=False, verbose=False)
     post_t0 = epochs_post.times[epochs_post.times > 0][0]
-    info['post_mintime'] = post_t0
+    calibration_params['post_mintime'] = post_t0
     epochs_post.crop(post_t0, None)
 
     post_data = epochs_post.get_data(copy=True)
     evoked = np.mean(post_data, axis=0)
     n_channels = evoked.shape[0]
-    sound_filter, sound_sigmas, n_iters, converged = sound(
+    sound_filter, _, _, _ = sound(
         evoked.T, 0, np.ones((n_channels, 1)), n_channels, leadfield,
         sound_opts['max_iterations'], sound_opts['lambda'],
         sound_opts['convergence_tolerance'], sound_opts['fixed_max_iterations'])
@@ -482,30 +471,21 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
 
     epochs_post = mne.EpochsArray(post_data, epochs_post.info, events=epochs_post.events, tmin=epochs_post.times[0])
     epochs_post.set_eeg_reference('average', projection=False, verbose=False)
-    info['sound_filter'] = sound_filter
-    info['n_iters_sound'] = n_iters
-    info['sound_convergence_reached'] = converged
-    info['sound_sigmas'] = sound_sigmas
+    calibration_params['sound_filter'] = sound_filter
 
     # Apply SSP-SIR to post-stim
     post_data = epochs_post.get_data(copy=True)
     evoked = np.mean(post_data, axis=0)
-    corrected, artifact_topographies, suppressed, kernel, P, M, PL, projection_suppression, projection_original, n_pcs = ssp_sir_to_average(
+    _, _, _, kernel, P, _, _, projection_suppression, projection_original, _ = ssp_sir_to_average(
         evoked, leadfield, epochs_post.info['sfreq'], ssp_sir_opts['timerange'], method=ssp_sir_opts['method'])
 
     post_data = ssp_sir_trials(post_data, P, projection_suppression, projection_original, kernel)
     epochs_post = mne.EpochsArray(post_data, epochs_post.info, events=epochs_post.events, tmin=epochs_post.times[0])
 
-    info['sspsir_suppression_matrix_P'] = P
-    info['sspsir_suppression_matrix_PL'] = PL
-    info['sspsir_filter_kernel'] = kernel
-    info['sspsir_M'] = M
-    info['sspsir_n_pcs_removed'] = n_pcs
-    info['sspsir_data_corrected_ave'] = corrected
-    info['sspsir_artifact_topographies'] = artifact_topographies
-    info['sspsir_data_suppressed_ave'] = suppressed
-    info['sspsir_sir_projmat_suppr'] = projection_suppression
-    info['sspsir_sir_projmat_orig'] = projection_original
+    calibration_params['sspsir_suppression_matrix_P'] = P
+    calibration_params['sspsir_filter_kernel'] = kernel
+    calibration_params['sspsir_sir_projmat_suppr'] = projection_suppression
+    calibration_params['sspsir_sir_projmat_orig'] = projection_original
 
     # Second artifact interpolation
     epochs_post = mne.preprocessing.fix_stim_artifact(epochs_post, tmin=post_t0, tmax=artifact_window_2[1], mode='window')
@@ -516,9 +496,8 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
         epochs_post.copy().crop(reject_range[0], reject_range[1]),
         trial_reject_opts['post']['global_zscore_threshold'],
         trial_reject_opts['post']['local_zscore_threshold'], False, False)
-    info['trials_before_post_eeg_rejection'] = epochs_post.get_data(copy=True).shape[0]
-    info['bad_trials_post'] = bad_post
-    info['good_trial_stats_post'] = stats_post
+    rejected_trials['bad_trials_post'] = bad_post
+    calibration_params['good_trial_stats_post'] = stats_post
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_post)
 
     # EMG processing
@@ -528,18 +507,17 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     bad_emg, epochs_emg, emg_time_info = _detect_bad_emg_trials(
         epochs_emg, emg_reject_opts['pre_innervation_options'], emg_reject_opts['ptp_options'], line_freq)
 
-    info['emg_filter'] = emg_filter_coefficients
-    info['emg_prep_times'] = emg_time_info
-    info['bad_trials_emg'] = bad_emg
-    info['trials_before_emg_rejection'] = epochs_emg.get_data(copy=True).shape[0]
+    calibration_params['emg_filter'] = emg_filter_coefficients
+    calibration_params['emg_prep_times'] = emg_time_info
+    rejected_trials['bad_trials_emg'] = bad_emg
 
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_emg)
-    info['n_trials_left'] = epochs_pre.get_data(copy=True).shape[0]
+    n_trials_left = epochs_pre.get_data(copy=True).shape[0]
 
-    if info['n_trials_left'] < n_trials_goal:
-        return n_trials_goal - info['n_trials_left']
+    if n_trials_left < n_trials_goal:
+        return n_trials_goal - n_trials_left
 
-    return epochs_pre, epochs_post, ica, info
+    return epochs_pre, epochs_post, ica, calibration_params, rejected_trials
 
 
 # ==================== Single-Trial Processing ====================
@@ -789,12 +767,7 @@ def run_subject_processing(site_id: str, subject_id: str):
         else:
             break
 
-    epochs_pre_cal, epochs_post_cal, ica, preprocessing_info = out
-
-    preprocessing_info['n_trials_calibration'] = len(epochs_pre_cal)
-    preprocessing_info['used_emg_channel'] = picked_channel
-    preprocessing_info['n_trials_used_in_calibration'] = n_trials_use
-    preprocessing_info['n_trials_original'] = len(epochs)
+    epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration = out
 
     # --- Single-trial processing ---
     pre_list = [epochs_pre_cal]
@@ -813,15 +786,15 @@ def run_subject_processing(site_id: str, subject_id: str):
 
         # Pre-stim
         epoch_pre = epoch.copy().crop(pre_range[0], pre_range[1]).resample(target_sfreq, method='polyphase')
-        result_pre = preprocess_pre_trial(epoch_pre, preprocessing_info, trial_reject_opts, filter_opts, use_ica_on_pre)
+        result_pre = preprocess_pre_trial(epoch_pre, calibration_params, trial_reject_opts, filter_opts, use_ica_on_pre)
 
         # Post-stim
         epoch_post = epoch.copy().crop(post_range[0], post_range[1]).resample(target_sfreq, method='polyphase')
-        result_post = preprocess_post_trial(epoch_post, preprocessing_info, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
+        result_post = preprocess_post_trial(epoch_post, calibration_params, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
 
         # EMG
         epoch_emg.crop(emg_time_range[0], emg_time_range[1]).resample(target_sfreq, method='polyphase')
-        result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, preprocessing_info, line_freq)
+        result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, calibration_params, line_freq)
 
         if result_pre is not False and result_post is not False and result_emg is not False:
             pre_list.append(result_pre)
@@ -829,7 +802,6 @@ def run_subject_processing(site_id: str, subject_id: str):
         else:
             bad_trials_online.append(trial_idx)
 
-    preprocessing_info['bad_trials_calibrated'] = bad_trials_online
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
 
@@ -837,19 +809,16 @@ def run_subject_processing(site_id: str, subject_id: str):
     bad_keys = ['bad_trials_ocular', 'bad_trials_pre', 'bad_trials_post', 'bad_trials_emg']
     block_ids_cal = block_ids[:n_trials_use]
     for key in bad_keys:
-        good = np.array([i for i in range(len(block_ids_cal)) if i not in preprocessing_info[key]])
+        good = np.array([i for i in range(len(block_ids_cal)) if i not in rejected_calibration[key]])
         block_ids_cal = block_ids_cal[good]
     good_online = np.array([i for i in range(n_trials_use, len(epochs)) if i not in bad_trials_online])
     block_ids_online = block_ids[good_online]
     block_ids_final = np.concatenate((block_ids_cal, block_ids_online))
-    preprocessing_info['block_identifiers'] = block_ids_final
-    preprocessing_info['n_trials_final'] = len(epochs_pre_final)
 
     # --- Save results ---
     for epoch, label in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
         epoch.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
 
-    np.savez(os.path.join(subject_output, f'{subject_id}_preprocessing_info.npz'), **preprocessing_info)
     np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
 
 
