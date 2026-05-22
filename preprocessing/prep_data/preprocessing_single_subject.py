@@ -17,9 +17,12 @@ from sound_modified import *
 from channel_interpolations import *
 import time
 import argparse
+import gc
 import os
 import sys
 from pathlib import Path
+
+_PREP_ROOT = Path(__file__).resolve().parents[1]
 
 warnings.filterwarnings(
     "ignore",
@@ -883,11 +886,11 @@ def run_subject_processing(site_id: str, subject_id: str):
     """
     Main logic to preprocess data for a single subject.
     """
-    # Paths and settings
-    all_data_path = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/data_epoched/raw_eeglab_and_block_idents")
+    # Paths and settings (repo-local; input layout: <data_root>/<site>/<subject>/)
+    all_data_path = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
     use_ica_on_pre = False
     save_results = True
-    processed_path = Path(f"/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/data_processed_final_pre_ica_{use_ica_on_pre}_final_v4")
+    processed_path = _PREP_ROOT / f"data_processed_pre_ica_{use_ica_on_pre}_v4"
 
     # Time ranges
     pre_range = [-0.505, -0.005]
@@ -928,7 +931,13 @@ def run_subject_processing(site_id: str, subject_id: str):
     common_channels = ['AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6', 'FT7', 'FT8', 'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1', 'O2', 'Oz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'PO3', 'PO4', 'PO7', 'PO8', 'POz', 'Pz', 'T7', 'T8', 'TP7', 'TP8']
     montage_name = 'standard_1005'
     montage = mne.channels.make_standard_montage(montage_name)
-    forward = mne.read_forward_solution(r"/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/extracted_files/subjects_dir_fsaverage/fsaverage/fsaverage-fwd.fif")
+    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
+    if not forward_path.exists():
+        raise FileNotFoundError(
+            f"Forward solution not found at {forward_path}. "
+            f"Run: python {_PREP_ROOT / 'build_fsaverage_forward.py'}"
+        )
+    forward = mne.read_forward_solution(forward_path)
     L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
     channel_order = forward.ch_names
     
@@ -1007,11 +1016,23 @@ def run_subject_processing(site_id: str, subject_id: str):
     bad_trials_calibrated = []
     ch_ptps = []
     preprocessing_info['n_trials_to_process_with_calibrated_filters'] = len(epochs) - n_trials_use
-    
+
     for trial_ind in range(n_trials_use, len(epochs)):
         print(f"Processing trial {trial_ind}...")
-        epoch = epochs[trial_ind]
-        epoch_emg = emg_epochs[trial_ind]
+        epoch = mne.EpochsArray(
+            epochs.get_data(item=trial_ind),
+            info=epochs.info,
+            events=epochs.events[trial_ind : trial_ind + 1],
+            tmin=epochs.tmin,
+            verbose=False,
+        )
+        epoch_emg = mne.EpochsArray(
+            emg_epochs.get_data(item=trial_ind),
+            info=emg_epochs.info,
+            events=emg_epochs.events[trial_ind : trial_ind + 1],
+            tmin=emg_epochs.tmin,
+            verbose=False,
+        )
 
         epoch_pre_now = epoch.copy().crop(pre_range_times['pre_range_final'][0], pre_range_times['pre_range_final'][1]).resample(resample_to, method='polyphase')
         start_pre = time.perf_counter()
@@ -1052,7 +1073,7 @@ def run_subject_processing(site_id: str, subject_id: str):
             processing_times['emg']['bad'].append(end_emg - start_emg)
 
     preprocessing_info['bad_trials_calibrated'] = bad_trials_calibrated
-    preprocessing_info['processing_times'] = processing_times
+#    preprocessing_info['processing_times'] = processing_times
     epochs_pre = mne.concatenate_epochs(epochs_pre_list)
     epochs_post = mne.concatenate_epochs(epochs_post_list)
     epochs_emg = mne.concatenate_epochs(epochs_emg_list)
