@@ -540,18 +540,14 @@ def run_fold_pretraining(
                     model_pretrain.state_dict()
                 )
 
-                # Save the final pretrained model checkpoint if the new flag is enabled
+                # Save the final pretrained model (output classifier) to the run results directory
                 if args.get("save_pretrained_model", False):
-                    checkpoint_dir = get_checkpoint_dir(run_output_dir)
-                    save_path = (
-                        checkpoint_dir
-                        / f"pretrained_fold_{fold_idx+1}.pt"
-                    )
+                    save_path = run_output_dir / f"pretrained_fold_{fold_idx+1}.pt"
                     save_checkpoint(
                         {"model_state_dict": model_pretrain.state_dict()}, save_path
                     )
                     console.print(
-                        f"      [green]Saved last pretrained model checkpoint to {save_path.name}[/green]"
+                        f"      [green]Saved pretrained model to {save_path.name}[/green]"
                     )
 
                 # This is for saving intermediate checkpoints if needed by another flag
@@ -974,18 +970,14 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                     subject_results[model_name]["finetuned"] = final_finetuned_metrics
                     all_models_trial_metrics[model_name] = per_trial_metrics
 
-                    # Save the final fine-tuned model state for interpretability analysis
+                    # Save the final fine-tuned model (output classifier) to the run results directory
                     if args.get('save_finetuned_model', False):
-                        checkpoint_dir = get_checkpoint_dir(run_output_dir)
-                        save_path = checkpoint_dir / f"finetuned_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
-                        
-                        # We save the state_dict of the entire TTAWrapper to include alignment info
-                        checkpoint_data = {
-                            'model_state_dict': model_eval_wrapped.state_dict(),
-                        }
-                        
-                        save_checkpoint(checkpoint_data, save_path)
-                        console.print(f"        [green]Saved fine-tuned model for interpretability to {save_path.name}[/green]")
+                        save_path = run_output_dir / f"finetuned_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
+                        save_checkpoint(
+                            {'model_state_dict': model_eval_wrapped.state_dict()},
+                            save_path,
+                        )
+                        console.print(f"        [green]Saved fine-tuned model to {save_path.name}[/green]")
 
                 else:
                     console.print("        No data available for the online phase. Final results will be empty.")

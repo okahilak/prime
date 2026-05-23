@@ -77,7 +77,8 @@ SUBJECTS_PER_JOB = 2
 
 # --- ANALYSIS & DATA CONFIGURATION ---
 BASE_LOG_DIR = REPO_DIR / "slurm_logs_interpretability"
-CHECKPOINTS_DIR = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/results_final/10ms_pp_w50/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/20250707_170031/checkpoints/")
+# Run output directory (finetuned_subj_*.pt live alongside results CSVs, not under checkpoints/)
+RESULTS_RUN_DIR = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/results_final/10ms_pp_w50/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/20250707_170031/")
 
 ANALYSIS_CONFIG = {
     "method": "occlusion",  #available: occlusion, spatial_occlusion, frequency_occlusion
@@ -529,9 +530,9 @@ def main():
     ANALYSIS_CONFIG["method"] = args.method
     
     if args.mode == 'submit':
-        checkpoint_paths = sorted(list(CHECKPOINTS_DIR.glob("finetuned_subj_*.pt")))
+        checkpoint_paths = sorted(list(RESULTS_RUN_DIR.glob("finetuned_subj_*.pt")))
         if not checkpoint_paths:
-            logging.error(f"No checkpoints found in {CHECKPOINTS_DIR}. Exiting."); return
+            logging.error(f"No finetuned models found in {RESULTS_RUN_DIR}. Exiting."); return
 
         subject_chunks = list(chunk_list(checkpoint_paths, SUBJECTS_PER_JOB))
         logging.info(f"Found {len(checkpoint_paths)} subjects, grouped into {len(subject_chunks)} jobs.")
