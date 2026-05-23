@@ -25,8 +25,14 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 warnings.filterwarnings(
     "ignore",
     category=RuntimeWarning,
-    message=r".*ICA\.apply\(\) was baseline-corrected.*"
+    message=r".*ICA\.apply\(\) was baseline-corrected.*",
 )
+warnings.filterwarnings(
+    "ignore",
+    category=RuntimeWarning,
+    message=r".*Event number greater than 2147483647.*",
+)
+mne.set_log_level("ERROR")
 
 
 # ==================== Filtering ====================
@@ -714,10 +720,11 @@ def _init_online_trial_worker(
     emg_batch_data, emg_batch_info, emg_batch_tmin, emg_batch_events,
     calibration_params, cfg, ica,
 ):
+    mne.set_log_level("ERROR")
     global _online_trial_worker_state
     _online_trial_worker_state = {
         'pre_batch_data': pre_batch_data,
-        'pre_batch_info': pre_batch_info,
+        'pre_batch_info': pre_batch_info, 
         'pre_batch_tmin': pre_batch_tmin,
         'pre_batch_events': pre_batch_events,
         'post_batch_data': post_batch_data,
