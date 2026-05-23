@@ -55,7 +55,7 @@ def preprocess_done(subject: str) -> bool:
 
 
 def dipole_done(subject: str) -> bool:
-    return (PROCESSED_DIR / subject / f"{subject}_response_extraction_info.npz").is_file()
+    return (PROCESSED_DIR / subject / f"{subject}_fitted_dipoles.npz").is_file()
 
 
 def _build_prep_env() -> dict:
