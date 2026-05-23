@@ -23,31 +23,30 @@ def dipoles_for_times(evoked, forward, tmin, tmax):
 	data_measured = evoked.data #data in the evoked object
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	data_measured = data_measured - np.mean(data_measured, axis=0) #data ensured to be in average reference (if already not)
-	n_source_locations_x_n_orientations = L.shape[1] #number of sources
+	n_pos = L.shape[1] // 3  #number of candidate source positions
 	best_dipole_per_time = [] #initialize a list for optimal dipoles for each time point
-	  
+
+	# Batch-precompute all pseudoinverses once.
+	# Reshape L (n_ch, n_pos*3) -> (n_pos, n_ch, 3), then pinv -> (n_pos, 3, n_ch).
+	# This replaces n_pos sequential np.linalg.pinv calls with a single batched LAPACK call.
+	L_3d = L.reshape(L.shape[0], n_pos, 3).transpose(1, 0, 2)  # (n_pos, n_ch, 3)
+	pinv_all = np.linalg.pinv(L_3d)                              # (n_pos, 3, n_ch)
+
 	for time_index, time in enumerate(evoked.times): #go through the time range of interest
+		y = data_measured[:, time_index]
+		ss_tot = np.dot(y, y)
 
-		best_r2, best_dipole_moment, best_pos_index, best_data_predicted = init_dipole_params() #initialize dipole parameters
-		best_r2_default = best_r2
+		# Vectorized dipole fitting over all source positions simultaneously
+		Q_all = pinv_all @ y                                          # (n_pos, 3): Q = pinv(L(r)) y
+		ypred_all = np.einsum('nij,nj->ni', L_3d, Q_all)             # (n_pos, n_ch): ypred = L(r) Q
+		# R2 = ||ypred||^2 / ||y||^2  (valid since both are average-referenced -> zero mean)
+		R2_all = np.einsum('ni,ni->n', ypred_all, ypred_all) / ss_tot # (n_pos,)
 
-		for position_index, position_now in enumerate(np.arange(0, n_source_locations_x_n_orientations, 3)): #go through the source locations
+		best_pos_index = int(np.argmax(R2_all))
+		best_r2 = float(R2_all[best_pos_index])
+		best_dipole_moment = Q_all[best_pos_index]
+		best_data_predicted = ypred_all[best_pos_index]
 
-			leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
-
-			dipole_moment = np.matmul(np.linalg.pinv(leadfield_at_pos), data_measured[:, time_index]) #Q = pinv(L(r))y = dipole_moment
-
-			data_predicted = np.matmul(leadfield_at_pos, dipole_moment) #y_predicted = L(r)Q
-
-			r2_now = r2_score(data_measured[:, time_index], data_predicted) #coefficient of determination of the dipole fit
-
-			if r2_now > best_r2: #then update the best dipole statistics
-				best_r2 = r2_now #update the best r2 that must be exceeded to update the best dipole statistic
-				best_pos_index = position_index #update the best position index
-				best_data_predicted = data_predicted #update the best predicted topography (forward-modeled dipole)
-				best_dipole_moment = dipole_moment #update the best dipole moment
-		if best_r2 == best_r2_default:
-			raise ValueError("Bad R2 score, did not find a plausible dipole")
 		#compute useful information for the best dipole now that all candidates have been considered
 		amplitude = np.linalg.norm(best_dipole_moment) #dipole amplitude is the norm of the dipole moment
 		orientation = best_dipole_moment / amplitude #unit-length dipole orientation is the dipole moment divided by amplitude
