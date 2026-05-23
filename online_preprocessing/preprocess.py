@@ -302,7 +302,6 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
     filter_opts = opts['filter_opts']
 
     calibration_params = {}
-    rejected_trials = {}
 
     # Post-stim: baseline and artifact interpolation
     epochs_post.apply_baseline(cfg.baseline)
@@ -367,7 +366,6 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
     else:
         bad_ocular = bad_ocular_post
 
-    rejected_trials['bad_trials_ocular'] = bad_ocular
     calibration_params['ocular_thresholds_post'] = ocular_threshold_post
 
     # Apply ICA
@@ -382,7 +380,6 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
     # Detect bad pre-stim trials
     bad_pre, stats_pre = _find_bad_trials(epochs_pre, trial_reject_opts['pre']['global_zscore_threshold'],
                                           trial_reject_opts['pre']['local_zscore_threshold'], False, False)
-    rejected_trials['bad_trials_pre'] = bad_pre
     calibration_params['good_trial_stats_pre'] = stats_pre
     epochs_pre, epochs_post = _drop_bad_trials([epochs_pre, epochs_post], bad_pre)
 
@@ -431,13 +428,12 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
         epochs_post.copy().crop(cfg.reject_range[0], cfg.reject_range[1]),
         trial_reject_opts['post']['global_zscore_threshold'],
         trial_reject_opts['post']['local_zscore_threshold'], False, False)
-    rejected_trials['bad_trials_post'] = bad_post
     calibration_params['good_trial_stats_post'] = stats_post
     epochs_pre, epochs_post = _drop_bad_trials([epochs_pre, epochs_post], bad_post)
 
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
-    return ica, calibration_params, rejected_trials, n_successful_trials
+    return ica, calibration_params, n_successful_trials
 
 
 # ==================== Single-Trial Processing ====================
@@ -613,11 +609,10 @@ def _process_online_trial_worker(trial_idx):
 
 # ==================== Calibration persistence (two-step simulation) ====================
 
-def _build_calibration_bundle(ica, calibration_params, rejected_calibration, n_trials_use):
+def _build_calibration_bundle(ica, calibration_params, n_trials_use):
     return {
         'calibration_params': calibration_params,
         'ica': ica,
-        'rejected_calibration': rejected_calibration,
         'n_trials_use': n_trials_use,
     }
 
@@ -651,7 +646,6 @@ def _verify_calibration_bundle(original, loaded):
     """Assert round-trip integrity of the calibration bundle."""
     assert set(original.keys()) == set(loaded.keys())
     assert original['n_trials_use'] == loaded['n_trials_use']
-    _assert_calibration_value_equal(original['rejected_calibration'], loaded['rejected_calibration'], 'rejected_calibration')
     assert original['ica'].exclude == loaded['ica'].exclude
     assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
     assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
@@ -713,7 +707,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     start_time = time.time()
     while True:
-        ica, calibration_params, rejected_calibration, n_successful_trials = (
+        ica, calibration_params, n_successful_trials = (
             preprocess_calibration(
                 epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield))
 
@@ -731,7 +725,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
         n_trials_use += 1
 
     bundle = _build_calibration_bundle(
-        ica, calibration_params, rejected_calibration, n_trials_use)
+        ica, calibration_params, n_trials_use)
 
     _save_calibration_bundle(calibration_bundle_path, bundle)
     bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
@@ -750,7 +744,6 @@ def _run_online_processing_stage(
     bundle = _load_calibration_bundle(calibration_bundle_path)
     calibration_params = bundle['calibration_params']
     ica = bundle['ica']
-    rejected_calibration = bundle['rejected_calibration']
 
     n_total = len(epochs)
     all_eeg_data = epochs.get_data(copy=False)
