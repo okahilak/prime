@@ -3,11 +3,8 @@ import time
 
 import mne
 import numpy as np
-import scipy
-import scipy.io
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt, find_peaks
-from scipy.optimize import curve_fit
+from scipy.signal import butter, filtfilt
 import warnings
 import argparse
 import os
@@ -267,134 +264,31 @@ def _drop_bad_trials(epoch_list, bad_indices):
     return epoch_list
 
 
-# ==================== EMG Processing ====================
-
-def _detect_bad_emg_trials(epochs_emg, pre_innervation_opts, ptp_opts, line_freq):
-    """Check EMG trials for pre-innervation and valid MEP."""
-    times = epochs_emg.times
-    data = epochs_emg.get_data(copy=True)
-    pre_innervation_mask = np.where((times >= pre_innervation_opts['tmin']) & (times <= pre_innervation_opts['tmax']))[0]
-    ptp_mask = np.where((times >= ptp_opts['tmin']) & (times <= ptp_opts['tmax']))[0]
-    pre_stim_times = times[pre_innervation_mask]
-    n_channels = data.shape[1]
-    n_trials = data.shape[0]
-
-    time_info = {
-        'full_emg_times': times,
-        'pre_innervation_time_indices': pre_innervation_mask,
-        'peak_to_peak_time_indices': ptp_mask,
-        'pre_stim_times': pre_stim_times,
-    }
-
-    bad_trials = []
-
-    for channel_idx in range(n_channels):
-        for trial_idx in range(n_trials):
-            has_pre_innervation, valid_ptp, _, data = _prep_emg_trial(
-                data, trial_idx, channel_idx, pre_innervation_mask, line_freq,
-                pre_stim_times, times, pre_innervation_opts, ptp_mask, ptp_opts,
-                epochs_emg.info['sfreq']
-            )
-            if has_pre_innervation or not valid_ptp:
-                bad_trials.append(trial_idx)
-
-    bad_trials = np.unique(bad_trials)
-    epochs_emg = mne.EpochsArray(data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
-    return bad_trials, epochs_emg, time_info
-
-
-def _prep_emg_trial(data, trial_idx, channel_idx, pre_innervation_mask, line_freq,
-                    pre_stim_times, full_times, pre_innervation_opts, ptp_mask, ptp_opts, sfreq):
-    """Remove line-frequency sine, check pre-innervation and MEP validity for one trial."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings('error', category=scipy.optimize.OptimizeWarning)
-        for harmonic in [1, 2]:
-            try:
-                pre_data = data[trial_idx, channel_idx, pre_innervation_mask]
-                sine_model = _make_sine_model(line_freq * harmonic)
-                sine_fit = _fit_line_freq_sine(pre_data, pre_stim_times, full_times, sine_model)
-                data[trial_idx, channel_idx, :] -= sine_fit
-            except scipy.optimize.OptimizeWarning:
-                break
-
-    emg_pre = data[trial_idx, channel_idx, pre_innervation_mask]
-    has_pre_innervation = (np.max(emg_pre) - np.min(emg_pre)) > pre_innervation_opts['threshold']
-
-    emg_ptp = data[trial_idx, channel_idx, ptp_mask]
-    if ptp_opts['check_ptp']:
-        min_dist_samples = ptp_opts['min_distance'] * sfreq
-        peaks_pos, _ = find_peaks(emg_ptp, prominence=ptp_opts['prominence'], distance=min_dist_samples)
-        peaks_neg, _ = find_peaks(-emg_ptp, prominence=ptp_opts['prominence'], distance=min_dist_samples)
-        if len(peaks_pos) < 1 or len(peaks_neg) < 1:
-            return has_pre_innervation, False, False, data
-        ptp = np.max(emg_ptp[peaks_pos]) - np.min(emg_ptp[peaks_neg])
-        valid_ptp = ptp >= ptp_opts['min_ptp_height']
-    else:
-        ptp = np.max(emg_ptp) - np.min(emg_ptp)
-        valid_ptp = True
-
-    return has_pre_innervation, valid_ptp, ptp, data
-
-
-def _fit_line_freq_sine(pre_data, pre_times, full_times, sine_model):
-    p0 = [np.std(pre_data) * np.sqrt(2), 0, np.mean(pre_data)]
-    popt, _ = curve_fit(sine_model, pre_times, pre_data, p0=p0)
-    return sine_model(full_times, *popt)
-
-
-def _make_sine_model(freq):
-    def model(t, amplitude, phase, offset):
-        return amplitude * np.sin(2 * np.pi * freq * t + phase) + offset
-    return model
-
-
-def _select_best_emg_channel(epochs_emg, ptp_opts, filter_opts):
-    data = epochs_emg.get_data(copy=True)
-    data, filter_coefficients = _butter_filter(data, filter_opts['cutoff'], filter_opts['btype'],
-                                       epochs_emg.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
-    epochs_emg = mne.EpochsArray(data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
-    cropped = epochs_emg.copy().crop(ptp_opts['tmin'], ptp_opts['tmax']).get_data(copy=True)
-    ptp_per_channel = np.mean(np.max(cropped, axis=2) - np.min(cropped, axis=2), axis=0)
-    best_idx = np.argmax(ptp_per_channel)
-    return epochs_emg.ch_names[best_idx], filter_coefficients
-
-
 # ==================== Main Calibration Pipeline ====================
 
-def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield):
-    """Full calibration preprocessing pipeline for pre-stim, post-stim, and EMG epochs."""
+def preprocess_calibration(epochs, n_trials_use, cfg, opts, leadfield):
+    """Full calibration preprocessing pipeline for pre-stim and post-stim epochs."""
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
     trial_reject_opts = opts['trial_reject_opts']
-    emg_reject_opts = opts['emg_reject_opts']
     sound_opts = opts['sound_opts']
     ssp_sir_opts = opts['ssp_sir_opts']
     filter_opts = opts['filter_opts']
-    filter_opts_emg = opts['filter_opts_emg']
 
     epochs = epochs[:n_trials_use]
-    epochs_emg = epochs_emg[:n_trials_use]
-
-    check_emg = epochs_emg.copy().crop(
-        cfg.emg_time_range[0], cfg.emg_time_range[1]
-    ).resample(cfg.target_sfreq, method='polyphase')
-    picked_channel, emg_filter_coefficients = _select_best_emg_channel(
-        check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
-    epochs_emg.pick(picked_channel)
 
     calibration_params = {}
     rejected_trials = {}
     ica_time_range = ica_opts['pre_timerange']
 
     # Crop into segments
-    epochs_emg.crop(cfg.emg_time_range[0], cfg.emg_time_range[1])
     epochs_pre = epochs.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
     epochs_pre_ica = epochs.copy().crop(ica_time_range[0], ica_time_range[1])
     epochs_post = epochs.copy().crop(cfg.post_range[0], cfg.post_range[1])
     del epochs
 
     # Resample
-    for epoch in [epochs_pre, epochs_pre_ica, epochs_post, epochs_emg]:
+    for epoch in [epochs_pre, epochs_pre_ica, epochs_post]:
         epoch.resample(cfg.target_sfreq, method='polyphase')
 
     # Post-stim: baseline and artifact interpolation
@@ -469,7 +363,7 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
     ica.apply(epochs_post)
 
     # Drop ocular-bad trials
-    epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_ocular)
+    epochs_pre, epochs_post = _drop_bad_trials([epochs_pre, epochs_post], bad_ocular)
     epochs_pre.set_eeg_reference('average', projection=False, verbose=False)
 
     # Detect bad pre-stim trials
@@ -477,7 +371,7 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
                                           trial_reject_opts['pre']['local_zscore_threshold'], False, False)
     rejected_trials['bad_trials_pre'] = bad_pre
     calibration_params['good_trial_stats_pre'] = stats_pre
-    epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_pre)
+    epochs_pre, epochs_post = _drop_bad_trials([epochs_pre, epochs_post], bad_pre)
 
     # Apply SOUND to post-stim
     epochs_post.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
@@ -526,20 +420,8 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
         trial_reject_opts['post']['local_zscore_threshold'], False, False)
     rejected_trials['bad_trials_post'] = bad_post
     calibration_params['good_trial_stats_post'] = stats_post
-    epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_post)
+    epochs_pre, epochs_post = _drop_bad_trials([epochs_pre, epochs_post], bad_post)
 
-    # EMG processing
-    emg_data = epochs_emg.get_data(copy=True)
-    emg_data = _apply_filter(emg_data, emg_filter_coefficients, filter_opts_emg['pad_time'], epochs_emg.info['sfreq'])
-    epochs_emg = mne.EpochsArray(emg_data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
-    bad_emg, epochs_emg, emg_time_info = _detect_bad_emg_trials(
-        epochs_emg, emg_reject_opts['pre_innervation_options'], emg_reject_opts['ptp_options'], cfg.line_freq)
-
-    calibration_params['emg_filter'] = emg_filter_coefficients
-    calibration_params['emg_prep_times'] = emg_time_info
-    rejected_trials['bad_trials_emg'] = bad_emg
-
-    epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_emg)
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
     return epochs_pre, epochs_post, ica, calibration_params, rejected_trials, n_successful_trials
@@ -667,46 +549,14 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
     return epoch_post
 
 
-def preprocess_emg_trial(epoch_emg, calibration_params, cfg):
-    """Preprocess a single EMG trial and determine MEP validity."""
-    dicts = cfg.to_dicts()
-    filter_opts_emg = dicts['filter_opts_emg']
-    emg_reject_opts = dicts['emg_reject_opts']
-
-    full_times = calibration_params['emg_prep_times']['full_emg_times']
-    pre_stim_times = full_times[calibration_params['emg_prep_times']['pre_innervation_time_indices']]
-    data = epoch_emg.get_data(copy=True)
-
-    # Apply filter
-    data = _apply_filter(
-        data, calibration_params['emg_filter'], filter_opts_emg['pad_time'], epoch_emg.info['sfreq'])
-
-    # Check pre-innervation and MEP
-    has_pre_innervation, valid_ptp, _, data = _prep_emg_trial(
-        data, 0, 0,
-        calibration_params['emg_prep_times']['pre_innervation_time_indices'],
-        cfg.line_freq, pre_stim_times, full_times,
-        emg_reject_opts['pre_innervation_options'],
-        calibration_params['emg_prep_times']['peak_to_peak_time_indices'],
-        emg_reject_opts['ptp_options'],
-        epoch_emg.info['sfreq']
-    )
-
-    if has_pre_innervation or not valid_ptp:
-        return False
-
-    return True
-
-
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(epoch_pre, epoch_post, epoch_emg, calibration_params, cfg, ica):
-    """Process a single trial (pre, post, EMG). Returns (success, epoch_pre, epoch_post)."""
+def process_single_trial(epoch_pre, epoch_post, calibration_params, cfg, ica):
+    """Process a single trial (pre, post). Returns (success, epoch_pre, epoch_post)."""
     result_pre = preprocess_pre_trial(epoch_pre, calibration_params, cfg)
     result_post = preprocess_post_trial(epoch_post, calibration_params, cfg, ica)
-    result_emg = preprocess_emg_trial(epoch_emg, calibration_params, cfg)
 
-    if result_pre is False or result_post is False or result_emg is False:
+    if result_pre is False or result_post is False:
         return False, None, None
     return True, result_pre, result_post
 
@@ -717,7 +567,6 @@ _online_trial_worker_state = {}
 def _init_online_trial_worker(
     pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
     post_batch_data, post_batch_tmin, post_batch_events,
-    emg_batch_data, emg_batch_info, emg_batch_tmin, emg_batch_events,
     calibration_params, cfg, ica,
 ):
     mne.set_log_level("ERROR")
@@ -730,10 +579,6 @@ def _init_online_trial_worker(
         'post_batch_data': post_batch_data,
         'post_batch_tmin': post_batch_tmin,
         'post_batch_events': post_batch_events,
-        'emg_batch_data': emg_batch_data,
-        'emg_batch_info': emg_batch_info,
-        'emg_batch_tmin': emg_batch_tmin,
-        'emg_batch_events': emg_batch_events,
         'calibration_params': calibration_params,
         'cfg': cfg,
         'ica': ica,
@@ -748,11 +593,8 @@ def _process_online_trial_worker(trial_idx):
     epoch_post = mne.EpochsArray(
         s['post_batch_data'][trial_idx:trial_idx + 1], info=s['pre_batch_info'],
         events=s['post_batch_events'][trial_idx:trial_idx + 1], tmin=s['post_batch_tmin'], verbose=False)
-    epoch_emg = mne.EpochsArray(
-        s['emg_batch_data'][trial_idx:trial_idx + 1], info=s['emg_batch_info'],
-        events=s['emg_batch_events'][trial_idx:trial_idx + 1], tmin=s['emg_batch_tmin'], verbose=False)
     success, result_pre, result_post = process_single_trial(
-        epoch_pre, epoch_post, epoch_emg, s['calibration_params'], s['cfg'], s['ica'])
+        epoch_pre, epoch_post, s['calibration_params'], s['cfg'], s['ica'])
     return trial_idx, success, result_pre, result_post
 
 
@@ -826,8 +668,6 @@ def _load_subject_epochs(subject_id, cfg):
     montage = mne.channels.make_standard_montage('standard_1005')
 
     epochs = mne.read_epochs_eeglab(os.path.join(subject_path, f'{subject_id}_task-tep_all_eeg.set'))
-    emg_names = [ch for ch in epochs.ch_names if 'emg' in ch.lower() or 'apb' in ch.lower() or 'fdi' in ch.lower()]
-    epochs_emg = epochs.copy().pick(emg_names)
     epochs.pick(cfg.common_channels)
     epochs.reorder_channels(channel_order)
     epochs.set_montage(None)
@@ -836,7 +676,7 @@ def _load_subject_epochs(subject_id, cfg):
     if channel_order != epochs.ch_names:
         raise ValueError(f"Channel order mismatch: {channel_order} vs {epochs.ch_names}")
 
-    return epochs, epochs_emg
+    return epochs
 
 
 def _compute_leadfield():
@@ -845,7 +685,7 @@ def _compute_leadfield():
     return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
 
 
-def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
+def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     start_time = time.time()
 
@@ -855,7 +695,7 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
 
     while True:
         epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_successful_trials = (
-            preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield))
+            preprocess_calibration(epochs, n_trials_use, cfg, opts, leadfield))
 
         if n_successful_trials >= cfg.n_trials_goal:
             break
@@ -874,7 +714,7 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
 
 
 def _run_online_processing_stage(
-    epochs, epochs_emg, cfg, subject_output, subject_id, calibration_bundle_path,
+    epochs, cfg, subject_output, subject_id, calibration_bundle_path,
 ):
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
     start_time = time.time()
@@ -889,13 +729,10 @@ def _run_online_processing_stage(
 
     n_online = len(epochs) - n_trials_use
     all_eeg_data = epochs.get_data(copy=False)
-    all_emg_data = epochs_emg.get_data(copy=False)
 
-    # Build temporary epochs for pre/post/emg from the online trials, crop & resample in batch
+    # Build temporary epochs for pre/post from the online trials, crop & resample in batch
     online_eeg_data = all_eeg_data[n_trials_use:]
-    online_emg_data = all_emg_data[n_trials_use:]
     online_events = epochs.events[n_trials_use:]
-    online_emg_events = epochs_emg.events[n_trials_use:]
 
     # Batch-crop and resample pre-stim epochs
     epochs_pre_batch = mne.EpochsArray(
@@ -914,18 +751,9 @@ def _run_online_processing_stage(
     post_batch_tmin = epochs_post_batch.tmin
     post_batch_events = epochs_post_batch.events
 
-    # Batch-crop and resample EMG epochs
-    epochs_emg_batch = mne.EpochsArray(
-        online_emg_data, info=epochs_emg.info, events=online_emg_events, tmin=epochs_emg.tmin, verbose=False)
-    epochs_emg_batch.crop(cfg.emg_time_range[0], cfg.emg_time_range[1]).resample(cfg.target_sfreq, method='polyphase')
-    emg_batch_data = epochs_emg_batch.get_data(copy=False)
-    emg_batch_info = epochs_emg_batch.info
-    emg_batch_tmin = epochs_emg_batch.tmin
-    emg_batch_events = epochs_emg_batch.events
-
     # Free memory from originals
-    del epochs_pre_batch, epochs_post_batch, epochs_emg_batch
-    del online_eeg_data, online_emg_data
+    del epochs_pre_batch, epochs_post_batch
+    del online_eeg_data
 
     # --- Parallel single-trial processing ---
     pre_list = [epochs_pre_cal]
@@ -935,7 +763,6 @@ def _run_online_processing_stage(
     initargs = (
         pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
         post_batch_data, post_batch_tmin, post_batch_events,
-        emg_batch_data, emg_batch_info, emg_batch_tmin, emg_batch_events,
         calibration_params, cfg, ica,
     )
     with ProcessPoolExecutor(
@@ -972,12 +799,12 @@ def run_subject_processing(subject_id: str):
 
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
-    epochs, epochs_emg = _load_subject_epochs(subject_id, cfg)
-    _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path)
+    epochs = _load_subject_epochs(subject_id, cfg)
+    _run_calibration_stage(epochs, cfg, calibration_bundle_path)
 
     cfg = get_default_config()
     _run_online_processing_stage(
-        epochs, epochs_emg, cfg, subject_output, subject_id, calibration_bundle_path)
+        epochs, cfg, subject_output, subject_id, calibration_bundle_path)
 
 
 # %%

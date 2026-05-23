@@ -81,7 +81,6 @@ def generate_and_save_data():
     GRID_DIR_BASE = "10ms_pp_w50"
     CSV_PATH_PRETRAIN_N45 = RESULTS_ROOT_DIR / "10ms_pp_w50/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/20250704_060709/results_summary_detailed.csv"
     CSV_PATH_PRETRAIN_P60 = RESULTS_ROOT_DIR / "10ms_pp_w50_p60/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/AlignEval_DeepTEPNet_TMSEEGClassificationTEPfree_FM-Full_A-None_AdaBN-F/20250707_170031/results_summary_detailed.csv"
-    CSV_PATH_MEP = RESULTS_ROOT_DIR / "10ms_pp_w50/AlignEval_DeepTEPNet_TMSEEGClassification_FM-Full_A-None_AdaBN-F/AlignEval_DeepTEPNet_TMSEEGClassification_FM-Full_A-None_AdaBN-F/20250709_174256/results_summary_detailed.csv"
     DATASET, PRIME_MODEL_NAME, CONFIG_TAG = "TMSEEGClassificationTEPfree", "DeepTEPNet", "FM-Full_A-None_AdaBN-F"
 
     # --- Panel A Data: Configurations ---
@@ -121,16 +120,6 @@ def generate_and_save_data():
         print(f"✅ Successfully saved data for Panel E to {OUTPUT_DATA_DIR / 'panel_e_n45_vs_p60.csv'}")
     except Exception as e:
         print(f"❌ Error generating data for Panel E: {e}")
-
-    # --- Panel F Data: N45 vs MEP Scatter ---
-    try:
-        df_f1 = pd.read_csv(CSV_PATH_PRETRAIN_N45)[['subject_id', 'finetuned_roc_auc']].rename(columns={'finetuned_roc_auc': 'roc_auc_1'})
-        df_f2 = pd.read_csv(CSV_PATH_MEP)[['subject_id', 'finetuned_roc_auc']].rename(columns={'finetuned_roc_auc': 'roc_auc_2'})
-        df_merged_f = pd.merge(df_f1, df_f2, on='subject_id')
-        df_merged_f.to_csv(OUTPUT_DATA_DIR / "panel_f_n45_vs_mep.csv", index=False)
-        print(f"✅ Successfully saved data for Panel F to {OUTPUT_DATA_DIR / 'panel_f_n45_vs_mep.csv'}")
-    except Exception as e:
-        print(f"❌ Error generating data for Panel F: {e}")
 
 if __name__ == "__main__":
     generate_and_save_data()

@@ -91,29 +91,6 @@ class TrialRejectOpts:
 
 
 @dataclass
-class PreInnervationOpts:
-    tmin: float
-    tmax: float
-    threshold: float
-
-
-@dataclass
-class PTPOpts:
-    tmin: float
-    tmax: float
-    min_ptp_height: float
-    min_distance: float
-    prominence: float
-    check_ptp: bool
-
-
-@dataclass
-class EMGRejectOpts:
-    pre_innervation_options: PreInnervationOpts
-    ptp_options: PTPOpts
-
-
-@dataclass
 class PreprocConfig:
     # Time ranges
     pre_range: List[float]
@@ -122,7 +99,6 @@ class PreprocConfig:
     reject_range: List[float]
     artifact_window_1: List[float]
     artifact_window_2: List[Optional[float]]
-    emg_time_range: List[float]
 
     # Channel rejection
     freq_range: List[float]
@@ -138,15 +114,10 @@ class PreprocConfig:
     # Trial rejection
     trial_reject_opts: TrialRejectOpts
 
-    # EMG rejection
-    emg_reject_opts: EMGRejectOpts
-
     # Filter options
     filter_opts: FilterOpts
-    filter_opts_emg: FilterOpts
 
     # General
-    line_freq: float
     target_sfreq: float
     n_trials_goal: int
     use_ica_on_pre: bool
@@ -212,34 +183,11 @@ class PreprocConfig:
             },
         }
 
-        emg_reject_opts = {
-            'pre_innervation_options': {
-                'tmin': self.emg_reject_opts.pre_innervation_options.tmin,
-                'tmax': self.emg_reject_opts.pre_innervation_options.tmax,
-                'threshold': self.emg_reject_opts.pre_innervation_options.threshold,
-            },
-            'ptp_options': {
-                'tmin': self.emg_reject_opts.ptp_options.tmin,
-                'tmax': self.emg_reject_opts.ptp_options.tmax,
-                'min_ptp_height': self.emg_reject_opts.ptp_options.min_ptp_height,
-                'min_distance': self.emg_reject_opts.ptp_options.min_distance,
-                'prominence': self.emg_reject_opts.ptp_options.prominence,
-                'check_ptp': self.emg_reject_opts.ptp_options.check_ptp,
-            },
-        }
-
         filter_opts = {
             'cutoff': self.filter_opts.cutoff,
             'btype': self.filter_opts.btype,
             'order': self.filter_opts.order,
             'pad_time': self.filter_opts.pad_time,
-        }
-
-        filter_opts_emg = {
-            'cutoff': self.filter_opts_emg.cutoff,
-            'btype': self.filter_opts_emg.btype,
-            'order': self.filter_opts_emg.order,
-            'pad_time': self.filter_opts_emg.pad_time,
         }
 
         return {
@@ -248,9 +196,7 @@ class PreprocConfig:
             'sound_opts': sound_opts,
             'ssp_sir_opts': ssp_sir_opts,
             'trial_reject_opts': trial_reject_opts,
-            'emg_reject_opts': emg_reject_opts,
             'filter_opts': filter_opts,
-            'filter_opts_emg': filter_opts_emg,
         }
 
 
@@ -264,7 +210,6 @@ def get_default_config() -> PreprocConfig:
         reject_range=[0.02, 0.06],
         artifact_window_1=[-0.014, 0.014],
         artifact_window_2=[None, 0.015],
-        emg_time_range=[-0.5, 0.2],
         freq_range=freq_range,
         channel_reject_opts=ChannelRejectOpts(
             pre=ChannelRejectPre(
@@ -315,24 +260,7 @@ def get_default_config() -> PreprocConfig:
                 local_zscore_threshold=5,
             ),
         ),
-        emg_reject_opts=EMGRejectOpts(
-            pre_innervation_options=PreInnervationOpts(
-                tmin=-0.2,
-                tmax=-0.015,
-                threshold=50e-6,
-            ),
-            ptp_options=PTPOpts(
-                tmin=0.02,
-                tmax=0.05,
-                min_ptp_height=50e-6,
-                min_distance=0.005,
-                prominence=10e-6,
-                check_ptp=False,
-            ),
-        ),
         filter_opts=FilterOpts(cutoff=[2, 47], btype='bandpass', order=2, pad_time=0.1),
-        filter_opts_emg=FilterOpts(cutoff=2, btype='highpass', order=4, pad_time=0.5),
-        line_freq=50,
         target_sfreq=1000,
         n_trials_goal=100,
         use_ica_on_pre=False,

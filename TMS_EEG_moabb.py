@@ -93,7 +93,7 @@ class RealTimeLabeler:
 
 # %%
 class TMSEEGDataset(BaseDataset):
-    """Dataset for preprocessed TMS-EEG data and MEPs."""
+    """Base dataset for preprocessed TMS-EEG data."""
     def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
         self.data_path_root = Path(data_path) if data_path else DATA_ROOT_PATH
         effective_subject_list = subject_list if subject_list is not None else self._discover_subjects()
@@ -112,32 +112,12 @@ class TMSEEGDataset(BaseDataset):
         return sorted(list(subjects))
 
     def _get_single_subject_data(self, subject: int) -> dict:
-        subject_id_str = f"{subject:03d}"
-        #eeg_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre_corrected.fif"
-        eeg_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif"
-        mep_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_MEPs.npy"
-
-
-        if not all([f.exists() for f in [eeg_file, mep_file]]):
-            log.warning(f"Data files missing for S{subject}. Skipping.")
-            return {}
-
-        epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
-        meps = np.load(mep_file).flatten()
-
-        if not (len(epochs) == len(meps)):
-            log.error(f"S{subject}: Mismatch in data lengths. Skipping.")
-            return {}
-
-        epochs.metadata = pd.DataFrame({"MEP_value": meps})
-        return {"0": {"0": epochs}}
+        raise NotImplementedError("Subclasses must implement _get_single_subject_data")
 
     def data_path(self, subject: int, **kwargs) -> List[str]:
         subject_id_str = f"{subject:03d}"
         paths = [
-            #self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre_corrected.fif",
             self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif",
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_MEPs.npy",
         ]
         return [str(p) for p in paths if p.exists()]
 
@@ -300,37 +280,14 @@ class _BaseTMSEEGParadigm(BaseParadigm):
 
 
 # %%
-class TMSEEGRegression(_BaseTMSEEGParadigm):
-    """Predicts the soft label (probabilistic percentile rank) of the MEP."""
-    def __init__(self, tmin: float = -0.5, tmax: float = -0.020, target_metadata_col="MEP_value", **kwargs):
-        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col=target_metadata_col, events={"TMS_stim": 1}, **kwargs)
+class _BaseTMSEEGParadigm(BaseParadigm):
+    """Classification paradigm for TEP data using the same real-time pipeline."""
+    def __init__(self, tmin: float = -0.5, tmax: float = -0.020, **kwargs):
+        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", events={"TMS_stim": 1}, **kwargs)
 
-    @property
-    def scoring(self):
-        return "r2"
-
-    def make_labels_pipeline(self):
-        return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1e6)
-
-    def used_events(self, dataset):
-        """Returns the event dictionary defined in this paradigm."""
-        # This check is needed because moabb might pass events=None
-        if hasattr(self, 'events'):
-            return self.events
-        return None
-
-
-class TMSEEGClassification(TMSEEGRegression):
-    """Classification paradigm using soft-label targets."""
     @property
     def scoring(self):
         return "roc_auc"
-
-
-class TMSEEGClassificationTEP(TMSEEGClassification):
-    """Classification paradigm for TEP data using the same real-time pipeline."""
-    def __init__(self, tmin: float = -0.5, tmax: float = -0.020, **kwargs):
-        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", **kwargs)
 
     @property
     def datasets(self):
@@ -338,11 +295,21 @@ class TMSEEGClassificationTEP(TMSEEGClassification):
     
     def make_labels_pipeline(self):
         return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1.0)
+
+    def used_events(self, dataset):
+        if hasattr(self, 'events'):
+            return self.events
+        return None
+
     
-class TMSEEGClassificationTEPfree(TMSEEGClassification):
-    """Classification paradigm for TEP data using the same real-time pipeline."""
+class TMSEEGClassificationTEPfree(_BaseTMSEEGParadigm):
+    """Classification paradigm for free-orientation TEP data."""
     def __init__(self, tmin: float = -0.5, tmax: float = -0.020, **kwargs):
-        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", **kwargs)
+        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", events={"TMS_stim": 1}, **kwargs)
+
+    @property
+    def scoring(self):
+        return "roc_auc"
 
     @property
     def datasets(self):
@@ -350,6 +317,11 @@ class TMSEEGClassificationTEPfree(TMSEEGClassification):
     
     def make_labels_pipeline(self):
         return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1.0)
+
+    def used_events(self, dataset):
+        if hasattr(self, 'events'):
+            return self.events
+        return None
 
 
 # %%
@@ -399,30 +371,7 @@ def plot_realtimelabeler_diagnostics(subject_id, metadata, final_labels, target_
 # %%
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    import numpy as np # Make sure numpy is imported
-
-    # --- MEP ANALYSIS ---
-    subject_mep = 106
-    log.info(f"\n{'='*25} RUNNING MEP EXAMPLE (Subject {subject_mep}) {'='*25}")
-    dataset_mep = TMSEEGDataset(subject_list=[subject_mep])
-
-    if not dataset_mep.subject_list:
-        log.error(f"Subject {subject_mep} not found for MEP task.")
-    else:
-        paradigm_mep = TMSEEGClassification(tmin=-0.5, tmax=-0.020)
-        X_mep, y_mep, meta_mep = paradigm_mep.get_data(dataset_mep)
-
-        if y_mep.size > 0:
-            log.info("Generating diagnostic plot for MEP processing...")
-            plot_realtimelabeler_diagnostics(
-                subject_id=subject_mep,
-                metadata=meta_mep,
-                final_labels=y_mep,
-                target_col='MEP_value',
-                scale_factor=1e6
-            )
-        else:
-            log.warning("No MEP data available to plot.")
+    import numpy as np
 
     # --- TEP ANALYSIS (Example) ---
     subject_tep = 106

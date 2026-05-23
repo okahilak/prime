@@ -8,7 +8,7 @@ by [Haxel*](mailto:lisa.haxel@uni-tuebingen.de), [Ahola](mailto:oskari.ahola@aal
 
 ## Overview
 
-PRIME (Personalized Real-time Inference of Momentary Excitability) is a deep neural network that predicts cortical excitability, modeled as TMS-evoked potential (TEP) amplitudes, from raw EEG signals in real-time. The framework incorporates transfer learning and continual adaptation to automatically identify personalized brain-state biomarkers for individualized optimization of stimulation timing. Unlike MEP-based approaches that are limited to motor cortex, PRIME enables brain state-dependent stimulation across any cortical region by targeting cortical excitability without spinal confounds.
+PRIME (Personalized Real-time Inference of Momentary Excitability) is a deep neural network that predicts cortical excitability, modeled as TMS-evoked potential (TEP) amplitudes, from raw EEG signals in real-time. The framework incorporates transfer learning and continual adaptation to automatically identify personalized brain-state biomarkers for individualized optimization of stimulation timing. PRIME enables brain state-dependent stimulation across any cortical region by targeting cortical excitability without spinal confounds.
 
 ## Installation
 
@@ -26,7 +26,7 @@ pip install jupyter
 
 ## Data Setup
 
-PRIME was evaluated using TMS-EEG data from the European Research Council-funded ConnectToBrain project. The data comprise recordings from 50 healthy adults with concurrent EEG and EMG recordings during single-pulse TMS targeting the left primary motor cortex.
+PRIME was evaluated using TMS-EEG data from the European Research Council-funded ConnectToBrain project. The data comprise recordings from 50 healthy adults with concurrent EEG recordings during single-pulse TMS targeting the left primary motor cortex.
 
 **Note**: The dataset is not publicly available but can be requested from the corresponding authors for research purposes, subject to ethical approval and data agreements.
 

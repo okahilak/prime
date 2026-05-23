@@ -50,9 +50,7 @@ try:
     # This assumes the project root is the parent directory of this script's location
     # and has been added to the Python path.
     from TMS_EEG_moabb import (
-        TMSEEGClassification,
         TMSEEGClassificationTEPfree,
-        TMSEEGDataset,
         TMSEEGDatasetTEP
     )
     from datasets import PARADIGM_DATA, load_cached_pretrain_data
