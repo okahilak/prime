@@ -12,7 +12,7 @@ import warnings
 import argparse
 import os
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 from ica_calibrator import get_number_of_components, get_ica
 from ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
@@ -705,6 +705,50 @@ def process_single_trial(epoch_pre, epoch_post, epoch_emg, calibration_params, c
     return True, result_pre, result_post
 
 
+_online_trial_worker_state = {}
+
+
+def _init_online_trial_worker(
+    pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
+    post_batch_data, post_batch_tmin, post_batch_events,
+    emg_batch_data, emg_batch_info, emg_batch_tmin, emg_batch_events,
+    calibration_params, cfg, ica,
+):
+    global _online_trial_worker_state
+    _online_trial_worker_state = {
+        'pre_batch_data': pre_batch_data,
+        'pre_batch_info': pre_batch_info,
+        'pre_batch_tmin': pre_batch_tmin,
+        'pre_batch_events': pre_batch_events,
+        'post_batch_data': post_batch_data,
+        'post_batch_tmin': post_batch_tmin,
+        'post_batch_events': post_batch_events,
+        'emg_batch_data': emg_batch_data,
+        'emg_batch_info': emg_batch_info,
+        'emg_batch_tmin': emg_batch_tmin,
+        'emg_batch_events': emg_batch_events,
+        'calibration_params': calibration_params,
+        'cfg': cfg,
+        'ica': ica,
+    }
+
+
+def _process_online_trial_worker(trial_idx):
+    s = _online_trial_worker_state
+    epoch_pre = mne.EpochsArray(
+        s['pre_batch_data'][trial_idx:trial_idx + 1], info=s['pre_batch_info'],
+        events=s['pre_batch_events'][trial_idx:trial_idx + 1], tmin=s['pre_batch_tmin'], verbose=False)
+    epoch_post = mne.EpochsArray(
+        s['post_batch_data'][trial_idx:trial_idx + 1], info=s['pre_batch_info'],
+        events=s['post_batch_events'][trial_idx:trial_idx + 1], tmin=s['post_batch_tmin'], verbose=False)
+    epoch_emg = mne.EpochsArray(
+        s['emg_batch_data'][trial_idx:trial_idx + 1], info=s['emg_batch_info'],
+        events=s['emg_batch_events'][trial_idx:trial_idx + 1], tmin=s['emg_batch_tmin'], verbose=False)
+    success, result_pre, result_post = process_single_trial(
+        epoch_pre, epoch_post, epoch_emg, s['calibration_params'], s['cfg'], s['ica'])
+    return trial_idx, success, result_pre, result_post
+
+
 # ==================== Calibration persistence (two-step simulation) ====================
 
 def _build_calibration_bundle(epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use):
@@ -886,31 +930,20 @@ def _run_online_processing_stage(
     post_list = [epochs_post_cal]
     bad_trials_online = []
 
-    def process_trial(i):
-        epoch_pre = mne.EpochsArray(
-            pre_batch_data[i:i+1], info=pre_batch_info, events=pre_batch_events[i:i+1],
-            tmin=pre_batch_tmin, verbose=False)
-        epoch_post = mne.EpochsArray(
-            post_batch_data[i:i+1], info=pre_batch_info, events=post_batch_events[i:i+1],
-            tmin=post_batch_tmin, verbose=False)
-        epoch_emg = mne.EpochsArray(
-            emg_batch_data[i:i+1], info=emg_batch_info, events=emg_batch_events[i:i+1],
-            tmin=emg_batch_tmin, verbose=False)
-        return process_single_trial(epoch_pre, epoch_post, epoch_emg, calibration_params, cfg, ica)
+    initargs = (
+        pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
+        post_batch_data, post_batch_tmin, post_batch_events,
+        emg_batch_data, emg_batch_info, emg_batch_tmin, emg_batch_events,
+        calibration_params, cfg, ica,
+    )
+    with ProcessPoolExecutor(
+        max_workers=4,
+        initializer=_init_online_trial_worker,
+        initargs=initargs,
+    ) as executor:
+        results = list(executor.map(_process_online_trial_worker, range(n_online)))
 
-    # Use ThreadPoolExecutor - ICA and MNE operations hold GIL but numpy releases it
-    # Process sequentially to maintain deterministic ordering (same as original)
-    # but with pre-prepared epochs for speed
-    results = []
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(process_trial, i): i for i in range(n_online)}
-        for future in futures:
-            results.append((futures[future], future.result()))
-
-    # Sort by original order to maintain determinism
-    results.sort(key=lambda x: x[0])
-
-    for i, (_, (success, result_pre, result_post)) in enumerate(results):
+    for i, (_, success, result_pre, result_post) in enumerate(results):
         if success:
             pre_list.append(result_pre)
             post_list.append(result_post)
