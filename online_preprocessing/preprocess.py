@@ -266,7 +266,26 @@ def _drop_bad_trials(epoch_list, bad_indices):
 
 # ==================== Main Calibration Pipeline ====================
 
-def preprocess_calibration(epochs, n_trials_use, cfg, opts, leadfield):
+def build_calibration_epoch_segments(epochs_subset, cfg, ica_time_range):
+    """Crop pre, pre-ICA, and post segments from a trial subset and resample."""
+    epochs_pre = epochs_subset.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
+    epochs_pre_ica = epochs_subset.copy().crop(ica_time_range[0], ica_time_range[1])
+    epochs_post = epochs_subset.copy().crop(cfg.post_range[0], cfg.post_range[1])
+    for epoch in (epochs_pre, epochs_pre_ica, epochs_post):
+        epoch.resample(cfg.target_sfreq, method='polyphase')
+    return epochs_pre, epochs_pre_ica, epochs_post
+
+
+def append_calibration_trial(epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range):
+    """Append one raw trial (cropped and resampled) to calibration epoch structs."""
+    trial_pre, trial_pre_ica, trial_post = build_calibration_epoch_segments(trial, cfg, ica_time_range)
+    epochs_pre = mne.concatenate_epochs([epochs_pre, trial_pre])
+    epochs_pre_ica = mne.concatenate_epochs([epochs_pre_ica, trial_pre_ica])
+    epochs_post = mne.concatenate_epochs([epochs_post, trial_post])
+    return epochs_pre, epochs_pre_ica, epochs_post
+
+
+def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, leadfield):
     """Full calibration preprocessing pipeline for pre-stim and post-stim epochs."""
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
@@ -275,21 +294,8 @@ def preprocess_calibration(epochs, n_trials_use, cfg, opts, leadfield):
     ssp_sir_opts = opts['ssp_sir_opts']
     filter_opts = opts['filter_opts']
 
-    epochs = epochs[:n_trials_use]
-
     calibration_params = {}
     rejected_trials = {}
-    ica_time_range = ica_opts['pre_timerange']
-
-    # Crop into segments
-    epochs_pre = epochs.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
-    epochs_pre_ica = epochs.copy().crop(ica_time_range[0], ica_time_range[1])
-    epochs_post = epochs.copy().crop(cfg.post_range[0], cfg.post_range[1])
-    del epochs
-
-    # Resample
-    for epoch in [epochs_pre, epochs_pre_ica, epochs_post]:
-        epoch.resample(cfg.target_sfreq, method='polyphase')
 
     # Post-stim: baseline and artifact interpolation
     epochs_post.apply_baseline(cfg.baseline)
@@ -691,16 +697,28 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     opts = cfg.to_dicts()
     leadfield = _compute_leadfield()
-    n_trials_use = cfg.n_trials_goal + 25
+    ica_time_range = opts['ica_opts']['pre_timerange']
+
+    n_trials_use = 125
+    epochs_pre, epochs_pre_ica, epochs_post = build_calibration_epoch_segments(
+        epochs[:n_trials_use], cfg, ica_time_range)
 
     while True:
         epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_successful_trials = (
-            preprocess_calibration(epochs, n_trials_use, cfg, opts, leadfield))
+            preprocess_calibration(
+                epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield))
 
         if n_successful_trials >= cfg.n_trials_goal:
             break
 
-        n_trials_use += cfg.n_trials_goal - n_successful_trials
+        if n_trials_use >= len(epochs):
+            raise RuntimeError(
+                f"Only {n_successful_trials} calibration trials passed (goal {cfg.n_trials_goal}); "
+                f"exhausted all {len(epochs)} epochs.")
+
+        epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
+            epochs_pre, epochs_pre_ica, epochs_post, epochs[n_trials_use:n_trials_use + 1], cfg, ica_time_range)
+        n_trials_use += 1
 
     bundle = _build_calibration_bundle(
         epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use)
