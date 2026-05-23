@@ -14,13 +14,13 @@ import os
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 
-from ica_calibrator import get_number_of_components, get_ica
-from ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
-from sound_modified import sound
-from channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
+from utils.ica_calibrator import get_number_of_components, get_ica
+from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
+from utils.sound_modified import sound
+from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
 from config import get_default_config
 
-_PREP_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path("~/prime-data").expanduser()
 
 warnings.filterwarnings(
     "ignore",
@@ -806,15 +806,15 @@ def _verify_calibration_bundle(original, loaded):
         original['calibration_params'], loaded['calibration_params'], 'calibration_params')
 
 
-def _load_subject_epochs(site_id, subject_id, cfg):
-    data_path = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
-    subject_path = data_path / site_id / subject_id
+def _load_subject_epochs(subject_id, cfg):
+    data_path = DATA_ROOT / "raw"
+    subject_path = data_path / subject_id
     if not subject_path.exists():
         raise FileNotFoundError(f"Subject directory not found at {subject_path}")
 
-    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
+    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     if not forward_path.exists():
-        raise FileNotFoundError(f"Forward solution not found at {forward_path}. Run: python {_PREP_ROOT / 'build_fsaverage_forward.py'}")
+        raise FileNotFoundError(f"Forward solution not found at {forward_path}. Run: python {DATA_ROOT / 'build_fsaverage_forward.py'}")
     channel_order = mne.read_forward_solution(forward_path).ch_names
     montage = mne.channels.make_standard_montage('standard_1005')
 
@@ -838,7 +838,7 @@ def _load_subject_epochs(site_id, subject_id, cfg):
 
 
 def _compute_leadfield():
-    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
+    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     forward = mne.read_forward_solution(forward_path)
     return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
 
@@ -973,16 +973,16 @@ def _run_online_processing_stage(
     print(f"Online processing stage took {end_time - start_time:.2f} seconds")
 
 
-def run_subject_processing(site_id: str, subject_id: str):
+def run_subject_processing(subject_id: str):
     """Main preprocessing pipeline for a single subject."""
     cfg = get_default_config()
-    output_path = _PREP_ROOT / f"data_processed_pre_ica_{cfg.use_ica_on_pre}_v4"
+    output_path = DATA_ROOT / "processed"
     subject_output = output_path / subject_id
     os.makedirs(subject_output, exist_ok=True)
 
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
-    epochs, epochs_emg, block_ids = _load_subject_epochs(site_id, subject_id, cfg)
+    epochs, epochs_emg, block_ids = _load_subject_epochs(subject_id, cfg)
     _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path)
 
     cfg = get_default_config()
@@ -993,10 +993,9 @@ def run_subject_processing(site_id: str, subject_id: str):
 # %%
 def main():
     parser = argparse.ArgumentParser(description="Run preprocessing for a single subject.")
-    parser.add_argument("--site", required=True, type=str, help="Site identifier.")
     parser.add_argument("--subject", required=True, type=str, help="Subject identifier.")
     args = parser.parse_args()
-    run_subject_processing(site_id=args.site, subject_id=args.subject)
+    run_subject_processing(subject_id=args.subject)
 
 
 if __name__ == "__main__":

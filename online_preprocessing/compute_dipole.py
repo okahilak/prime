@@ -15,7 +15,7 @@ import pandas as pd
 import argparse
 from pathlib import Path
 
-_PREP_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path("~/prime-data").expanduser()
 
 
 def dipoles_for_times(evoked, forward, tmin, tmax):
@@ -442,10 +442,10 @@ def main():
     args = parser.parse_args()
 
     # --- Configuration (repo-local; matches preprocessing_single_subject.py) ---
-    subjects_directory_eeg = str(_PREP_ROOT / "data_processed_pre_ica_False_v4")
-    subjects_directory_dipoles = str(_PREP_ROOT / "dipoles_pre_ica_False_v4")
-    subjects_dir_fsaverage = str(_PREP_ROOT / "subjects_dir_fsaverage")
-    fsaverage_forward_path = os.path.join(subjects_dir_fsaverage, "fsaverage", "fsaverage-fwd.fif")
+    subjects_directory_eeg = str(DATA_ROOT / "processed")
+    subjects_directory_dipoles = str(DATA_ROOT / "dipoles")
+    subjects_dir_fsaverage = str(DATA_ROOT / "fsaverage")
+    fsaverage_forward_path = os.path.join(DATA_ROOT / "fsaverage", "fsaverage-fwd.fif")
 
     # This list defines the desired channel set and order
     common_channels = [
@@ -476,6 +476,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
