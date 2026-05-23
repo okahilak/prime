@@ -9,13 +9,98 @@ import mne
 import numpy as np
 import os
 import argparse
+import time
 from pathlib import Path
-
-from compute_dipole import fit_dipoles_to_single_trials
+from sklearn.metrics import r2_score
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 mne.set_log_level("ERROR")
+
+
+def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, tmin, tmax):
+	epochs_cropped = epochs.copy().crop(tmin, tmax) #epochs in the time range of interest
+	epochs_data = epochs_cropped.get_data(copy=True) #epoched data in the time range of interest
+	n_trials = epochs_data.shape[0] #number of trials in the data
+	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
+	position_now = position_index*3
+	leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
+
+	dipoles_for_trials = [] #initialize a list for adding dipoles for each trial to
+
+	if orientation is not None:
+		orientation_is_fixed = True
+		leadfield_in_ori = np.matmul(leadfield_at_pos, orientation) #project to orientation
+		leadfield_at_pos_pinv = None #no pinv needed
+	else:
+		orientation_is_fixed = False
+		leadfield_in_ori = None
+		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
+
+	extraction_times = [] #init list for saving extraction times
+
+	for trial_index in range(n_trials):
+		#simulate getting a single-trial epoch
+		epoch_now = epochs_cropped[trial_index]
+		trial_data = epoch_now.get_data(copy=True)[0,:,:] #data n_channels x n_times for the single trial data
+		start_time = time.perf_counter()
+		best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured = get_single_trial_dipole(trial_data, trial_index, epoch_now.times, orientation,
+																												 leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
+
+		true_amplitude = np.abs(best_amplitude) if orientation is not None else best_amplitude #save magnitude and scalar amplitude separately if needed
+
+		dipole_info = {'amplitude':true_amplitude, 'dipole':best_dipole_moment, 'time': best_time, 'position': forward['source_rr'][position_index],
+				  'position_index': position_index, 'position_now': position_now, 'orientation': ori, 'r2': best_r2, 'orientation_is_fixed':orientation_is_fixed,
+					'y_predicted': best_y_predicted, 'y_measured': best_data_measured, 'trial_index':trial_index,
+					 'leadfield_at_pos':leadfield_at_pos, 'leadfield_at_pos_pinv':leadfield_at_pos_pinv, 'leadfield_in_ori':leadfield_in_ori}
+		
+		if orientation is not None: #then also save the scalar amplitude
+			dipole_info['scalar_amplitude'] = best_amplitude
+
+		dipoles_for_trials.append(dipole_info) #add the information to the list
+		extraction_times.append(time.perf_counter() - start_time) #append the extraction (and saving) time
+
+	return dipoles_for_trials, extraction_times
+
+
+def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
+	best_r2 = -np.inf #initialize best r2 value
+	best_r2_default = best_r2
+
+	for time_index, time in enumerate(times):
+
+		data_measured = trial_data[:, time_index] #get the data at the current time point
+
+		if orientation is not None:
+			#scalar amplitude of the fixed source, from y_measured = amplitude * leadfield_in_ori = leadfield_in_ori * amplitude
+			amplitude = np.dot(leadfield_in_ori.T,data_measured) /  np.dot(leadfield_in_ori.T, leadfield_in_ori)
+			dipole_moment = orientation*amplitude #Q = aq
+			ori = orientation
+		else:
+			dipole_moment = np.matmul(leadfield_at_pos_pinv,data_measured) #Q = pinv(L(r))y
+			amplitude = np.linalg.norm(dipole_moment) #a = ||Q|| (l2-norm)
+			ori = dipole_moment/amplitude #ori = Q/||Q||
+
+		data_predicted = np.matmul(leadfield_at_pos, dipole_moment) #y_predicted = LQ
+
+		r2_now = r2_score(data_measured, data_predicted) #coefficient of determination of the dipole fit
+		
+		if r2_now > best_r2: #then update the best dipole statistics
+			best_r2 = r2_now #update the best r2 that must be exceeded to update the best dipole statistic
+			best_y_predicted = data_predicted #update the best predicted topography (forward-modeled dipole)
+			best_amplitude = amplitude #update the best amplitude
+			best_dipole_moment = dipole_moment #update best dipole moment
+			best_time = time #update the best time
+			best_data_measured = data_measured #update the respectively "measured data"
+
+	if best_r2 == best_r2_default:
+		raise ValueError(f"Did not find a sufficient R2 for trial {trial_index}")
+
+	return best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured
+
+
+def init_dipole_params():
+	return -np.inf, None, None, None
 
 
 def run_fitting(subject, subjects_directory_eeg, forward):
