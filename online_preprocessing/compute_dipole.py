@@ -332,7 +332,6 @@ def plot_dipole_stats_over_trials(subject_response_extraction_info):
 def run_dipole_calculation_for_subject(
     subject, 
     subjects_directory_eeg, 
-    subjects_directory_dipoles, 
     forward,
     subjects_dir_fsaverage,
     save_results=True
@@ -352,7 +351,6 @@ def run_dipole_calculation_for_subject(
     n_calibration_trials = 100
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
-    subject_directory_dipoles = os.path.join(subjects_directory_dipoles, subject)
     subject_response_extraction_info = {}
 
     try:
@@ -410,8 +408,8 @@ def run_dipole_calculation_for_subject(
 
     # Plotting and saving logic
     if save_results:
-        os.makedirs(subject_directory_dipoles, exist_ok=True)
-        output_path = os.path.join(subject_directory_dipoles, f'{subject}_response_extraction_info.npz')
+        os.makedirs(subject_directory, exist_ok=True)
+        output_path = os.path.join(subject_directory, f'{subject}_response_extraction_info.npz')
         # Use np.savez_compressed for more efficient storage if desired
         np.savez(output_path, **subject_response_extraction_info)
         print(f"Results saved to {output_path}")
@@ -419,12 +417,12 @@ def run_dipole_calculation_for_subject(
         try:
             # Plot evoked info
             plot_info_on_evoked(evoked, subject_response_extraction_info, weighted_pos, None, subjects_dir_fsaverage, subject_plot, transpath)
-            plt.savefig(os.path.join(subject_directory_dipoles, f"{subject}_evoked_dipole_location.png"))
+            plt.savefig(os.path.join(subject_directory, f"{subject}_evoked_dipole_location.png"))
             plt.close()
 
             # Plot trial stats
             plot_dipole_stats_over_trials(subject_response_extraction_info)
-            plt.savefig(os.path.join(subject_directory_dipoles, f"{subject}_trial_dipole_stats.png"))
+            plt.savefig(os.path.join(subject_directory, f"{subject}_trial_dipole_stats.png"))
             plt.close()
         except Exception as e:
             print(f"Warning: Could not generate plots for {subject}. Error: {e}")
@@ -443,7 +441,6 @@ def main():
 
     # --- Configuration (repo-local; matches preprocessing_single_subject.py) ---
     subjects_directory_eeg = str(DATA_ROOT / "processed")
-    subjects_directory_dipoles = str(DATA_ROOT / "dipoles")
     subjects_dir_fsaverage = str(DATA_ROOT / "fsaverage")
     fsaverage_forward_path = os.path.join(DATA_ROOT / "fsaverage", "fsaverage-fwd.fif")
 
@@ -458,7 +455,7 @@ def main():
     ]
     
     # Ensure the main output directory exists
-    os.makedirs(subjects_directory_dipoles, exist_ok=True)
+    os.makedirs(subjects_directory_eeg, exist_ok=True)
 
     # Load the forward model once and select the common channels in a fixed order
     forward = mne.read_forward_solution(fsaverage_forward_path)
@@ -468,7 +465,6 @@ def main():
     run_dipole_calculation_for_subject(
         subject=args.subject,
         subjects_directory_eeg=subjects_directory_eeg,
-        subjects_directory_dipoles=subjects_directory_dipoles,
         forward=forward,  # Corrected argument name
         subjects_dir_fsaverage=subjects_dir_fsaverage, # Added necessary argument
         save_results=True
