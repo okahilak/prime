@@ -3,17 +3,10 @@ from pathlib import Path
 
 import mne
 
-PREP_ROOT = Path(__file__).resolve().parent
-SUBJECTS_DIR = PREP_ROOT / "subjects_dir_fsaverage"
-FORWARD_PATH = SUBJECTS_DIR / "fsaverage" / "fsaverage-fwd.fif"
-RAW_EEGLAB = (
-    PREP_ROOT
-    / "data_epoched"
-    / "raw_eeglab_and_block_idents"
-    / "Tuebingen"
-    / "sub-018"
-    / "sub-018_task-tep_all_eeg.set"
-)
+DATA_ROOT = Path("~/prime-data").expanduser()
+FSAVERAGE_DIR = DATA_ROOT / "fsaverage"
+FORWARD_PATH = FSAVERAGE_DIR / "fsaverage-fwd.fif"
+RAW_EEGLAB = DATA_ROOT / "raw" / "sub-018" / "sub-018_task-tep_all_eeg.set"
 
 COMMON_CHANNELS = [
     "AF3", "AF4", "AF7", "AF8", "C1", "C2", "C3", "C4", "C5", "C6",
@@ -36,9 +29,9 @@ def main():
             "Link sub-018 under preprocessing/data_epoched/raw_eeglab_and_block_idents/Tuebingen/ first."
         )
 
-    mne.datasets.fetch_fsaverage(subjects_dir=str(SUBJECTS_DIR), verbose=True)
+    mne.datasets.fetch_fsaverage(subjects_dir=str(FSAVERAGE_DIR), verbose=True)
 
-    bem_dir = SUBJECTS_DIR / "fsaverage" / "bem"
+    bem_dir = FSAVERAGE_DIR / "bem"
     trans = bem_dir / "fsaverage-trans.fif"
     src = bem_dir / "fsaverage-ico-5-src.fif"
     bem = bem_dir / "fsaverage-5120-5120-5120-bem-sol.fif"
