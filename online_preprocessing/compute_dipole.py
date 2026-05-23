@@ -1,18 +1,12 @@
 #%%
 """
-This script calculates the dipole amplitude for each time point in the evoked object.
+Core dipole fitting functions: scanning, time-range selection, and single-trial extraction.
 """
 import mne 
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
-import os
 import time 
 import pandas as pd
-import argparse
-from pathlib import Path
-
-DATA_ROOT = Path("~/prime-data").expanduser()
 
 mne.set_log_level("ERROR")
 
@@ -255,123 +249,3 @@ def determine_optimal_ori_and_pos(dipoles, forward, evoked):
 
 def init_dipole_params():
 	return -np.inf, None, None, None
-
-def run_dipole_calculation_for_subject(
-    subject, 
-    subjects_directory_eeg, 
-    forward,
-    save_results=True
-):
-    """
-    Runs the full dipole fitting and saving pipeline for a single subject.
-    """
-    print(f"--- Starting processing for subject: {subject} ---")
-    
-    tmin_init, tmax_init = 0.038, 0.050  # Use updated time range
-    min_window_size = 3
-    max_window_size = 6
-    window_size_exponent = 1.5
-    n_calibration_trials = 100
-
-    subject_directory = os.path.join(subjects_directory_eeg, subject)
-    subject_response_extraction_info = {}
-
-    try:
-        epochs = mne.read_epochs(os.path.join(subject_directory, f'{subject}_post.fif'), verbose=False)
-    except FileNotFoundError:
-        print(f"ERROR: Could not find post-stimulus epoch file for subject {subject}. Skipping.")
-        return
-
-    # The channel order check from the original script
-    if not epochs.info['ch_names'] == forward.ch_names:
-        raise ValueError(f"Channel mismatch for subject {subject}. Aborting.")
-
-    evoked = epochs.copy()[:n_calibration_trials].average()
-
-    best_dipole_per_time = dipoles_for_times(evoked, forward, tmin_init, tmax_init)
-    subject_response_extraction_info['best_dipole_per_time'] = best_dipole_per_time
-
-    # Updated call to include all windowing parameters and capture all outputs
-    optimal_time_range, dipoles_in_time_range, windows_df = determine_optimal_time_range(
-        best_dipole_per_time, min_window_size, max_window_size, window_size_exponent
-    )
-    subject_response_extraction_info['optimal_time_range'] = optimal_time_range
-    subject_response_extraction_info['dipoles_in_time_range'] = dipoles_in_time_range
-    subject_response_extraction_info['windows_df'] = windows_df # Save the windows dataframe
-
-    best_dipole_index = np.argmax([dipole['r2'] for dipole in dipoles_in_time_range])
-    subject_response_extraction_info['best_dipole_to_evoked'] = dipoles_in_time_range[best_dipole_index]
-
-
-
-    # Updated call to capture all position-related outputs
-    weighted_pos, weighted_ori, position_index, pos_of_pos_index, weighted_dipole_stats_fixed, weighted_dipole_stats_free = determine_optimal_ori_and_pos(
-        dipoles_in_time_range, forward, evoked
-    )
-    subject_response_extraction_info.update({
-        'weighted_pos': weighted_pos,
-        'weighted_ori': weighted_ori,
-        'nearest_to_weighted_pos_pos_index': position_index,
-        'pos_of_weighted_pos_index': pos_of_pos_index, # Save the new variable
-        'weighted_dipole_stats_fixed': weighted_dipole_stats_fixed,
-        'weighted_dipole_stats_free': weighted_dipole_stats_free
-    })
-    
-    for fixed_orientation in [weighted_ori, None]:
-        dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
-            epochs, forward, position_index, fixed_orientation, optimal_time_range[0], optimal_time_range[1]
-        )
-        orientation_identifier = 'free_ori' if fixed_orientation is None else 'fixed_ori'
-        subject_response_extraction_info[f'trial_dipoles_{orientation_identifier}'] = dipoles_for_trials
-        # Add the informative print statement back
-        print(f"Average {orientation_identifier} dipole extraction times {np.mean(extraction_times)*1e3:.2f} ms")
-
-    if save_results:
-        os.makedirs(subject_directory, exist_ok=True)
-        output_path = os.path.join(subject_directory, f'{subject}_response_extraction_info.npz')
-        np.savez(output_path, **subject_response_extraction_info)
-        print(f"Results saved to {output_path}")
-
-    print(f"--- Finished processing for subject: {subject} ---")
-
-
-
-def main():
-    """
-    Parses command-line arguments and runs the dipole calculation for a single subject.
-    """
-    parser = argparse.ArgumentParser(description="Run single-trial dipole amplitude calculation for one subject.")
-    parser.add_argument("--subject", required=True, type=str, help="The subject identifier (e.g., 'sub-001').")
-    args = parser.parse_args()
-
-    # --- Configuration (repo-local; matches preprocessing_single_subject.py) ---
-    subjects_directory_eeg = str(DATA_ROOT / "processed")
-    fsaverage_forward_path = os.path.join(DATA_ROOT / "fsaverage", "fsaverage-fwd.fif")
-
-    # This list defines the desired channel set and order
-    common_channels = [
-        'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 
-        'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz', 'F1', 'F2', 
-        'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'FC1', 'FC2', 'FC3', 'FC4', 
-        'FC5', 'FC6', 'FT7', 'FT8', 'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1', 
-        'O2', 'Oz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'PO3', 
-        'PO4', 'PO7', 'PO8', 'POz', 'Pz', 'T7', 'T8', 'TP7', 'TP8'
-    ]
-    
-    # Ensure the main output directory exists
-    os.makedirs(subjects_directory_eeg, exist_ok=True)
-
-    # Load the forward model once and select the common channels in a fixed order
-    forward = mne.read_forward_solution(fsaverage_forward_path, verbose=False)
-    forward = forward.pick_channels(common_channels, ordered=True)
-
-    # Run the processing for the specified subject
-    run_dipole_calculation_for_subject(
-        subject=args.subject,
-        subjects_directory_eeg=subjects_directory_eeg,
-        forward=forward,
-        save_results=True
-    )
-
-if __name__ == "__main__":
-    main()
