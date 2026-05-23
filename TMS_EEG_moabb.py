@@ -184,6 +184,9 @@ class _BaseTMSEEGParadigm(BaseParadigm):
     def is_valid(self, dataset):
         return "tms_eeg" in dataset.paradigm
 
+    def used_events(self, dataset):
+        return dict(dataset.event_id)
+
     def make_labels_pipeline(self):
         raise NotImplementedError("Subclasses must implement their own label pipeline.")
 
