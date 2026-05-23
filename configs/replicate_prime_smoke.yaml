@@ -40,7 +40,7 @@ tta_cov_buffer_size: 50
 window_size: 100
 seed: 42
 device: "cuda"
-experiment_name: "replicate_preft_smoke"
+experiment_name: "replicate_prime_smoke"
 save_results: true
 save_predictions_and_labels: true
 save_checkpoints: false
