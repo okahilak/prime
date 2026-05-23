@@ -669,6 +669,8 @@ def _verify_calibration_bundle(original, loaded):
 
 
 def _load_subject_epochs(subject_id, cfg):
+    print("Loading data...")
+
     data_path = DATA_ROOT / "raw"
     subject_path = data_path / subject_id
     if not subject_path.exists():
@@ -700,8 +702,6 @@ def _compute_leadfield():
 
 def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
-    start_time = time.time()
-
     opts = cfg.to_dicts()
     leadfield = _compute_leadfield()
     ica_time_range = opts['ica_opts']['pre_timerange']
@@ -711,12 +711,16 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     epochs_pre = epochs_pre_ica = epochs_post = None
     n_trials_use = 0
+    print("Appending calibration trials...")
     for trial_idx in range(125):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
             epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
         n_trials_use += 1
 
+    print("Calibrating...")
+
+    start_time = time.time()
     while True:
         epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_successful_trials = (
             preprocess_calibration(
