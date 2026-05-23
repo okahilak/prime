@@ -10,11 +10,13 @@ import warnings
 import argparse
 import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from ica_calibrator import get_number_of_components, get_ica
 from ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
 from sound_modified import sound
 from channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
+from config import get_default_config
 
 _PREP_ROOT = Path(__file__).resolve().parents[2]
 
@@ -655,59 +657,54 @@ def preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, info, line
     return True
 
 
+# ==================== Single-Trial Worker ====================
+
+def _process_single_trial(trial_idx, epoch_pre_data, epoch_post_data, epoch_emg_data,
+                          eeg_info, emg_info,
+                          pre_events_row, post_events_row, emg_events_row,
+                          pre_tmin, post_tmin, emg_tmin,
+                          calibration_params, trial_reject_opts, ica, baseline,
+                          artifact_window_1, artifact_window_2, leadfield, reject_range,
+                          filter_opts, filter_opts_emg, emg_reject_opts, use_ica_on_pre, line_freq):
+    """Process a single trial (pre, post, EMG). Returns (trial_idx, result_pre, result_post) or (trial_idx, None, None)."""
+    epoch_pre = mne.EpochsArray(
+        epoch_pre_data, info=eeg_info, events=pre_events_row, tmin=pre_tmin, verbose=False)
+    epoch_post = mne.EpochsArray(
+        epoch_post_data, info=eeg_info, events=post_events_row, tmin=post_tmin, verbose=False)
+    epoch_emg = mne.EpochsArray(
+        epoch_emg_data, info=emg_info, events=emg_events_row, tmin=emg_tmin, verbose=False)
+
+    result_pre = preprocess_pre_trial(epoch_pre, calibration_params, trial_reject_opts, filter_opts, use_ica_on_pre)
+    result_post = preprocess_post_trial(epoch_post, calibration_params, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
+    result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, calibration_params, line_freq)
+
+    if result_pre is not False and result_post is not False and result_emg is not False:
+        return trial_idx, result_pre, result_post
+    return trial_idx, None, None
+
+
 # ==================== Subject-Level Runner ====================
 
 def run_subject_processing(site_id: str, subject_id: str):
     """Main preprocessing pipeline for a single subject."""
+    cfg = get_default_config()
+    dicts = cfg.to_dicts()
+
     # Paths
     data_path = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
-    use_ica_on_pre = False
-    output_path = _PREP_ROOT / f"data_processed_pre_ica_{use_ica_on_pre}_v4"
+    output_path = _PREP_ROOT / f"data_processed_pre_ica_{cfg.use_ica_on_pre}_v4"
 
-    # Time ranges
-    pre_range = [-0.505, -0.005]
-    post_range = [-0.03, 0.1]
-    baseline = [-0.025, -0.015]
-    reject_range = [0.02, 0.06]
-    artifact_window_1 = [-0.014, 0.014]
-    artifact_window_2 = [None, 0.015]
-    emg_time_range = [-0.5, 0.2]
-
-    # Channel rejection
-    freq_range = [30, 47]
-    channel_reject_opts = {
-        'pre': {'z_score_threshold_mad': [-3, 3], 'z_score_threshold_power': 5, 'fmin_fmax': freq_range, 'z_score_threshold_autocorr': 4},
-        'post': {'z_score_threshold_auc': 3},
-    }
-
-    # ICA
-    ica_opts = {
-        'pc_threshold': 0.99,
-        'bad_component_thresholds': {'eye blink': 0.9},
-        'n_min_comps_to_reject': {'eye blink': 2},
-        'threshold_min_components_to_reject': {'eye blink': 0.7},
-        'pre_timerange': [-1.1, -0.005],
-        'filtering': {'order_bandpass': 2, 'order_bandstop': 2, 'pad_time_bandpass': 0.5, 'cutoff': [1, 100]},
-    }
-
-    # SOUND & SSP-SIR
-    sound_opts = {'max_iterations': 10, 'lambda': 0.01, 'convergence_tolerance': 1e-9, 'fixed_max_iterations': False}
-    ssp_sir_opts = {'timerange': ['automatic', 50], 'method': ['threshold', 0.99]}
-
-    # Trial rejection
-    trial_reject_opts = {
-        'ocular': {'z_thresh': 2, 'pre_timerange_min': -0.1, 'post_timerange': [0.015, None]},
-        'pre': {'global_zscore_threshold': [-8, 4], 'local_zscore_threshold': 5, 'psd_zscore_threshold': False, 'psd_freq_range': freq_range},
-        'post': {'global_zscore_threshold': [-np.inf, 6], 'local_zscore_threshold': 5},
-    }
-
-    # EMG rejection
-    pre_innervation_opts = {'tmin': -0.2, 'tmax': -0.015, 'threshold': 50e-6}
-    ptp_opts = {'tmin': 0.02, 'tmax': 0.05, 'min_ptp_height': 50e-6, 'min_distance': 0.005, 'prominence': 10e-6, 'check_ptp': False}
-    emg_reject_opts = {'pre_innervation_options': pre_innervation_opts, 'ptp_options': ptp_opts}
+    # Unpack dict versions for functions that expect dicts
+    channel_reject_opts = dicts['channel_reject_opts']
+    ica_opts = dicts['ica_opts']
+    sound_opts = dicts['sound_opts']
+    ssp_sir_opts = dicts['ssp_sir_opts']
+    trial_reject_opts = dicts['trial_reject_opts']
+    emg_reject_opts = dicts['emg_reject_opts']
+    filter_opts = dicts['filter_opts']
+    filter_opts_emg = dicts['filter_opts_emg']
 
     # Channel setup and forward model
-    common_channels = ['AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6', 'FT7', 'FT8', 'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1', 'O2', 'Oz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'PO3', 'PO4', 'PO7', 'PO8', 'POz', 'Pz', 'T7', 'T8', 'TP7', 'TP8']
     montage = mne.channels.make_standard_montage('standard_1005')
     forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
     if not forward_path.exists():
@@ -715,15 +712,6 @@ def run_subject_processing(site_id: str, subject_id: str):
     forward = mne.read_forward_solution(forward_path)
     leadfield = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
     channel_order = forward.ch_names
-
-    # Filter options
-    filter_opts = {'cutoff': [2, 47], 'btype': 'bandpass', 'order': 2, 'pad_time': 0.1}
-    filter_opts_emg = {'cutoff': 2, 'btype': 'highpass', 'order': 4, 'pad_time': 0.5}
-
-    # General parameters
-    line_freq = 50
-    target_sfreq = 1000
-    n_trials_goal = 100
 
     # --- Load data ---
     subject_path = data_path / site_id / subject_id
@@ -737,7 +725,7 @@ def run_subject_processing(site_id: str, subject_id: str):
     epochs = mne.read_epochs_eeglab(os.path.join(subject_path, f'{subject_id}_task-tep_all_eeg.set'))
     emg_names = [ch for ch in epochs.ch_names if 'emg' in ch.lower() or 'apb' in ch.lower() or 'fdi' in ch.lower()]
     epochs_emg = epochs.copy().pick(emg_names)
-    epochs.pick(common_channels)
+    epochs.pick(cfg.common_channels)
     epochs.reorder_channels(channel_order)
     epochs.set_montage(None)
     epochs.set_montage(montage)
@@ -748,20 +736,20 @@ def run_subject_processing(site_id: str, subject_id: str):
         raise ValueError(f"Channel order mismatch: {channel_order} vs {epochs.ch_names}")
 
     # --- Calibration ---
-    n_trials_use = n_trials_goal + 25
-    check_emg = epochs_emg.copy()[0:n_trials_use].crop(emg_time_range[0], emg_time_range[1]).resample(target_sfreq, method='polyphase')
-    picked_channel, emg_filter_coefficients = _select_best_emg_channel(check_emg, ptp_opts, filter_opts_emg)
+    n_trials_use = cfg.n_trials_goal + 25
+    check_emg = epochs_emg.copy()[0:n_trials_use].crop(cfg.emg_time_range[0], cfg.emg_time_range[1]).resample(cfg.target_sfreq, method='polyphase')
+    picked_channel, emg_filter_coefficients = _select_best_emg_channel(check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
     epochs_emg.pick(picked_channel)
 
     while True:
         out = preprocess_calibration(
             epochs[0:n_trials_use], epochs_emg[0:n_trials_use],
-            pre_range, post_range, baseline,
-            artifact_window_1, artifact_window_2, reject_range,
-            emg_time_range, channel_reject_opts, ica_opts, trial_reject_opts,
+            cfg.pre_range, cfg.post_range, cfg.baseline,
+            cfg.artifact_window_1, cfg.artifact_window_2, cfg.reject_range,
+            cfg.emg_time_range, channel_reject_opts, ica_opts, trial_reject_opts,
             emg_reject_opts, sound_opts, ssp_sir_opts, leadfield,
-            filter_opts, filter_opts_emg, line_freq, target_sfreq,
-            n_trials_goal, use_ica_on_pre, emg_filter_coefficients)
+            filter_opts, filter_opts_emg, cfg.line_freq, cfg.target_sfreq,
+            cfg.n_trials_goal, cfg.use_ica_on_pre, emg_filter_coefficients)
         if isinstance(out, int):
             n_trials_use += out
         else:
@@ -769,34 +757,84 @@ def run_subject_processing(site_id: str, subject_id: str):
 
     epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration = out
 
-    # --- Single-trial processing ---
+    # --- Pre-prepare all online epochs (crop and resample once) ---
+    n_online = len(epochs) - n_trials_use
+    all_eeg_data = epochs.get_data(copy=False)
+    all_emg_data = epochs_emg.get_data(copy=False)
+
+    # Build temporary epochs for pre/post/emg from the online trials, crop & resample in batch
+    online_eeg_data = all_eeg_data[n_trials_use:]
+    online_emg_data = all_emg_data[n_trials_use:]
+    online_events = epochs.events[n_trials_use:]
+    online_emg_events = epochs_emg.events[n_trials_use:]
+
+    # Batch-crop and resample pre-stim epochs
+    epochs_pre_batch = mne.EpochsArray(
+        online_eeg_data, info=epochs.info, events=online_events, tmin=epochs.tmin, verbose=False)
+    epochs_pre_batch.crop(cfg.pre_range[0], cfg.pre_range[1]).resample(cfg.target_sfreq, method='polyphase')
+    pre_batch_data = epochs_pre_batch.get_data(copy=False)
+    pre_batch_info = epochs_pre_batch.info
+    pre_batch_tmin = epochs_pre_batch.tmin
+    pre_batch_events = epochs_pre_batch.events
+
+    # Batch-crop and resample post-stim epochs
+    epochs_post_batch = mne.EpochsArray(
+        online_eeg_data, info=epochs.info, events=online_events, tmin=epochs.tmin, verbose=False)
+    epochs_post_batch.crop(cfg.post_range[0], cfg.post_range[1]).resample(cfg.target_sfreq, method='polyphase')
+    post_batch_data = epochs_post_batch.get_data(copy=False)
+    post_batch_tmin = epochs_post_batch.tmin
+    post_batch_events = epochs_post_batch.events
+
+    # Batch-crop and resample EMG epochs
+    epochs_emg_batch = mne.EpochsArray(
+        online_emg_data, info=epochs_emg.info, events=online_emg_events, tmin=epochs_emg.tmin, verbose=False)
+    epochs_emg_batch.crop(cfg.emg_time_range[0], cfg.emg_time_range[1]).resample(cfg.target_sfreq, method='polyphase')
+    emg_batch_data = epochs_emg_batch.get_data(copy=False)
+    emg_batch_info = epochs_emg_batch.info
+    emg_batch_tmin = epochs_emg_batch.tmin
+    emg_batch_events = epochs_emg_batch.events
+
+    # Free memory from originals
+    del epochs_pre_batch, epochs_post_batch, epochs_emg_batch
+    del online_eeg_data, online_emg_data
+
+    # --- Parallel single-trial processing ---
     pre_list = [epochs_pre_cal]
     post_list = [epochs_post_cal]
     bad_trials_online = []
-    n_total = len(epochs) - n_trials_use
 
-    for i, trial_idx in enumerate(range(n_trials_use, len(epochs))):
-        print(f"Trial {i + 1}/{n_total}")
-        epoch = mne.EpochsArray(
-            epochs.get_data(item=trial_idx), info=epochs.info,
-            events=epochs.events[trial_idx:trial_idx + 1], tmin=epochs.tmin, verbose=False)
-        epoch_emg = mne.EpochsArray(
-            epochs_emg.get_data(item=trial_idx), info=epochs_emg.info,
-            events=epochs_emg.events[trial_idx:trial_idx + 1], tmin=epochs_emg.tmin, verbose=False)
+    def process_trial(i):
+        trial_idx = n_trials_use + i
+        # Use pre-prepared data (no copy needed for read, functions do get_data(copy=True) internally)
+        epoch_pre_data = pre_batch_data[i:i+1]
+        epoch_post_data = post_batch_data[i:i+1]
+        epoch_emg_data = emg_batch_data[i:i+1]
 
-        # Pre-stim
-        epoch_pre = epoch.copy().crop(pre_range[0], pre_range[1]).resample(target_sfreq, method='polyphase')
-        result_pre = preprocess_pre_trial(epoch_pre, calibration_params, trial_reject_opts, filter_opts, use_ica_on_pre)
+        return _process_single_trial(
+            trial_idx, epoch_pre_data, epoch_post_data, epoch_emg_data,
+            pre_batch_info, emg_batch_info,
+            pre_batch_events[i:i+1], post_batch_events[i:i+1], emg_batch_events[i:i+1],
+            pre_batch_tmin, post_batch_tmin, emg_batch_tmin,
+            calibration_params, trial_reject_opts, ica, cfg.baseline,
+            cfg.artifact_window_1, cfg.artifact_window_2, leadfield, cfg.reject_range,
+            filter_opts, filter_opts_emg, emg_reject_opts, cfg.use_ica_on_pre, cfg.line_freq)
 
-        # Post-stim
-        epoch_post = epoch.copy().crop(post_range[0], post_range[1]).resample(target_sfreq, method='polyphase')
-        result_post = preprocess_post_trial(epoch_post, calibration_params, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
+    # Use ThreadPoolExecutor - ICA and MNE operations hold GIL but numpy releases it
+    # Process sequentially to maintain deterministic ordering (same as original)
+    # but with pre-prepared epochs for speed
+    results = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(process_trial, i): i for i in range(n_online)}
+        for future in futures:
+            results.append((futures[future], future.result()))
 
-        # EMG
-        epoch_emg.crop(emg_time_range[0], emg_time_range[1]).resample(target_sfreq, method='polyphase')
-        result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, calibration_params, line_freq)
+    # Sort by original order to maintain determinism
+    results.sort(key=lambda x: x[0])
 
-        if result_pre is not False and result_post is not False and result_emg is not False:
+    for i, (_, result) in enumerate(results):
+        trial_idx = n_trials_use + i
+        _, result_pre, result_post = result
+        if result_pre is not None:
             pre_list.append(result_pre)
             post_list.append(result_post)
         else:
