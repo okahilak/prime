@@ -683,44 +683,74 @@ def _process_single_trial(trial_idx, epoch_pre_data, epoch_post_data, epoch_emg_
     return trial_idx, None, None
 
 
-# ==================== Subject-Level Runner ====================
+# ==================== Calibration persistence (two-step simulation) ====================
 
-def run_subject_processing(site_id: str, subject_id: str):
-    """Main preprocessing pipeline for a single subject."""
-    cfg = get_default_config()
-    dicts = cfg.to_dicts()
+def _build_calibration_bundle(epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use):
+    return {
+        'calibration_params': calibration_params,
+        'ica': ica,
+        'rejected_calibration': rejected_calibration,
+        'epochs_pre_cal': epochs_pre_cal,
+        'epochs_post_cal': epochs_post_cal,
+        'n_trials_use': n_trials_use,
+    }
 
-    # Paths
+
+def _save_calibration_bundle(path, bundle):
+    np.save(path, bundle, allow_pickle=True)
+
+
+def _load_calibration_bundle(path):
+    return np.load(path, allow_pickle=True).item()
+
+
+def _assert_calibration_value_equal(orig_val, load_val, path):
+    if orig_val is None or load_val is None:
+        assert orig_val is load_val, path
+    elif isinstance(orig_val, np.ndarray):
+        assert np.allclose(orig_val, load_val), path
+    elif isinstance(orig_val, dict):
+        assert orig_val.keys() == load_val.keys(), path
+        for sub_key in orig_val:
+            _assert_calibration_value_equal(orig_val[sub_key], load_val[sub_key], f'{path}.{sub_key}')
+    elif isinstance(orig_val, list):
+        assert len(orig_val) == len(load_val), path
+        for i, (orig_item, load_item) in enumerate(zip(orig_val, load_val)):
+            _assert_calibration_value_equal(orig_item, load_item, f'{path}[{i}]')
+    else:
+        assert orig_val == load_val, path
+
+
+def _verify_calibration_bundle(original, loaded):
+    """Assert round-trip integrity of the calibration bundle."""
+    assert set(original.keys()) == set(loaded.keys())
+    assert original['n_trials_use'] == loaded['n_trials_use']
+    _assert_calibration_value_equal(original['rejected_calibration'], loaded['rejected_calibration'], 'rejected_calibration')
+    assert original['ica'].exclude == loaded['ica'].exclude
+    assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
+    assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
+    for orig_epochs, load_epochs in (
+        (original['epochs_pre_cal'], loaded['epochs_pre_cal']),
+        (original['epochs_post_cal'], loaded['epochs_post_cal']),
+    ):
+        assert np.allclose(orig_epochs.get_data(), load_epochs.get_data())
+        assert orig_epochs.ch_names == load_epochs.ch_names
+        assert np.array_equal(orig_epochs.events, load_epochs.events)
+    _assert_calibration_value_equal(
+        original['calibration_params'], loaded['calibration_params'], 'calibration_params')
+
+
+def _load_subject_epochs(site_id, subject_id, cfg):
     data_path = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
-    output_path = _PREP_ROOT / f"data_processed_pre_ica_{cfg.use_ica_on_pre}_v4"
-
-    # Unpack dict versions for functions that expect dicts
-    channel_reject_opts = dicts['channel_reject_opts']
-    ica_opts = dicts['ica_opts']
-    sound_opts = dicts['sound_opts']
-    ssp_sir_opts = dicts['ssp_sir_opts']
-    trial_reject_opts = dicts['trial_reject_opts']
-    emg_reject_opts = dicts['emg_reject_opts']
-    filter_opts = dicts['filter_opts']
-    filter_opts_emg = dicts['filter_opts_emg']
-
-    # Channel setup and forward model
-    montage = mne.channels.make_standard_montage('standard_1005')
-    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
-    if not forward_path.exists():
-        raise FileNotFoundError(f"Forward solution not found at {forward_path}. Run: python {_PREP_ROOT / 'build_fsaverage_forward.py'}")
-    forward = mne.read_forward_solution(forward_path)
-    leadfield = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
-    channel_order = forward.ch_names
-
-    # --- Load data ---
     subject_path = data_path / site_id / subject_id
-    subject_output = output_path / subject_id
-
     if not subject_path.exists():
         raise FileNotFoundError(f"Subject directory not found at {subject_path}")
 
-    os.makedirs(subject_output, exist_ok=True)
+    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
+    if not forward_path.exists():
+        raise FileNotFoundError(f"Forward solution not found at {forward_path}. Run: python {_PREP_ROOT / 'build_fsaverage_forward.py'}")
+    channel_order = mne.read_forward_solution(forward_path).ch_names
+    montage = mne.channels.make_standard_montage('standard_1005')
 
     epochs = mne.read_epochs_eeglab(os.path.join(subject_path, f'{subject_id}_task-tep_all_eeg.set'))
     emg_names = [ch for ch in epochs.ch_names if 'emg' in ch.lower() or 'apb' in ch.lower() or 'fdi' in ch.lower()]
@@ -730,15 +760,42 @@ def run_subject_processing(site_id: str, subject_id: str):
     epochs.set_montage(None)
     epochs.set_montage(montage)
 
-    block_ids = scipy.io.loadmat(os.path.join(subject_path, f'{subject_id}_block_identifiers.mat'), simplify_cells=True)['block_identifiers_trials']
+    block_ids = scipy.io.loadmat(
+        os.path.join(subject_path, f'{subject_id}_block_identifiers.mat'),
+        simplify_cells=True,
+    )['block_identifiers_trials']
 
     if channel_order != epochs.ch_names:
         raise ValueError(f"Channel order mismatch: {channel_order} vs {epochs.ch_names}")
 
-    # --- Calibration ---
+    return epochs, epochs_emg, block_ids
+
+
+def _compute_leadfield():
+    forward_path = _PREP_ROOT / "subjects_dir_fsaverage" / "fsaverage" / "fsaverage-fwd.fif"
+    forward = mne.read_forward_solution(forward_path)
+    return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
+
+
+def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
+    """Calibration only: writes bundle to disk; no state returned except the path."""
+    dicts = cfg.to_dicts()
+    channel_reject_opts = dicts['channel_reject_opts']
+    ica_opts = dicts['ica_opts']
+    sound_opts = dicts['sound_opts']
+    ssp_sir_opts = dicts['ssp_sir_opts']
+    trial_reject_opts = dicts['trial_reject_opts']
+    emg_reject_opts = dicts['emg_reject_opts']
+    filter_opts = dicts['filter_opts']
+    filter_opts_emg = dicts['filter_opts_emg']
+    leadfield = _compute_leadfield()
+
     n_trials_use = cfg.n_trials_goal + 25
-    check_emg = epochs_emg.copy()[0:n_trials_use].crop(cfg.emg_time_range[0], cfg.emg_time_range[1]).resample(cfg.target_sfreq, method='polyphase')
-    picked_channel, emg_filter_coefficients = _select_best_emg_channel(check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
+    check_emg = epochs_emg.copy()[0:n_trials_use].crop(
+        cfg.emg_time_range[0], cfg.emg_time_range[1]
+    ).resample(cfg.target_sfreq, method='polyphase')
+    picked_channel, emg_filter_coefficients = _select_best_emg_channel(
+        check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
     epochs_emg.pick(picked_channel)
 
     while True:
@@ -756,8 +813,32 @@ def run_subject_processing(site_id: str, subject_id: str):
             break
 
     epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration = out
+    bundle = _build_calibration_bundle(
+        epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use)
+    _save_calibration_bundle(calibration_bundle_path, bundle)
+    bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
+    _verify_calibration_bundle(bundle, bundle_loaded)
 
-    # --- Pre-prepare all online epochs (crop and resample once) ---
+
+def _run_online_processing_stage(
+    epochs, epochs_emg, block_ids, cfg, subject_output, subject_id, calibration_bundle_path,
+):
+    """Online trial processing: only config, epochs, and calibration bundle from disk."""
+    dicts = cfg.to_dicts()
+    trial_reject_opts = dicts['trial_reject_opts']
+    emg_reject_opts = dicts['emg_reject_opts']
+    filter_opts = dicts['filter_opts']
+    filter_opts_emg = dicts['filter_opts_emg']
+    leadfield = _compute_leadfield()
+
+    bundle = _load_calibration_bundle(calibration_bundle_path)
+    calibration_params = bundle['calibration_params']
+    ica = bundle['ica']
+    rejected_calibration = bundle['rejected_calibration']
+    epochs_pre_cal = bundle['epochs_pre_cal']
+    epochs_post_cal = bundle['epochs_post_cal']
+    n_trials_use = bundle['n_trials_use']
+
     n_online = len(epochs) - n_trials_use
     all_eeg_data = epochs.get_data(copy=False)
     all_emg_data = epochs_emg.get_data(copy=False)
@@ -858,6 +939,23 @@ def run_subject_processing(site_id: str, subject_id: str):
         epoch.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
 
     np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
+
+
+def run_subject_processing(site_id: str, subject_id: str):
+    """Main preprocessing pipeline for a single subject."""
+    cfg = get_default_config()
+    output_path = _PREP_ROOT / f"data_processed_pre_ica_{cfg.use_ica_on_pre}_v4"
+    subject_output = output_path / subject_id
+    os.makedirs(subject_output, exist_ok=True)
+
+    calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
+
+    epochs, epochs_emg, block_ids = _load_subject_epochs(site_id, subject_id, cfg)
+    _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path)
+
+    cfg = get_default_config()
+    _run_online_processing_stage(
+        epochs, epochs_emg, block_ids, cfg, subject_output, subject_id, calibration_bundle_path)
 
 
 # %%
