@@ -611,15 +611,8 @@ def _process_online_trial_worker(trial_idx):
 
 # ==================== Calibration persistence (two-step simulation) ====================
 
-def _build_calibration_bundle(calibration_params, n_trials_use):
-    return {
-        'calibration_params': calibration_params,
-        'n_trials_use': n_trials_use,
-    }
-
-
-def _save_calibration_bundle(path, bundle):
-    np.save(path, bundle, allow_pickle=True)
+def _save_calibration_bundle(path, calibration_params):
+    np.save(path, calibration_params, allow_pickle=True)
 
 
 def _load_calibration_bundle(path):
@@ -645,15 +638,11 @@ def _assert_calibration_value_equal(orig_val, load_val, path):
 
 def _verify_calibration_bundle(original, loaded):
     """Assert round-trip integrity of the calibration bundle."""
-    assert set(original.keys()) == set(loaded.keys())
-    assert original['n_trials_use'] == loaded['n_trials_use']
-    orig_params = original['calibration_params']
-    load_params = loaded['calibration_params']
-    assert orig_params['ica'].exclude == load_params['ica'].exclude
-    assert np.allclose(orig_params['ica'].mixing_matrix_, load_params['ica'].mixing_matrix_)
-    assert np.allclose(orig_params['ica'].unmixing_matrix_, load_params['ica'].unmixing_matrix_)
-    orig_without_ica = {k: v for k, v in orig_params.items() if k != 'ica'}
-    load_without_ica = {k: v for k, v in load_params.items() if k != 'ica'}
+    assert original['ica'].exclude == loaded['ica'].exclude
+    assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
+    assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
+    orig_without_ica = {k: v for k, v in original.items() if k != 'ica'}
+    load_without_ica = {k: v for k, v in loaded.items() if k != 'ica'}
     _assert_calibration_value_equal(orig_without_ica, load_without_ica, 'calibration_params')
 
 
@@ -728,11 +717,9 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
             epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
         n_trials_use += 1
 
-    bundle = _build_calibration_bundle(calibration_params, n_trials_use)
-
-    _save_calibration_bundle(calibration_bundle_path, bundle)
-    bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
-    _verify_calibration_bundle(bundle, bundle_loaded)
+    _save_calibration_bundle(calibration_bundle_path, calibration_params)
+    calibration_params_loaded = _load_calibration_bundle(calibration_bundle_path)
+    _verify_calibration_bundle(calibration_params, calibration_params_loaded)
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
@@ -744,8 +731,7 @@ def _run_online_processing_stage(
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
     start_time = time.time()
 
-    bundle = _load_calibration_bundle(calibration_bundle_path)
-    calibration_params = bundle['calibration_params']
+    calibration_params = _load_calibration_bundle(calibration_bundle_path)
 
     n_total = len(epochs)
     all_eeg_data = epochs.get_data(copy=False)
