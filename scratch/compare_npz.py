@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Compare two response_extraction_info.npz files field by field.
+Compare two .npz files field by field on their common top-level keys.
 
-Designed for verifying that the vectorized refactor of dipoles_for_times
-produces results equivalent to the original loop-based implementation.
+Designed for verifying that refactored dipole fitting matches the original
+(e.g. response_extraction_info.npz vs fitted_dipoles.npz, which only overlap
+on trial_dipoles_fixed_ori / trial_dipoles_free_ori).
 
 Usage:
     python compare_npz.py REF.npz NEW.npz [--rtol 1e-6] [--atol 1e-10]
+    python compare_npz.py REF.npz NEW.npz --keys trial_dipoles_fixed_ori trial_dipoles_free_ori
 """
 import argparse
 import numpy as np
@@ -134,12 +136,13 @@ def compare_scalar(path, a, b, rtol, atol, report):
         report.fail_(path, f"{type(a).__name__} differs: {a!r} vs {b!r}")
 
 
-def compare_dict(path, a, b, rtol, atol, report):
+def compare_dict(path, a, b, rtol, atol, report, strict_keys=False):
     ka, kb = set(a.keys()), set(b.keys())
-    if ka != kb:
-        report.warn_(path, f"key sets differ: only-ref={kb-ka} only-new={ka-kb}")
+    if strict_keys and ka != kb:
+        report.fail_(path, f"key sets differ: only-ref={kb-ka} only-new={ka-kb}")
+        return
     for k in sorted(ka & kb):
-        compare(f"{path}.{k}", a[k], b[k], rtol, atol, report)
+        compare(f"{path}.{k}", a[k], b[k], rtol, atol, report, strict_keys=strict_keys)
 
 
 def compare_list_of_dicts(path, a, b, rtol, atol, report):
@@ -188,7 +191,7 @@ def compare_dataframe(path, a, b, rtol, atol, report):
         compare_array(f"{path}[{col!r}]", sa, sb, rtol, atol, report)
 
 
-def compare(path, a, b, rtol, atol, report):
+def compare(path, a, b, rtol, atol, report, strict_keys=False):
     # Unwrap 0-d object arrays
     if isinstance(a, np.ndarray) and a.dtype == object and a.shape == ():
         a = a.item()
@@ -198,7 +201,7 @@ def compare(path, a, b, rtol, atol, report):
     if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
         compare_dataframe(path, a, b, rtol, atol, report)
     elif isinstance(a, dict) and isinstance(b, dict):
-        compare_dict(path, a, b, rtol, atol, report)
+        compare_dict(path, a, b, rtol, atol, report, strict_keys=strict_keys)
     elif isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
         if len(a) > 0 and isinstance(a[0], dict):
             compare_list_of_dicts(path, a, b, rtol, atol, report)
@@ -241,6 +244,10 @@ def main():
     p.add_argument("--atol", type=float, default=DEFAULT_ATOL)
     p.add_argument("--show-all", action="store_true",
                    help="Print every comparison (default: only warnings + failures)")
+    p.add_argument("--keys", nargs="+", metavar="KEY",
+                   help="Top-level keys to compare (default: intersection of both files)")
+    p.add_argument("--strict-keys", action="store_true",
+                   help="Fail if top-level or nested dict key sets differ")
     args = p.parse_args()
 
     print(f"Loading reference: {args.reference}")
@@ -248,14 +255,36 @@ def main():
     print(f"Loading new:       {args.new}")
     new = load(args.new)
     print(f"Tolerances: rtol={args.rtol}  atol={args.atol}")
+
+    ka, kb = set(ref.keys()), set(new.keys())
+    if args.keys:
+        keys = sorted(set(args.keys))
+        missing_ref = set(keys) - ka
+        missing_new = set(keys) - kb
+        if missing_ref or missing_new:
+            raise SystemExit(
+                f"Requested keys not found: "
+                f"only in ref missing={sorted(missing_ref)} "
+                f"only in new missing={sorted(missing_new)}"
+            )
+    else:
+        keys = sorted(ka & kb)
+
+    only_ref = ka - set(keys)
+    only_new = kb - set(keys)
+    if only_ref or only_new:
+        print(f"Skipping keys only in reference ({len(only_ref)}): {sorted(only_ref)}")
+        print(f"Skipping keys only in new ({len(only_new)}): {sorted(only_new)}")
+    if not keys:
+        raise SystemExit("No keys to compare (no overlap and --keys not given).")
+    print(f"Comparing {len(keys)} key(s): {keys}")
     print()
 
     report = Report()
-    ka, kb = set(ref.keys()), set(new.keys())
-    if ka != kb:
-        report.warn_("<top>", f"top-level keys differ: only-ref={ka-kb} only-new={kb-ka}")
-    for k in sorted(ka & kb):
-        compare(k, ref[k], new[k], args.rtol, args.atol, report)
+    if args.strict_keys and (ka != kb or set(keys) != ka or set(keys) != kb):
+        report.fail_("<top>", f"top-level keys differ: only-ref={ka-kb} only-new={kb-ka}")
+    for k in keys:
+        compare(k, ref[k], new[k], args.rtol, args.atol, report, strict_keys=args.strict_keys)
 
     if args.show_all:
         print("ALL CHECKS:")
