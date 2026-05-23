@@ -1,7 +1,7 @@
 """
 Part 2: Fit dipoles to single trials using pre-computed fitting info.
 
-Loads the fitting info produced by compute_dipole_calibration.py and fits
+Loads the fitting info produced by calibrate_dipole.py and fits
 dipoles to every trial in the epoch file.
 Outputs: {subject}_fitted_dipoles.npz
 """
@@ -115,7 +115,7 @@ def run_fitting(subject, subjects_directory_eeg, forward):
     # Load fitting info from calibration step
     fitting_info_path = os.path.join(subject_directory, f'{subject}_dipole_fitting_info.npz')
     if not os.path.exists(fitting_info_path):
-        print(f"ERROR: Fitting info not found at {fitting_info_path}. Run compute_dipole_calibration.py first.")
+        print(f"ERROR: Fitting info not found at {fitting_info_path}. Run calibrate_dipole.py first.")
         return
 
     fitting_info = np.load(fitting_info_path, allow_pickle=True)

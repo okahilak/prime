@@ -23,8 +23,8 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 
 RAW_DATA_DIR = DATA_ROOT / "raw"
 PREPROCESS_SCRIPT = SCRIPT_DIR / "preprocess.py"
-DIPOLE_CALIBRATION_SCRIPT = SCRIPT_DIR / "compute_dipole_calibration.py"
-DIPOLE_FIT_SCRIPT = SCRIPT_DIR / "compute_dipole_fit.py"
+DIPOLE_CALIBRATION_SCRIPT = SCRIPT_DIR / "calibrate_dipole.py"
+DIPOLE_FIT_SCRIPT = SCRIPT_DIR / "fit_dipole.py"
 PROCESSED_DIR = DATA_ROOT / "processed"
 
 
