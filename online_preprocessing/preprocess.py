@@ -266,6 +266,17 @@ def _drop_bad_trials(epoch_list, bad_indices):
 
 # ==================== Main Calibration Pipeline ====================
 
+def _single_trial_epochs_from_arrays(eeg_data, events, epochs, trial_idx):
+    """One trial as EpochsArray without deep-copying the full subject epochs."""
+    return mne.EpochsArray(
+        eeg_data[trial_idx:trial_idx + 1],
+        info=epochs.info,
+        events=events[trial_idx:trial_idx + 1],
+        tmin=epochs.tmin,
+        verbose=False,
+    )
+
+
 def append_calibration_trial(epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range):
     """Append one raw trial (cropped and resampled) to calibration epoch structs."""
     trial_pre = trial.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
@@ -695,12 +706,15 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     leadfield = _compute_leadfield()
     ica_time_range = opts['ica_opts']['pre_timerange']
 
+    all_eeg_data = epochs.get_data(copy=False)
+    all_events = epochs.events
+
     epochs_pre = epochs_pre_ica = epochs_post = None
     n_trials_use = 0
     for trial_idx in range(125):
+        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
-            epochs_pre, epochs_pre_ica, epochs_post,
-            epochs[trial_idx:trial_idx + 1], cfg, ica_time_range)
+            epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
         n_trials_use += 1
 
     while True:
@@ -716,8 +730,9 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
                 f"Only {n_successful_trials} calibration trials passed (goal {cfg.n_trials_goal}); "
                 f"exhausted all {len(epochs)} epochs.")
 
+        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, n_trials_use)
         epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
-            epochs_pre, epochs_pre_ica, epochs_post, epochs[n_trials_use:n_trials_use + 1], cfg, ica_time_range)
+            epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
         n_trials_use += 1
 
     bundle = _build_calibration_bundle(
