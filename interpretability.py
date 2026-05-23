@@ -36,7 +36,6 @@ import os
 import pickle
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import matplotlib as mpl
@@ -56,6 +55,7 @@ from statsmodels.stats.multitest import fdrcorrection
 from models.deep_tepnet import PRIME
 from tta_wrapper import TTAWrapper
 from TMS_EEG_moabb import TMSEEGClassificationTEPfree, TMSEEGDatasetTEPfree
+from utils import run_timestamp
 
 
 # 1. CONFIGURATION
@@ -541,7 +541,7 @@ def main():
             logging.info("\n--- DRY RUN: No jobs will be submitted. ---")
             return
 
-        run_name = f"{datetime.now().strftime('%Y-%m-%d_%H-%M')}_interpret_{args.method}"
+        run_name = f"{run_timestamp()}_interpret_{args.method}"
         log_folder = BASE_LOG_DIR / run_name
         results_folder = log_folder / "results"
         results_folder.mkdir(exist_ok=True, parents=True)

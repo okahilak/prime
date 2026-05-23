@@ -24,6 +24,8 @@ import warnings
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
+from utils import run_timestamp
+
 # Third-party libraries
 import numpy as np
 import pandas as pd
@@ -431,7 +433,7 @@ def main():
     OmegaConf.resolve(cfg) # Resolve any interpolations like ${oc.env:USER}
 
     # Setup output directory
-    ts = time.strftime("%Y%m%d_%H%M%S")
+    ts = run_timestamp()
     run_output_dir = Path(cfg.base_output_dir) / f"{cfg.experiment_name}_{ts}"
     run_output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -267,13 +267,18 @@ def filter_args_for_model(
     return model_params
 
 
+def run_timestamp() -> str:
+    """Filesystem-safe ISO 8601 timestamp for run directories (YYYY-MM-DD_HH-MM-SS)."""
+    return datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+
 def get_output_dir(
     base_output_root: Union[str, Path], experiment_name: str, timestamp: bool = True
 ) -> Path:
     """Create and return unique output directory for experiment run."""
     base_path = Path(base_output_root) / experiment_name
     if timestamp:
-        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_str = run_timestamp()
         run_dir = base_path / timestamp_str
     else:
         run_dir = base_path
