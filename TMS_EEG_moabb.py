@@ -23,15 +23,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Data paths
-#N45
-DATA_ROOT_PATH = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/data_processed_final_pre_ica_False_final_v4")
-TEP_DATA_ROOT_PATH = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/dipoles_with_calibration_final_v4")
-METADATA_ROOT_PATH = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/data_processed_final_pre_ica_False_final_v4")
+DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
 
-#P60
-#TEP_DATA_ROOT_PATH = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/dipoles_with_calibration_final_p60")
-#METADATA_ROOT_PATH = Path("/mnt/lustre/work/macke/mwe626/repos/eegjepa/EDAPT_neurips/EDAPT_TMS/preprocessing/data_processed_final_pre_ica_False_final_p60")
 # %%
 # Real-Time Compatible Labeler with Warm-up
 class RealTimeLabeler:
@@ -147,7 +140,7 @@ class TMSEEGDataset(BaseDataset):
             #self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre_corrected.fif",
             self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif",
             self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_MEPs.npy",
-            METADATA_ROOT_PATH / f"sub-{subject_id_str}_block_identifiers.npy"
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_block_identifiers.npy"
         ]
         return [str(p) for p in paths if p.exists()]
 
@@ -156,14 +149,14 @@ class TMSEEGDatasetTEP(TMSEEGDataset):
     """Dataset for fixed-orientation TEP data, reusing the TMSEEGDataset structure."""
     def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
         super().__init__(data_path, subject_list)
-        self.data_path_root = Path(data_path) if data_path else TEP_DATA_ROOT_PATH
         self.code = "TMSEEGDatasetTEP"
 
     def _get_single_subject_data(self, subject: int) -> dict:
         subject_id_str = f"{subject:03d}"
-        eeg_file = DATA_ROOT_PATH / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif"
-        block_file = DATA_ROOT_PATH / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_block_identifiers.npy"
-        tep_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_response_extraction_info.npz"
+        subj_dir = self.data_path_root / f"sub-{subject_id_str}"
+        eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
+        block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
+        tep_file = subj_dir / f"sub-{subject_id_str}_response_extraction_info.npz"
 
         if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
@@ -191,14 +184,14 @@ class TMSEEGDatasetTEPfree(TMSEEGDataset):
     """Dataset for free-orientation TEP data, reusing the TMSEEGDataset structure."""
     def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
         super().__init__(data_path, subject_list)
-        self.data_path_root = Path(data_path) if data_path else TEP_DATA_ROOT_PATH
         self.code = "TMSEEGDatasetTEPfree"
 
     def _get_single_subject_data(self, subject: int) -> dict:
         subject_id_str = f"{subject:03d}"
-        eeg_file = DATA_ROOT_PATH / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif"
-        block_file = DATA_ROOT_PATH / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_block_identifiers.npy"
-        tep_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_response_extraction_info.npz"
+        subj_dir = self.data_path_root / f"sub-{subject_id_str}"
+        eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
+        block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
+        tep_file = subj_dir / f"sub-{subject_id_str}_response_extraction_info.npz"
 
         if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")

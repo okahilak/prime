@@ -208,7 +208,7 @@ def setup_experiment(cli_args=None):
     DEFAULT_YAML = """
 dataset_names: ["TMSEEGClassification"]
 subjects: null
-data_root: "/mnt/lustre/home/macke/${oc.env:USER}/mne_data"
+data_root: "~/prime-data/processed"
 pretrained_checkpoint_dir: null
 fmin: null
 fmax: null
@@ -332,6 +332,7 @@ shuffle_test_labels: false
         config.print_dataset_structure_and_exit = True
     
     OmegaConf.resolve(config)
+    config.data_root = str(Path(config.data_root).expanduser())
     
     # Set seed
     np.random.seed(config.seed)
@@ -807,13 +808,13 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
             console.print(f"    [bold green]Using Custom TMS/TEP Paradigm for test subject data.[/bold green]")
             try:
                 if dataset_name == "TMSEEGClassification":
-                    dataset = TMSEEGDataset()
+                    dataset = TMSEEGDataset(data_path=args.data_root)
                     paradigm = TMSEEGClassification(tmin=args.tmin, tmax=args.tmax)
                 elif dataset_name == "TMSEEGClassificationTEPfree":
-                    dataset = TMSEEGDatasetTEPfree()
+                    dataset = TMSEEGDatasetTEPfree(data_path=args.data_root)
                     paradigm = TMSEEGClassificationTEPfree(tmin=args.tmin, tmax=args.tmax)
                 else: # TMSEEGClassificationTEP
-                    dataset = TMSEEGDatasetTEP()
+                    dataset = TMSEEGDatasetTEP(data_path=args.data_root)
                     paradigm = TMSEEGClassificationTEP(tmin=args.tmin, tmax=args.tmax)
 
                 all_test_subj_epochs, all_test_subj_labels_soft, _ = paradigm.get_data(

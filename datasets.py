@@ -132,7 +132,7 @@ def get_subject_list_for_datasets(
     dataset_class = paradigm_info["class_map"][dataset_name]
 
     try:
-        dataset_instance = dataset_class()
+        dataset_instance = dataset_class(data_path=data_root)
         subjects = sorted(dataset_instance.subject_list)
         log.info(f"Found {len(subjects)} subjects in dataset '{dataset_name}'.")
         return subjects
@@ -189,7 +189,7 @@ def load_cached_pretrain_data(
     try:
         paradigm = paradigm_class(**effective_paradigm_kwargs)
         dataset_class = PARADIGM_DATA["CUSTOM_CLS"]["class_map"][dataset_name]
-        dataset = dataset_class()
+        dataset = dataset_class(data_path=data_root)
     except Exception as e:
         log.error(f"Failed to instantiate paradigm or dataset: {e}", exc_info=True)
         return None, None, None, None, None, None
