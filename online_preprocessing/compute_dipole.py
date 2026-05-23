@@ -17,6 +17,8 @@ from pathlib import Path
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
+mne.set_log_level("ERROR")
+
 
 def dipoles_for_times(evoked, forward, tmin, tmax):
 	evoked = evoked.copy().crop(tmin, tmax) #crop the data to the time range of interest
@@ -458,7 +460,7 @@ def main():
     os.makedirs(subjects_directory_eeg, exist_ok=True)
 
     # Load the forward model once and select the common channels in a fixed order
-    forward = mne.read_forward_solution(fsaverage_forward_path)
+    forward = mne.read_forward_solution(fsaverage_forward_path, verbose=False)
     forward = forward.pick_channels(common_channels, ordered=True)
 
     # Run the processing for the specified subject
