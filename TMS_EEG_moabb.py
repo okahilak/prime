@@ -93,7 +93,7 @@ class RealTimeLabeler:
 
 # %%
 class TMSEEGDataset(BaseDataset):
-    """Dataset for preprocessed TMS-EEG data, MEPs, and block identifiers."""
+    """Dataset for preprocessed TMS-EEG data and MEPs."""
     def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
         self.data_path_root = Path(data_path) if data_path else DATA_ROOT_PATH
         effective_subject_list = subject_list if subject_list is not None else self._discover_subjects()
@@ -116,22 +116,20 @@ class TMSEEGDataset(BaseDataset):
         #eeg_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre_corrected.fif"
         eeg_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif"
         mep_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_MEPs.npy"
-        block_file = self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_block_identifiers.npy"
 
 
-        if not all([f.exists() for f in [eeg_file, mep_file, block_file]]):
+        if not all([f.exists() for f in [eeg_file, mep_file]]):
             log.warning(f"Data files missing for S{subject}. Skipping.")
             return {}
 
         epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
         meps = np.load(mep_file).flatten()
-        blocks = np.load(block_file, allow_pickle=True).flatten()
 
-        if not (len(epochs) == len(meps) == len(blocks)):
+        if not (len(epochs) == len(meps)):
             log.error(f"S{subject}: Mismatch in data lengths. Skipping.")
             return {}
 
-        epochs.metadata = pd.DataFrame({"MEP_value": meps, "block": blocks})
+        epochs.metadata = pd.DataFrame({"MEP_value": meps})
         return {"0": {"0": epochs}}
 
     def data_path(self, subject: int, **kwargs) -> List[str]:
@@ -140,7 +138,6 @@ class TMSEEGDataset(BaseDataset):
             #self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre_corrected.fif",
             self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif",
             self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_MEPs.npy",
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_block_identifiers.npy"
         ]
         return [str(p) for p in paths if p.exists()]
 
@@ -155,15 +152,13 @@ class TMSEEGDatasetTEP(TMSEEGDataset):
         subject_id_str = f"{subject:03d}"
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
         eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
-        block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
         tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
 
-        if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
+        if not all([f.exists() for f in [eeg_file, tep_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
             return {}
 
         epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
-        blocks = np.load(block_file, allow_pickle=True).flatten()
 
         try:
             npz_data = np.load(tep_file, allow_pickle=True)
@@ -173,11 +168,11 @@ class TMSEEGDatasetTEP(TMSEEGDataset):
             log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
             return {}
 
-        if not (len(epochs) == len(tep_amplitudes) == len(blocks)):
+        if not (len(epochs) == len(tep_amplitudes)):
             log.error(f"S{subject}: Mismatch in TEP data lengths. Skipping.")
             return {}
 
-        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes, "block": blocks})
+        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes})
         return {"0": {"0": epochs}}
 
 class TMSEEGDatasetTEPfree(TMSEEGDataset):
@@ -190,15 +185,13 @@ class TMSEEGDatasetTEPfree(TMSEEGDataset):
         subject_id_str = f"{subject:03d}"
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
         eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
-        block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
         tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
 
-        if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
+        if not all([f.exists() for f in [eeg_file, tep_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
             return {}
 
         epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
-        blocks = np.load(block_file, allow_pickle=True).flatten()
 
         try:
             npz_data = np.load(tep_file, allow_pickle=True)
@@ -208,11 +201,11 @@ class TMSEEGDatasetTEPfree(TMSEEGDataset):
             log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
             return {}
 
-        if not (len(epochs) == len(tep_amplitudes) == len(blocks)):
+        if not (len(epochs) == len(tep_amplitudes)):
             log.error(f"S{subject}: Mismatch in TEP data lengths. Skipping.")
             return {}
 
-        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes, "block": blocks})
+        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes})
         return {"0": {"0": epochs}}
 
 

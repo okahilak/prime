@@ -15,5 +15,4 @@ X, y, meta = paradigm.get_data(dataset, subjects=[18])
 print(f"X shape: {X.shape}")                # expect (~1100, n_ch, 481) — calibration trims ~100
 print(f"y shape: {y.shape}, range [{y.min():.3f}, {y.max():.3f}]")
 print(f"meta columns: {list(meta.columns)}")
-print(f"unique blocks: {meta['block'].unique()}")
 print(f"NaN labels: {np.isnan(y).sum()}")

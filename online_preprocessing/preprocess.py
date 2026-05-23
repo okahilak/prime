@@ -833,15 +833,10 @@ def _load_subject_epochs(subject_id, cfg):
     epochs.set_montage(None)
     epochs.set_montage(montage)
 
-    block_ids = scipy.io.loadmat(
-        os.path.join(subject_path, f'{subject_id}_block_identifiers.mat'),
-        simplify_cells=True,
-    )['block_identifiers_trials']
-
     if channel_order != epochs.ch_names:
         raise ValueError(f"Channel order mismatch: {channel_order} vs {epochs.ch_names}")
 
-    return epochs, epochs_emg, block_ids
+    return epochs, epochs_emg
 
 
 def _compute_leadfield():
@@ -879,7 +874,7 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
 
 
 def _run_online_processing_stage(
-    epochs, epochs_emg, block_ids, cfg, subject_output, subject_id, calibration_bundle_path,
+    epochs, epochs_emg, cfg, subject_output, subject_id, calibration_bundle_path,
 ):
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
     start_time = time.time()
@@ -960,21 +955,9 @@ def _run_online_processing_stage(
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
 
-    # Block identifiers bookkeeping
-    bad_keys = ['bad_trials_ocular', 'bad_trials_pre', 'bad_trials_post', 'bad_trials_emg']
-    block_ids_cal = block_ids[:n_trials_use]
-    for key in bad_keys:
-        good = np.array([i for i in range(len(block_ids_cal)) if i not in rejected_calibration[key]])
-        block_ids_cal = block_ids_cal[good]
-    good_online = np.array([i for i in range(n_trials_use, len(epochs)) if i not in bad_trials_online])
-    block_ids_online = block_ids[good_online]
-    block_ids_final = np.concatenate((block_ids_cal, block_ids_online))
-
     # --- Save results ---
     for epoch, label in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
         epoch.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
-
-    np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
 
     end_time = time.time()
     print(f"Online processing stage took {end_time - start_time:.2f} seconds")
@@ -989,12 +972,12 @@ def run_subject_processing(subject_id: str):
 
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
-    epochs, epochs_emg, block_ids = _load_subject_epochs(subject_id, cfg)
+    epochs, epochs_emg = _load_subject_epochs(subject_id, cfg)
     _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path)
 
     cfg = get_default_config()
     _run_online_processing_stage(
-        epochs, epochs_emg, block_ids, cfg, subject_output, subject_id, calibration_bundle_path)
+        epochs, epochs_emg, cfg, subject_output, subject_id, calibration_bundle_path)
 
 
 # %%
