@@ -433,7 +433,8 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
 
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
-    return ica, calibration_params, n_successful_trials
+    calibration_params['ica'] = ica
+    return calibration_params, n_successful_trials
 
 
 # ==================== Single-Trial Processing ====================
@@ -482,7 +483,7 @@ def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
     return epoch_pre
 
 
-def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
+def preprocess_post_trial(epoch_post, calibration_params, cfg):
     """Preprocess a single post-stimulus trial using calibrated parameters."""
     dicts = cfg.to_dicts()
     trial_reject_opts = dicts['trial_reject_opts']
@@ -501,6 +502,8 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
 
     # Average reference
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
+
+    ica = calibration_params['ica']
 
     # Check ocular ICA components
     source_time_course = ica.get_sources(epoch_post)
@@ -560,10 +563,10 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
 
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(epoch_pre, epoch_post, calibration_params, cfg, ica):
+def process_single_trial(epoch_pre, epoch_post, calibration_params, cfg):
     """Process a single trial (pre, post). Returns (success, epoch_pre, epoch_post)."""
     result_pre = preprocess_pre_trial(epoch_pre, calibration_params, cfg)
-    result_post = preprocess_post_trial(epoch_post, calibration_params, cfg, ica)
+    result_post = preprocess_post_trial(epoch_post, calibration_params, cfg)
 
     if result_pre is False or result_post is False:
         return False, None, None
@@ -576,7 +579,7 @@ _online_trial_worker_state = {}
 def _init_online_trial_worker(
     pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
     post_batch_data, post_batch_tmin, post_batch_events,
-    calibration_params, cfg, ica,
+    calibration_params, cfg,
 ):
     mne.set_log_level("ERROR")
     global _online_trial_worker_state
@@ -590,7 +593,6 @@ def _init_online_trial_worker(
         'post_batch_events': post_batch_events,
         'calibration_params': calibration_params,
         'cfg': cfg,
-        'ica': ica,
     }
 
 
@@ -603,16 +605,15 @@ def _process_online_trial_worker(trial_idx):
         s['post_batch_data'][trial_idx:trial_idx + 1], info=s['pre_batch_info'],
         events=s['post_batch_events'][trial_idx:trial_idx + 1], tmin=s['post_batch_tmin'], verbose=False)
     success, result_pre, result_post = process_single_trial(
-        epoch_pre, epoch_post, s['calibration_params'], s['cfg'], s['ica'])
+        epoch_pre, epoch_post, s['calibration_params'], s['cfg'])
     return trial_idx, success, result_pre, result_post
 
 
 # ==================== Calibration persistence (two-step simulation) ====================
 
-def _build_calibration_bundle(ica, calibration_params, n_trials_use):
+def _build_calibration_bundle(calibration_params, n_trials_use):
     return {
         'calibration_params': calibration_params,
-        'ica': ica,
         'n_trials_use': n_trials_use,
     }
 
@@ -646,11 +647,14 @@ def _verify_calibration_bundle(original, loaded):
     """Assert round-trip integrity of the calibration bundle."""
     assert set(original.keys()) == set(loaded.keys())
     assert original['n_trials_use'] == loaded['n_trials_use']
-    assert original['ica'].exclude == loaded['ica'].exclude
-    assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
-    assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
-    _assert_calibration_value_equal(
-        original['calibration_params'], loaded['calibration_params'], 'calibration_params')
+    orig_params = original['calibration_params']
+    load_params = loaded['calibration_params']
+    assert orig_params['ica'].exclude == load_params['ica'].exclude
+    assert np.allclose(orig_params['ica'].mixing_matrix_, load_params['ica'].mixing_matrix_)
+    assert np.allclose(orig_params['ica'].unmixing_matrix_, load_params['ica'].unmixing_matrix_)
+    orig_without_ica = {k: v for k, v in orig_params.items() if k != 'ica'}
+    load_without_ica = {k: v for k, v in load_params.items() if k != 'ica'}
+    _assert_calibration_value_equal(orig_without_ica, load_without_ica, 'calibration_params')
 
 
 def _load_subject_epochs(subject_id, cfg):
@@ -707,7 +711,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     start_time = time.time()
     while True:
-        ica, calibration_params, n_successful_trials = (
+        calibration_params, n_successful_trials = (
             preprocess_calibration(
                 epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield))
 
@@ -724,8 +728,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
             epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
         n_trials_use += 1
 
-    bundle = _build_calibration_bundle(
-        ica, calibration_params, n_trials_use)
+    bundle = _build_calibration_bundle(calibration_params, n_trials_use)
 
     _save_calibration_bundle(calibration_bundle_path, bundle)
     bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
@@ -743,7 +746,6 @@ def _run_online_processing_stage(
 
     bundle = _load_calibration_bundle(calibration_bundle_path)
     calibration_params = bundle['calibration_params']
-    ica = bundle['ica']
 
     n_total = len(epochs)
     all_eeg_data = epochs.get_data(copy=False)
@@ -776,7 +778,7 @@ def _run_online_processing_stage(
     initargs = (
         pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
         post_batch_data, post_batch_tmin, post_batch_events,
-        calibration_params, cfg, ica,
+        calibration_params, cfg,
     )
     with ProcessPoolExecutor(
         max_workers=4,
