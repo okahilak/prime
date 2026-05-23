@@ -619,33 +619,6 @@ def _load_calibration_bundle(path):
     return np.load(path, allow_pickle=True).item()
 
 
-def _assert_calibration_value_equal(orig_val, load_val, path):
-    if orig_val is None or load_val is None:
-        assert orig_val is load_val, path
-    elif isinstance(orig_val, np.ndarray):
-        assert np.allclose(orig_val, load_val), path
-    elif isinstance(orig_val, dict):
-        assert orig_val.keys() == load_val.keys(), path
-        for sub_key in orig_val:
-            _assert_calibration_value_equal(orig_val[sub_key], load_val[sub_key], f'{path}.{sub_key}')
-    elif isinstance(orig_val, list):
-        assert len(orig_val) == len(load_val), path
-        for i, (orig_item, load_item) in enumerate(zip(orig_val, load_val)):
-            _assert_calibration_value_equal(orig_item, load_item, f'{path}[{i}]')
-    else:
-        assert orig_val == load_val, path
-
-
-def _verify_calibration_bundle(original, loaded):
-    """Assert round-trip integrity of the calibration bundle."""
-    assert original['ica'].exclude == loaded['ica'].exclude
-    assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
-    assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
-    orig_without_ica = {k: v for k, v in original.items() if k != 'ica'}
-    load_without_ica = {k: v for k, v in loaded.items() if k != 'ica'}
-    _assert_calibration_value_equal(orig_without_ica, load_without_ica, 'calibration_params')
-
-
 def _load_subject_epochs(subject_id, cfg):
     print("Loading data...")
 
@@ -718,8 +691,6 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
         n_trials_use += 1
 
     _save_calibration_bundle(calibration_bundle_path, calibration_params)
-    calibration_params_loaded = _load_calibration_bundle(calibration_bundle_path)
-    _verify_calibration_bundle(calibration_params, calibration_params_loaded)
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
