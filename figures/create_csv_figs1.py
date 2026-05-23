@@ -44,7 +44,7 @@ def load_all_latency_data(base_dir, dipole_dir, model_csv_path):
     logging.info(f"Found and calculated latencies for {len(post_total_latencies)} post-stimulus trials.")
 
     # 2. Load and combine Post-stimulus TEP latencies
-    dipole_search_pattern = os.path.join(dipole_dir, 'sub-*', '*_response_extraction_info.npz')
+    dipole_search_pattern = os.path.join(dipole_dir, 'sub-*', '*_fitted_dipoles.npz')
     dipole_files = glob.glob(dipole_search_pattern)
     tep_free_ori_latencies = []
     for file_path in dipole_files:

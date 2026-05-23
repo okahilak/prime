@@ -156,7 +156,7 @@ class TMSEEGDatasetTEP(TMSEEGDataset):
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
         eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
         block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
-        tep_file = subj_dir / f"sub-{subject_id_str}_response_extraction_info.npz"
+        tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
 
         if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
@@ -191,7 +191,7 @@ class TMSEEGDatasetTEPfree(TMSEEGDataset):
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
         eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
         block_file = subj_dir / f"sub-{subject_id_str}_block_identifiers.npy"
-        tep_file = subj_dir / f"sub-{subject_id_str}_response_extraction_info.npz"
+        tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
 
         if not all([f.exists() for f in [eeg_file, tep_file, block_file]]):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
