@@ -44,3 +44,5 @@ experiment_name: "replicate_preft"
 save_results: true
 save_predictions_and_labels: true
 save_checkpoints: false
+save_last_pretrained_checkpoint: true
+save_last_finetuned_checkpoint: true
