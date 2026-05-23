@@ -60,52 +60,52 @@ def _apply_filter(data, coeffs, pad_time, fs):
 
 # ==================== Bad Channel Detection ====================
 
-def _get_bad_channels_epoched(epochs, z_mad_thresh, z_power_thresh, freq_range, z_autocorr_thresh, z_auc_thresh):
+def _get_bad_channels_epoched(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
     """Iteratively detect bad channels using multiple metrics."""
     bad_channels = _get_bad_channels_epoched_once(
         epochs.copy().set_eeg_reference('average', projection=False, verbose=False),
-        z_mad_thresh, z_power_thresh, freq_range, z_autocorr_thresh, z_auc_thresh
+        z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold
     )
     if len(bad_channels) > 0:
         while True:
             remaining = epochs.copy().drop_channels(bad_channels).set_eeg_reference('average', projection=False, verbose=False)
-            new_bad = _get_bad_channels_epoched_once(remaining, z_mad_thresh, z_power_thresh, freq_range, z_autocorr_thresh, z_auc_thresh)
+            new_bad = _get_bad_channels_epoched_once(remaining, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold)
             if len(new_bad) == 0:
                 break
             bad_channels = list(np.union1d(bad_channels, new_bad))
     return bad_channels
 
 
-def _get_bad_channels_epoched_once(epochs, z_mad_thresh, z_power_thresh, freq_range, z_autocorr_thresh, z_auc_thresh):
+def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
     data = epochs.get_data(copy=True)
     n_trials, n_channels, _ = data.shape
     bad_indices = np.array([])
 
-    if z_mad_thresh:
+    if z_mad_threshold:
         flattened = data.swapaxes(0, 1).reshape(n_channels, -1)
         mad_vals = median_abs_deviation(flattened, axis=1)
         z_mad = zscore(mad_vals)
-        bad_mad = np.where((z_mad > z_mad_thresh[1]) | (z_mad < z_mad_thresh[0]))[0]
+        bad_mad = np.where((z_mad > z_mad_threshold[1]) | (z_mad < z_mad_threshold[0]))[0]
         bad_indices = np.union1d(bad_indices, bad_mad)
 
-    if z_power_thresh:
+    if z_power_threshold:
         psds, _ = mne.time_frequency.psd_array_multitaper(data, epochs.info['sfreq'], fmin=freq_range[0], fmax=freq_range[1], verbose=False)
         mean_psd = np.mean(np.mean(psds, axis=0), axis=-1)
         z_psd = zscore(mean_psd)
-        bad_power = np.where(z_psd > z_power_thresh)[0]
+        bad_power = np.where(z_psd > z_power_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_power)
 
-    if z_autocorr_thresh:
+    if z_autocorr_threshold:
         autocorrelations = [np.mean([np.corrcoef(data[t, c, :-1], data[t, c, 1:])[0, 1] for t in range(n_trials)]) for c in range(n_channels)]
         z_autocorr = np.abs(zscore(autocorrelations))
-        bad_autocorr = np.where(z_autocorr > z_autocorr_thresh)[0]
+        bad_autocorr = np.where(z_autocorr > z_autocorr_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_autocorr)
 
-    if z_auc_thresh:
+    if z_auc_threshold:
         evoked = np.mean(data, axis=0)
         auc_vals = [np.trapz(np.abs(evoked[c, :])) for c in range(n_channels)]
         z_auc = zscore(auc_vals)
-        bad_auc = np.where(z_auc > z_auc_thresh)[0]
+        bad_auc = np.where(z_auc > z_auc_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_auc)
 
     bad_indices = bad_indices.astype(int)
@@ -142,26 +142,26 @@ def _interpolate_bad_channels(epochs, bad_channels, interpolation_info):
 
 # ==================== Bad Trial Detection ====================
 
-def _find_bad_trials(epochs, global_z_thresh, local_z_thresh, psd_thresh, psd_freq_range):
+def _find_bad_trials(epochs, global_z_threshold, local_z_threshold, psd_threshold, psd_freq_range):
     """Iteratively detect bad trials using MAD-based z-scores."""
-    bad, stats = _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, psd_freq_range, np.array([]))
+    bad, stats = _find_bad_trials_once(epochs, global_z_threshold, local_z_threshold, psd_threshold, psd_freq_range, np.array([]))
     if len(bad) > 0:
         while True:
-            new_bad, stats = _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, psd_freq_range, bad)
+            new_bad, stats = _find_bad_trials_once(epochs, global_z_threshold, local_z_threshold, psd_threshold, psd_freq_range, bad)
             if len(new_bad) == 0:
                 break
             bad = np.union1d(bad, new_bad)
     return list(bad.astype(int)), stats
 
 
-def _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, psd_freq_range, known_bad):
+def _find_bad_trials_once(epochs, global_z_threshold, local_z_threshold, psd_threshold, psd_freq_range, known_bad):
     data = epochs.get_data(copy=True)
     n_trials = data.shape[0]
     all_indices = np.arange(n_trials, dtype=int)
     good_indices = np.array([i for i in all_indices if i not in known_bad])
     good_data = data[good_indices, :, :]
 
-    if psd_thresh:
+    if psd_threshold:
         psds, _ = mne.time_frequency.psd_array_multitaper(good_data, epochs.info['sfreq'], fmin=psd_freq_range[0], fmax=psd_freq_range[1], verbose=False)
         psd_per_trial = np.mean(psds, axis=(1, 2))
         z_psd = zscore(psd_per_trial)
@@ -176,20 +176,20 @@ def _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, p
     # Map z-scores back to full trial space
     z_global_full = []
     z_local_full = []
-    if psd_thresh:
+    if psd_threshold:
         z_psd_full = []
     good_idx = 0
     for i in all_indices:
         if i in good_indices:
             z_global_full.append(z_global[good_idx])
             z_local_full.append(z_local[good_idx])
-            if psd_thresh:
+            if psd_threshold:
                 z_psd_full.append(z_psd[good_idx])
             good_idx += 1
         else:
             z_global_full.append(0)
             z_local_full.append(np.zeros(z_local.shape[1]))
-            if psd_thresh:
+            if psd_threshold:
                 z_psd_full.append(0)
 
     if len(z_local_full):
@@ -198,15 +198,15 @@ def _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, p
         z_local_full = np.zeros((n_trials, mad_per_channel.shape[1]))
 
     z_global_full = np.asarray(z_global_full)
-    if psd_thresh:
+    if psd_threshold:
         z_psd_full = np.asarray(z_psd_full)
 
     # Identify bad trials
-    bad_local = np.where(np.any(np.abs(z_local_full) > local_z_thresh, axis=1))[0]
-    bad_global = np.where((z_global_full > global_z_thresh[1]) | (z_global_full < global_z_thresh[0]))[0]
+    bad_local = np.where(np.any(np.abs(z_local_full) > local_z_threshold, axis=1))[0]
+    bad_global = np.where((z_global_full > global_z_threshold[1]) | (z_global_full < global_z_threshold[0]))[0]
 
     # Compute stats from good trials
-    bad_global_current = np.where((z_global > global_z_thresh[1]) | (z_global < global_z_thresh[0]))[0]
+    bad_global_current = np.where((z_global > global_z_threshold[1]) | (z_global < global_z_threshold[0]))[0]
     good_mad_indices = np.array([i for i in range(len(mad_per_trial)) if i not in bad_global_current])
     stats = {
         'mads': mad_per_trial[good_mad_indices],
@@ -215,9 +215,9 @@ def _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, p
     }
 
     bad = np.union1d(bad_global, bad_local)
-    if psd_thresh:
-        bad_psd = np.where(np.array(z_psd_full) > psd_thresh)[0]
-        bad_psd_current = np.where(z_psd > psd_thresh)[0]
+    if psd_threshold:
+        bad_psd = np.where(np.array(z_psd_full) > psd_threshold)[0]
+        bad_psd_current = np.where(z_psd > psd_threshold)[0]
         good_psd_indices = np.array([i for i in range(len(psd_per_trial)) if i not in bad_psd_current])
         stats['psds'] = psd_per_trial[good_psd_indices]
         stats['psds_std'] = np.std(psd_per_trial[good_psd_indices])
@@ -227,7 +227,7 @@ def _find_bad_trials_once(epochs, global_z_thresh, local_z_thresh, psd_thresh, p
     return bad, stats
 
 
-def _detect_ocular_trials(ica, epochs, tmin, tmax, ocular_component_indices, z_thresh):
+def _detect_ocular_trials(ica, epochs, tmin, tmax, ocular_component_indices, z_threshold):
     """Detect trials with ocular artifacts from ICA source time courses."""
     sources = ica.get_sources(epochs)
     source_data = sources.get_data(copy=True)
@@ -250,7 +250,7 @@ def _detect_ocular_trials(ica, epochs, tmin, tmax, ocular_component_indices, z_t
         assert z_scored.shape == (n_trials, n_times)
 
         median_z = np.median(z_scored[:, time_mask], axis=1)
-        bad_now = np.where(median_z > z_thresh)[0]
+        bad_now = np.where(median_z > z_threshold)[0]
         thresholds[component_idx] = {
             'std': np.std(flat_time_course),
             'mean': np.mean(flat_time_course),
@@ -448,12 +448,12 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
     if cfg.use_ica_on_pre:
         bad_ocular_pre, _ = _detect_ocular_trials(
             ica, epochs_pre, trial_reject_opts['ocular']['pre_timerange_min'], None,
-            excluded_components['eye blink'], trial_reject_opts['ocular']['z_thresh'])
+            excluded_components['eye blink'], trial_reject_opts['ocular']['z_threshold'])
 
     bad_ocular_post, ocular_threshold_post = _detect_ocular_trials(
         ica, epochs_post, trial_reject_opts['ocular']['post_timerange'][0],
         trial_reject_opts['ocular']['post_timerange'][1],
-        excluded_components['eye blink'], trial_reject_opts['ocular']['z_thresh'])
+        excluded_components['eye blink'], trial_reject_opts['ocular']['z_threshold'])
 
     if cfg.use_ica_on_pre:
         bad_ocular = list(np.union1d(bad_ocular_pre, bad_ocular_post).astype(int))
@@ -574,16 +574,16 @@ def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
     mad_val = median_abs_deviation(data, axis=(1, 2))[0]
     z_mad = (mad_val - calibration_params['good_trial_stats_pre']['mads_mean']) / calibration_params['good_trial_stats_pre']['mads_std']
 
-    thresh = trial_reject_opts['pre']['global_zscore_threshold']
-    if z_mad < thresh[0] or z_mad > thresh[1]:
+    threshold = trial_reject_opts['pre']['global_zscore_threshold']
+    if z_mad < threshold[0] or z_mad > threshold[1]:
         return False
 
     # Local MAD check
     local_mad = median_abs_deviation(data, axis=2)
     z_local = zscore(local_mad, axis=1)
 
-    local_thresh = trial_reject_opts['pre']['local_zscore_threshold']
-    if np.any(np.abs(z_local) > local_thresh):
+    local_threshold = trial_reject_opts['pre']['local_zscore_threshold']
+    if np.any(np.abs(z_local) > local_threshold):
         return False
 
     # Rebuild epoch
@@ -617,7 +617,7 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
     for component_idx in calibration_params['ocular_thresholds_post']:
         component_info = calibration_params['ocular_thresholds_post'][component_idx]
         z_comp = (np.abs(source_data[0, component_idx, component_info['time_indices_of_interest']]) - component_info['mean']) / component_info['std']
-        if np.median(z_comp) > trial_reject_opts['ocular']['z_thresh']:
+        if np.median(z_comp) > trial_reject_opts['ocular']['z_threshold']:
             return False
 
     # Apply ICA
@@ -652,16 +652,16 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
     mad_val = median_abs_deviation(reject_data, axis=(1, 2))[0]
     z_mad = (mad_val - calibration_params['good_trial_stats_post']['mads_mean']) / calibration_params['good_trial_stats_post']['mads_std']
 
-    thresh = trial_reject_opts['post']['global_zscore_threshold']
-    if z_mad < thresh[0] or z_mad > thresh[1]:
+    threshold = trial_reject_opts['post']['global_zscore_threshold']
+    if z_mad < threshold[0] or z_mad > threshold[1]:
         return False
 
     # Local MAD check
     local_mad = median_abs_deviation(reject_data, axis=2)
     z_local = zscore(local_mad, axis=1)
 
-    local_thresh = trial_reject_opts['post']['local_zscore_threshold']
-    if np.any(np.abs(z_local) > local_thresh):
+    local_threshold = trial_reject_opts['post']['local_zscore_threshold']
+    if np.any(np.abs(z_local) > local_threshold):
         return False
 
     return epoch_post

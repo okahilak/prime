@@ -5,7 +5,7 @@ import mne_icalabel
 import numpy as np
 #import warnings
 
-def get_ica(epochs_or_raw, n_components, picks, bad_component_thresholds, n_min_comps_to_reject, thresh_min_comps_to_reject):
+def get_ica(epochs_or_raw, n_components, picks, bad_component_thresholds, n_min_comps_to_reject, threshold_min_comps_to_reject):
     #warnings.filterwarnings('ignore') #stop warning about high-pass problems, because the data has been high-pass filtered but it is not marked epochs.info["highpass"] (could not be set directly)
     ica = ICA(n_components=n_components, random_state=97, method='infomax', fit_params=dict(extended=True),verbose=False) #initialize ICA
     ica.fit(epochs_or_raw, picks=picks, verbose=False) #fit ICA to the structure using picks channels (if picks=None, then use all channels)
@@ -35,14 +35,14 @@ def get_ica(epochs_or_raw, n_components, picks, bad_component_thresholds, n_min_
                 #get probabilites and indices of remaining components of the bad_component_name
                 print(f"Not enough {bad_component_name} components were rejected (found {len(exclude_ic_indices_comp)} components out of requested {n_min_comps_to_reject[bad_component_name]}).\nChecking all {bad_component_name} component probabilities...")
                 probabilities_indices_left = [(probability, index) for index, (label, probability) in enumerate(zip(ic_labels, ic_probabilities))
-                                    if label==bad_component_name and probability > thresh_min_comps_to_reject[bad_component_name] and index not in exclude_ic_indices_comp]
+                                    if label==bad_component_name and probability > threshold_min_comps_to_reject[bad_component_name] and index not in exclude_ic_indices_comp]
                 if len(probabilities_indices_left) > 0:
                     probabilities = [pair[0] for pair in probabilities_indices_left]
                     indices = [pair[1] for pair in probabilities_indices_left]
-                    print(f"Found {len(probabilities)} {bad_component_name} components with probabilities: {probabilities}, with the threshold {thresh_min_comps_to_reject[bad_component_name]}.")
+                    print(f"Found {len(probabilities)} {bad_component_name} components with probabilities: {probabilities}, with the threshold {threshold_min_comps_to_reject[bad_component_name]}.")
                     sorted_probabilities, sorted_indices = zip(*sorted(zip(probabilities, indices), reverse=True)) #probabilities and indices in descending order
                     sorted_probabilities, sorted_indices = np.array(sorted_probabilities), np.array(sorted_indices) #transform to numpy arrays
-                    inds_over_probability_threshold = np.where(sorted_probabilities > thresh_min_comps_to_reject[bad_component_name])[0] #indices that go over the threshold
+                    inds_over_probability_threshold = np.where(sorted_probabilities > threshold_min_comps_to_reject[bad_component_name])[0] #indices that go over the threshold
                     if len(inds_over_probability_threshold) > n_comps_left_to_reject:
                         inds_over_probability_threshold = inds_over_probability_threshold[0:n_comps_left_to_reject]
                     n_comps_to_additionally_reject = len(inds_over_probability_threshold)
@@ -59,8 +59,8 @@ def get_ica(epochs_or_raw, n_components, picks, bad_component_thresholds, n_min_
     ica.exclude = list(exclude_ic_indices.astype(int)) #mark the indices of bad components exceeding the probability threshold to be rejected
     return ica, component_indices_excluded, ic_labels_dict #return the ICA structure with (most likely) some of the indices marked bad and other info
 
-def apply_ica_from(epochs_from, epochs_to, picks, n_ic_components, bad_component_thresholds, n_min_comps_to_reject, thresh_min_comps_to_reject):
-    ica = get_ica(epochs_from, n_ic_components, picks, bad_component_thresholds, n_min_comps_to_reject, thresh_min_comps_to_reject) #get the ic decomposition
+def apply_ica_from(epochs_from, epochs_to, picks, n_ic_components, bad_component_thresholds, n_min_comps_to_reject, threshold_min_comps_to_reject):
+    ica = get_ica(epochs_from, n_ic_components, picks, bad_component_thresholds, n_min_comps_to_reject, threshold_min_comps_to_reject) #get the ic decomposition
     ica.apply(epochs_to) #apply the ic decomposition filters to epochs_to
     return epochs_to, ica
 

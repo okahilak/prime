@@ -64,7 +64,7 @@ class SSPSIROpts:
 
 @dataclass
 class OcularRejectOpts:
-    z_thresh: float
+    z_threshold: float
     pre_timerange_min: float
     post_timerange: List[Optional[float]]
 
@@ -196,7 +196,7 @@ class PreprocConfig:
 
         trial_reject_opts = {
             'ocular': {
-                'z_thresh': self.trial_reject_opts.ocular.z_thresh,
+                'z_threshold': self.trial_reject_opts.ocular.z_threshold,
                 'pre_timerange_min': self.trial_reject_opts.ocular.pre_timerange_min,
                 'post_timerange': self.trial_reject_opts.ocular.post_timerange,
             },
@@ -300,7 +300,7 @@ def get_default_config() -> PreprocConfig:
         ),
         trial_reject_opts=TrialRejectOpts(
             ocular=OcularRejectOpts(
-                z_thresh=2,
+                z_threshold=2,
                 pre_timerange_min=-0.1,
                 post_timerange=[0.015, None],
             ),
