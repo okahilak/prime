@@ -1,4 +1,6 @@
 #%%
+import time
+
 import mne
 import numpy as np
 import scipy
@@ -779,6 +781,8 @@ def _compute_leadfield():
 
 def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
+    start_time = time.time()
+
     dicts = cfg.to_dicts()
     channel_reject_opts = dicts['channel_reject_opts']
     ica_opts = dicts['ica_opts']
@@ -819,11 +823,16 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
     bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
     _verify_calibration_bundle(bundle, bundle_loaded)
 
+    end_time = time.time()
+    print(f"Calibration stage took {end_time - start_time:.2f} seconds")
+
 
 def _run_online_processing_stage(
     epochs, epochs_emg, block_ids, cfg, subject_output, subject_id, calibration_bundle_path,
 ):
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
+    start_time = time.time()
+
     dicts = cfg.to_dicts()
     trial_reject_opts = dicts['trial_reject_opts']
     emg_reject_opts = dicts['emg_reject_opts']
@@ -939,6 +948,9 @@ def _run_online_processing_stage(
         epoch.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
 
     np.save(os.path.join(subject_output, f'{subject_id}_block_identifiers.npy'), block_ids_final)
+
+    end_time = time.time()
+    print(f"Online processing stage took {end_time - start_time:.2f} seconds")
 
 
 def run_subject_processing(site_id: str, subject_id: str):
