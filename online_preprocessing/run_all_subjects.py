@@ -1,42 +1,37 @@
 #!/usr/bin/env python3
 """
 Run preprocessing and/or dipole extraction for every subject under
-data_epoched/raw_eeglab_and_block_idents/{Aalto,Tuebingen}/.
+~/prime-data/raw/{subject}/.
 
 Example:
-  python preprocessing/run_all_subjects.py --step both
-  python preprocessing/run_all_subjects.py --step preprocess --site Tuebingen
-  python preprocessing/run_all_subjects.py --step dipole --subject sub-018
-  python preprocessing/run_all_subjects.py --dry-run
+  python online_preprocessing/run_all_subjects.py --step both
+  python online_preprocessing/run_all_subjects.py --step preprocess
+  python online_preprocessing/run_all_subjects.py --step dipole --subject sub-018
+  python online_preprocessing/run_all_subjects.py --dry-run
 """
 import argparse
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
-_PREP_ROOT = Path(__file__).resolve().parent
-_REPO_ROOT = _PREP_ROOT.parent
-RAW_DATA_DIR = _PREP_ROOT / "data_epoched" / "raw_eeglab_and_block_idents"
-PREPROCESS_SCRIPT = _PREP_ROOT / "prep_data" / "preprocessing_single_subject.py"
-DIPOLE_SCRIPT = _PREP_ROOT / "extract_teps" / "single_trial_dipole_amplitude_slurm.py"
-PROCESSED_DIR = _PREP_ROOT / "data_processed_pre_ica_False_v4"
-DIPOLES_DIR = _PREP_ROOT / "dipoles_pre_ica_False_v4"
+SCRIPT_DIR = Path(__file__).resolve().parent
+DATA_ROOT = Path("~/prime-data").expanduser()
+
+RAW_DATA_DIR = DATA_ROOT / "raw"
+PREPROCESS_SCRIPT = SCRIPT_DIR / "preprocess.py"
+DIPOLE_SCRIPT = SCRIPT_DIR / "compute_dipole.py"
+PROCESSED_DIR = DATA_ROOT / "processed"
 
 
-def discover_subjects(data_dir: Path) -> List[Tuple[str, str]]:
-    """Return sorted (site, subject) pairs from raw data layout."""
-    subjects: List[Tuple[str, str]] = []
+def discover_subjects(data_dir: Path) -> List[str]:
+    """Return sorted subject ids from raw data layout."""
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Raw data directory not found: {data_dir}")
-    for site_dir in sorted(data_dir.iterdir()):
-        if not site_dir.is_dir():
-            continue
-        for subject_dir in sorted(site_dir.iterdir()):
-            if subject_dir.is_dir():
-                subjects.append((site_dir.name, subject_dir.name))
-    return subjects
+    return sorted(
+        p.name for p in data_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+    )
 
 
 def _run_command(command: List[str], env: dict, label: str, continue_on_error: bool) -> bool:
@@ -64,12 +59,12 @@ def preprocess_done(subject: str) -> bool:
 
 
 def dipole_done(subject: str) -> bool:
-    return (DIPOLES_DIR / subject / f"{subject}_response_extraction_info.npz").is_file()
+    return (PROCESSED_DIR / subject / f"{subject}_response_extraction_info.npz").is_file()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run preprocessing and dipole extraction for all Aalto/Tuebingen subjects."
+        description="Run preprocessing and dipole extraction for all subjects."
     )
     parser.add_argument(
         "--step",
@@ -77,7 +72,6 @@ def main() -> None:
         default="both",
         help="Which pipeline to run (default: both).",
     )
-    parser.add_argument("--site", type=str, help="Only run subjects from this site (e.g. Aalto, Tuebingen).")
     parser.add_argument("--subject", type=str, help="Only run this subject id (e.g. sub-018, sub-038_rep).")
     parser.add_argument(
         "--skip-existing",
@@ -104,10 +98,8 @@ def main() -> None:
     continue_on_error = args.continue_on_error and not args.stop_on_error
 
     subjects = discover_subjects(RAW_DATA_DIR)
-    if args.site:
-        subjects = [(s, sub) for s, sub in subjects if s == args.site]
     if args.subject:
-        subjects = [(s, sub) for s, sub in subjects if sub == args.subject]
+        subjects = [s for s in subjects if s == args.subject]
     if not subjects:
         print("No subjects matched filters. Exiting.")
         sys.exit(1)
@@ -115,7 +107,7 @@ def main() -> None:
     print(f"Found {len(subjects)} subject(s) under {RAW_DATA_DIR}")
 
     prep_env = os.environ.copy()
-    prep_pythonpath = str(PREPROCESS_SCRIPT.parent)
+    prep_pythonpath = str(SCRIPT_DIR)
     if prep_env.get("PYTHONPATH"):
         prep_pythonpath = f"{prep_pythonpath}{os.pathsep}{prep_env['PYTHONPATH']}"
     prep_env["PYTHONPATH"] = prep_pythonpath
@@ -125,22 +117,20 @@ def main() -> None:
     n_fail = 0
     n_skip = 0
 
-    for i, (site, subject) in enumerate(subjects, start=1):
-        print(f"\n========== [{i}/{len(subjects)}] {site}/{subject} ==========")
+    for i, subject in enumerate(subjects, start=1):
+        print(f"\n========== [{i}/{len(subjects)}] {subject} ==========")
 
         if args.step in ("preprocess", "both"):
             if args.skip_existing and preprocess_done(subject):
                 print(f"  SKIP preprocess: output exists for {subject}")
                 n_skip += 1
             elif args.dry_run:
-                print(
-                    f"  DRY-RUN: {python} {PREPROCESS_SCRIPT} --site {site} --subject {subject}"
-                )
+                print(f"  DRY-RUN: {python} {PREPROCESS_SCRIPT} --subject {subject}")
             else:
                 ok = _run_command(
-                    [python, "-u", str(PREPROCESS_SCRIPT), "--site", site, "--subject", subject],
+                    [python, "-u", str(PREPROCESS_SCRIPT), "--subject", subject],
                     prep_env,
-                    f"preprocess {site}/{subject}",
+                    f"preprocess {subject}",
                     continue_on_error,
                 )
                 if not ok:
