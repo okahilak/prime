@@ -541,26 +541,32 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
 
 # ==================== Single-Trial Processing ====================
 
-def preprocess_pre_trial(epoch_pre, info, trial_reject_opts, filter_opts, use_ica_on_pre):
+def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
     """Preprocess a single pre-stimulus trial using calibrated parameters."""
-    # Interpolate bad channels
-    if info['bad_channels']:
-        epoch_pre, _ = _interpolate_bad_channels(epoch_pre, info['bad_channels'], info['channel_interpolation_info'])
+    dicts = cfg.to_dicts()
+    trial_reject_opts = dicts['trial_reject_opts']
+    filter_opts = dicts['filter_opts']
 
-    if use_ica_on_pre:
+    # Interpolate bad channels
+    if calibration_params['bad_channels']:
+        epoch_pre, _ = _interpolate_bad_channels(
+            epoch_pre, calibration_params['bad_channels'], calibration_params['channel_interpolation_info'])
+
+    if cfg.use_ica_on_pre:
         raise NotImplementedError("Applying ICA to pre-stimulus in single-trials is not currently implemented")
 
     data = epoch_pre.get_data(copy=True)
 
     # Apply filter
-    data = _apply_filter(data, info['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
+    data = _apply_filter(
+        data, calibration_params['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
 
     # Mean subtraction (average reference)
     data -= np.mean(data, axis=1)
 
     # Global MAD check
     mad_val = median_abs_deviation(data, axis=(1, 2))[0]
-    z_mad = (mad_val - info['good_trial_stats_pre']['mads_mean']) / info['good_trial_stats_pre']['mads_std']
+    z_mad = (mad_val - calibration_params['good_trial_stats_pre']['mads_mean']) / calibration_params['good_trial_stats_pre']['mads_std']
 
     thresh = trial_reject_opts['pre']['global_zscore_threshold']
     if z_mad < thresh[0] or z_mad > thresh[1]:
@@ -579,17 +585,22 @@ def preprocess_pre_trial(epoch_pre, info, trial_reject_opts, filter_opts, use_ic
     return epoch_pre
 
 
-def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range):
+def preprocess_post_trial(epoch_post, calibration_params, cfg, ica):
     """Preprocess a single post-stimulus trial using calibrated parameters."""
+    dicts = cfg.to_dicts()
+    trial_reject_opts = dicts['trial_reject_opts']
+
     # Baseline correction
-    epoch_post.apply_baseline(baseline)
+    epoch_post.apply_baseline(cfg.baseline)
 
     # First artifact interpolation
-    epoch_post = mne.preprocessing.fix_stim_artifact(epoch_post, tmin=artifact_window_1[0], tmax=artifact_window_1[1], mode='window')
+    epoch_post = mne.preprocessing.fix_stim_artifact(
+        epoch_post, tmin=cfg.artifact_window_1[0], tmax=cfg.artifact_window_1[1], mode='window')
 
     # Interpolate bad channels
-    if info['bad_channels']:
-        epoch_post, _ = _interpolate_bad_channels(epoch_post, info['bad_channels'], info['channel_interpolation_info'])
+    if calibration_params['bad_channels']:
+        epoch_post, _ = _interpolate_bad_channels(
+            epoch_post, calibration_params['bad_channels'], calibration_params['channel_interpolation_info'])
 
     # Average reference
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
@@ -597,8 +608,8 @@ def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, ar
     # Check ocular ICA components
     source_time_course = ica.get_sources(epoch_post)
     source_data = source_time_course.get_data(copy=True)
-    for component_idx in info['ocular_thresholds_post']:
-        component_info = info['ocular_thresholds_post'][component_idx]
+    for component_idx in calibration_params['ocular_thresholds_post']:
+        component_info = calibration_params['ocular_thresholds_post'][component_idx]
         z_comp = (np.abs(source_data[0, component_idx, component_info['time_indices_of_interest']]) - component_info['mean']) / component_info['std']
         if np.median(z_comp) > trial_reject_opts['ocular']['z_thresh']:
             return False
@@ -607,31 +618,33 @@ def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, ar
     ica.apply(epoch_post)
 
     # Re-baseline and crop
-    epoch_post.apply_baseline(baseline).set_eeg_reference('average', projection=False, verbose=False)
-    epoch_post.crop(info['post_mintime'], None)
+    epoch_post.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
+    epoch_post.crop(calibration_params['post_mintime'], None)
 
     # Apply SOUND
     data = epoch_post.get_data(copy=True)
-    data = np.matmul(info['sound_filter'], data)
+    data = np.matmul(calibration_params['sound_filter'], data)
     epoch_post = mne.EpochsArray(data, epoch_post.info, events=epoch_post.events, tmin=epoch_post.times[0], verbose=False)
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
 
     # Apply SSP-SIR
     data = epoch_post.get_data(copy=True)
-    data = ssp_sir_single_trial(data[0, :, :], info['sspsir_suppression_matrix_P'],
-                                info['sspsir_sir_projmat_suppr'], info['sspsir_sir_projmat_orig'],
-                                info['sspsir_filter_kernel'])
+    data = ssp_sir_single_trial(
+        data[0, :, :], calibration_params['sspsir_suppression_matrix_P'],
+        calibration_params['sspsir_sir_projmat_suppr'], calibration_params['sspsir_sir_projmat_orig'],
+        calibration_params['sspsir_filter_kernel'])
     epoch_post = mne.EpochsArray(data.reshape(1, data.shape[0], data.shape[1]), epoch_post.info,
                                  events=epoch_post.events, tmin=epoch_post.times[0])
 
     # Second artifact interpolation
-    epoch_post = mne.preprocessing.fix_stim_artifact(epoch_post, tmin=info['post_mintime'], tmax=artifact_window_2[1], mode='window')
+    epoch_post = mne.preprocessing.fix_stim_artifact(
+        epoch_post, tmin=calibration_params['post_mintime'], tmax=cfg.artifact_window_2[1], mode='window')
     epoch_post.set_eeg_reference('average', projection=False, verbose=False)
 
     # Global MAD check
-    reject_data = epoch_post.copy().crop(reject_range[0], reject_range[1]).get_data(copy=True)
+    reject_data = epoch_post.copy().crop(cfg.reject_range[0], cfg.reject_range[1]).get_data(copy=True)
     mad_val = median_abs_deviation(reject_data, axis=(1, 2))[0]
-    z_mad = (mad_val - info['good_trial_stats_post']['mads_mean']) / info['good_trial_stats_post']['mads_std']
+    z_mad = (mad_val - calibration_params['good_trial_stats_post']['mads_mean']) / calibration_params['good_trial_stats_post']['mads_std']
 
     thresh = trial_reject_opts['post']['global_zscore_threshold']
     if z_mad < thresh[0] or z_mad > thresh[1]:
@@ -648,22 +661,27 @@ def preprocess_post_trial(epoch_post, info, trial_reject_opts, ica, baseline, ar
     return epoch_post
 
 
-def preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, info, line_freq):
+def preprocess_emg_trial(epoch_emg, calibration_params, cfg):
     """Preprocess a single EMG trial and determine MEP validity."""
-    full_times = info['emg_prep_times']['full_emg_times']
-    pre_stim_times = full_times[info['emg_prep_times']['pre_innervation_time_indices']]
+    dicts = cfg.to_dicts()
+    filter_opts_emg = dicts['filter_opts_emg']
+    emg_reject_opts = dicts['emg_reject_opts']
+
+    full_times = calibration_params['emg_prep_times']['full_emg_times']
+    pre_stim_times = full_times[calibration_params['emg_prep_times']['pre_innervation_time_indices']]
     data = epoch_emg.get_data(copy=True)
 
     # Apply filter
-    data = _apply_filter(data, info['emg_filter'], filter_opts_emg['pad_time'], epoch_emg.info['sfreq'])
+    data = _apply_filter(
+        data, calibration_params['emg_filter'], filter_opts_emg['pad_time'], epoch_emg.info['sfreq'])
 
     # Check pre-innervation and MEP
     has_pre_innervation, valid_ptp, _, data = _prep_emg_trial(
         data, 0, 0,
-        info['emg_prep_times']['pre_innervation_time_indices'],
-        line_freq, pre_stim_times, full_times,
+        calibration_params['emg_prep_times']['pre_innervation_time_indices'],
+        cfg.line_freq, pre_stim_times, full_times,
         emg_reject_opts['pre_innervation_options'],
-        info['emg_prep_times']['peak_to_peak_time_indices'],
+        calibration_params['emg_prep_times']['peak_to_peak_time_indices'],
         emg_reject_opts['ptp_options'],
         epoch_emg.info['sfreq']
     )
@@ -676,28 +694,15 @@ def preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, info, line
 
 # ==================== Single-Trial Worker ====================
 
-def _process_single_trial(trial_idx, epoch_pre_data, epoch_post_data, epoch_emg_data,
-                          eeg_info, emg_info,
-                          pre_events_row, post_events_row, emg_events_row,
-                          pre_tmin, post_tmin, emg_tmin,
-                          calibration_params, trial_reject_opts, ica, baseline,
-                          artifact_window_1, artifact_window_2, leadfield, reject_range,
-                          filter_opts, filter_opts_emg, emg_reject_opts, use_ica_on_pre, line_freq):
-    """Process a single trial (pre, post, EMG). Returns (trial_idx, result_pre, result_post) or (trial_idx, None, None)."""
-    epoch_pre = mne.EpochsArray(
-        epoch_pre_data, info=eeg_info, events=pre_events_row, tmin=pre_tmin, verbose=False)
-    epoch_post = mne.EpochsArray(
-        epoch_post_data, info=eeg_info, events=post_events_row, tmin=post_tmin, verbose=False)
-    epoch_emg = mne.EpochsArray(
-        epoch_emg_data, info=emg_info, events=emg_events_row, tmin=emg_tmin, verbose=False)
+def process_single_trial(epoch_pre, epoch_post, epoch_emg, calibration_params, cfg, ica):
+    """Process a single trial (pre, post, EMG). Returns (success, epoch_pre, epoch_post)."""
+    result_pre = preprocess_pre_trial(epoch_pre, calibration_params, cfg)
+    result_post = preprocess_post_trial(epoch_post, calibration_params, cfg, ica)
+    result_emg = preprocess_emg_trial(epoch_emg, calibration_params, cfg)
 
-    result_pre = preprocess_pre_trial(epoch_pre, calibration_params, trial_reject_opts, filter_opts, use_ica_on_pre)
-    result_post = preprocess_post_trial(epoch_post, calibration_params, trial_reject_opts, ica, baseline, artifact_window_1, artifact_window_2, leadfield, reject_range)
-    result_emg = preprocess_emg_trial(epoch_emg, filter_opts_emg, emg_reject_opts, calibration_params, line_freq)
-
-    if result_pre is not False and result_post is not False and result_emg is not False:
-        return trial_idx, result_pre, result_post
-    return trial_idx, None, None
+    if result_pre is False or result_post is False or result_emg is False:
+        return False, None, None
+    return True, result_pre, result_post
 
 
 # ==================== Calibration persistence (two-step simulation) ====================
@@ -828,13 +833,6 @@ def _run_online_processing_stage(
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
     start_time = time.time()
 
-    dicts = cfg.to_dicts()
-    trial_reject_opts = dicts['trial_reject_opts']
-    emg_reject_opts = dicts['emg_reject_opts']
-    filter_opts = dicts['filter_opts']
-    filter_opts_emg = dicts['filter_opts_emg']
-    leadfield = _compute_leadfield()
-
     bundle = _load_calibration_bundle(calibration_bundle_path)
     calibration_params = bundle['calibration_params']
     ica = bundle['ica']
@@ -889,20 +887,16 @@ def _run_online_processing_stage(
     bad_trials_online = []
 
     def process_trial(i):
-        trial_idx = n_trials_use + i
-        # Use pre-prepared data (no copy needed for read, functions do get_data(copy=True) internally)
-        epoch_pre_data = pre_batch_data[i:i+1]
-        epoch_post_data = post_batch_data[i:i+1]
-        epoch_emg_data = emg_batch_data[i:i+1]
-
-        return _process_single_trial(
-            trial_idx, epoch_pre_data, epoch_post_data, epoch_emg_data,
-            pre_batch_info, emg_batch_info,
-            pre_batch_events[i:i+1], post_batch_events[i:i+1], emg_batch_events[i:i+1],
-            pre_batch_tmin, post_batch_tmin, emg_batch_tmin,
-            calibration_params, trial_reject_opts, ica, cfg.baseline,
-            cfg.artifact_window_1, cfg.artifact_window_2, leadfield, cfg.reject_range,
-            filter_opts, filter_opts_emg, emg_reject_opts, cfg.use_ica_on_pre, cfg.line_freq)
+        epoch_pre = mne.EpochsArray(
+            pre_batch_data[i:i+1], info=pre_batch_info, events=pre_batch_events[i:i+1],
+            tmin=pre_batch_tmin, verbose=False)
+        epoch_post = mne.EpochsArray(
+            post_batch_data[i:i+1], info=pre_batch_info, events=post_batch_events[i:i+1],
+            tmin=post_batch_tmin, verbose=False)
+        epoch_emg = mne.EpochsArray(
+            emg_batch_data[i:i+1], info=emg_batch_info, events=emg_batch_events[i:i+1],
+            tmin=emg_batch_tmin, verbose=False)
+        return process_single_trial(epoch_pre, epoch_post, epoch_emg, calibration_params, cfg, ica)
 
     # Use ThreadPoolExecutor - ICA and MNE operations hold GIL but numpy releases it
     # Process sequentially to maintain deterministic ordering (same as original)
@@ -916,14 +910,12 @@ def _run_online_processing_stage(
     # Sort by original order to maintain determinism
     results.sort(key=lambda x: x[0])
 
-    for i, (_, result) in enumerate(results):
-        trial_idx = n_trials_use + i
-        _, result_pre, result_post = result
-        if result_pre is not None:
+    for i, (_, (success, result_pre, result_post)) in enumerate(results):
+        if success:
             pre_list.append(result_pre)
             post_list.append(result_post)
         else:
-            bad_trials_online.append(trial_idx)
+            bad_trials_online.append(n_trials_use + i)
 
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
