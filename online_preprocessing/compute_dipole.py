@@ -7,9 +7,6 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
 import os
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import time 
 import pandas as pd
 import argparse
@@ -259,83 +256,10 @@ def determine_optimal_ori_and_pos(dipoles, forward, evoked):
 def init_dipole_params():
 	return -np.inf, None, None, None
 
-def plot_info_on_evoked(evoked, subject_response_extraction_info, weighted_pos, weighted_ori, subjects_dir, subject_plot, transpath):
-    if weighted_ori is None:
-        weighted_dipole_stats = subject_response_extraction_info['weighted_dipole_stats_free']
-    else:
-        weighted_dipole_stats = subject_response_extraction_info['weighted_dipole_stats_fixed']
-    print(f"time range to consider is {subject_response_extraction_info['optimal_time_range']}")
-    evoked.plot_joint(list(evoked.copy().crop(subject_response_extraction_info['optimal_time_range'][0],subject_response_extraction_info['optimal_time_range'][1]).times))
-    print("Best-fitting weighted dipole in the average response. Note that it is in fsaverage.")
-    best_r2_score_index_of_weighted = np.argmax(weighted_dipole_stats['r2_scores'])
-    best_r2_score_of_weighted = weighted_dipole_stats['r2_scores'][best_r2_score_index_of_weighted]
-    amplitude = weighted_dipole_stats['dipole_amplitudes'][best_r2_score_index_of_weighted]
-    time = weighted_dipole_stats['times'][best_r2_score_index_of_weighted]
-    if weighted_ori is None:
-        ori = weighted_dipole_stats['orientations'][best_r2_score_index_of_weighted]
-    else:
-        ori = weighted_ori
-   
-    #create a mne.Dipole object for plotting
-    dipole = mne.Dipole(times=[time],
-                      pos=[weighted_pos], amplitude=[amplitude],
-                        ori=[ori], gof=[best_r2_score_of_weighted])
-   
-    #create a title for the figure
-    title = f"AMP {np.round(amplitude*1e9,1)} nAm, R2 {np.round(best_r2_score_of_weighted*100,1)}%"
-
-    #plot
-    mne.viz.plot_dipole_locations(dipole, subject=subject_plot, trans=transpath,
-                                subjects_dir=subjects_dir, mode='orthoview',title=title)
-	
-def plot_dipole_stats_over_trials(subject_response_extraction_info):
-	fixed_ori_dipoles = subject_response_extraction_info['trial_dipoles_fixed_ori']
-	free_ori_dipoles = subject_response_extraction_info['trial_dipoles_free_ori']
-	amps_fixed = []
-	amps_free = []
-	gofs_fixed = []
-	gofs_free = []
-	amps_fixed_scalar = []
-	for free_ori_dipole, fixed_ori_dipole in zip(free_ori_dipoles, fixed_ori_dipoles):
-		amps_fixed.append(fixed_ori_dipole['amplitude']*1e9)
-		amps_fixed_scalar.append(fixed_ori_dipole['scalar_amplitude']*1e9)
-		amps_free.append(free_ori_dipole['amplitude']*1e9)
-		gofs_fixed.append(fixed_ori_dipole['r2'])
-		gofs_free.append(free_ori_dipole['r2'])
-	fig, axs = plt.subplots(3,2,figsize=(10,5))
-	axs[0,0].plot(amps_fixed)
-	axs[0,0].set_title("fixed orientation (absolute amplitude)")
-	axs[1,0].plot(amps_fixed_scalar)
-	axs[1,0].set_title("fixed orientation (scalar amplitude)")
-	axs[0,0].set_xticks([])
-	axs[1,0].set_xticks([])
-	axs[2,0].plot(amps_free)
-	axs[2,0].set_title("free orientation")
-	axs[0,1].plot(gofs_fixed)
-	axs[0,1].set_title("r2 fixed orientation")
-	axs[1,1].plot(gofs_free)
-	axs[1,1].set_title("r2 free orientation")
-	axs[0,1].set_xticks([])
-	axs[1,1].set_xticks([])
-	axs[0,1].set_xticks([])
-	axs[1,1].set_xticks([])
-	axs[2,1].set_xticks([])
-	axs[2,1].set_yticks([])
-	fig.supylabel("Dipole amplitude (nAm)")
-	fig.supxlabel("Trials")
-	print("amplitude correlations between fixed and free ori dipoles (absolute amplitudes)", np.corrcoef(amps_fixed, amps_free)[0,1])
-	print("amplitude correlations between fixed ori dipoles (absolute amplitudes vs scalar amplitudes)", np.corrcoef(amps_fixed, amps_fixed_scalar)[0,1])
-	print("gof-amplitude correlations in fixed ori dipoles", np.corrcoef(amps_fixed, gofs_fixed)[0,1])
-	print("gof-scalar amplitude correlations in fixed ori dipoles", np.corrcoef(amps_fixed_scalar, gofs_fixed)[0,1])
-	print("gof-amplitude correlations in free ori dipoles", np.corrcoef(amps_free, gofs_free)[0,1])
-	print("gof (R2) correlations between fixed and free ori dipoles", np.corrcoef(gofs_fixed, gofs_free)[0,1])
-	#plt.show()
-	
 def run_dipole_calculation_for_subject(
     subject, 
     subjects_directory_eeg, 
     forward,
-    subjects_dir_fsaverage,
     save_results=True
 ):
     """
@@ -343,9 +267,6 @@ def run_dipole_calculation_for_subject(
     """
     print(f"--- Starting processing for subject: {subject} ---")
     
-    # --- Define constants from the latest version of the original script ---
-    subject_plot = 'fsaverage'
-    transpath = os.path.join(subjects_dir_fsaverage, subject_plot, "bem", f"{subject_plot}-trans.fif")
     tmin_init, tmax_init = 0.038, 0.050  # Use updated time range
     min_window_size = 3
     max_window_size = 6
@@ -396,9 +317,6 @@ def run_dipole_calculation_for_subject(
         'weighted_dipole_stats_free': weighted_dipole_stats_free
     })
     
-    print(f"Displaying results for {subject}")
-    # The plotting call is now inside the saving block for better organization
-
     for fixed_orientation in [weighted_ori, None]:
         dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
             epochs, forward, position_index, fixed_orientation, optimal_time_range[0], optimal_time_range[1]
@@ -408,26 +326,11 @@ def run_dipole_calculation_for_subject(
         # Add the informative print statement back
         print(f"Average {orientation_identifier} dipole extraction times {np.mean(extraction_times)*1e3:.2f} ms")
 
-    # Plotting and saving logic
     if save_results:
         os.makedirs(subject_directory, exist_ok=True)
         output_path = os.path.join(subject_directory, f'{subject}_response_extraction_info.npz')
-        # Use np.savez_compressed for more efficient storage if desired
         np.savez(output_path, **subject_response_extraction_info)
         print(f"Results saved to {output_path}")
-
-        try:
-            # Plot evoked info
-            plot_info_on_evoked(evoked, subject_response_extraction_info, weighted_pos, None, subjects_dir_fsaverage, subject_plot, transpath)
-            plt.savefig(os.path.join(subject_directory, f"{subject}_evoked_dipole_location.png"))
-            plt.close()
-
-            # Plot trial stats
-            plot_dipole_stats_over_trials(subject_response_extraction_info)
-            plt.savefig(os.path.join(subject_directory, f"{subject}_trial_dipole_stats.png"))
-            plt.close()
-        except Exception as e:
-            print(f"Warning: Could not generate plots for {subject}. Error: {e}")
 
     print(f"--- Finished processing for subject: {subject} ---")
 
@@ -443,7 +346,6 @@ def main():
 
     # --- Configuration (repo-local; matches preprocessing_single_subject.py) ---
     subjects_directory_eeg = str(DATA_ROOT / "processed")
-    subjects_dir_fsaverage = str(DATA_ROOT / "fsaverage")
     fsaverage_forward_path = os.path.join(DATA_ROOT / "fsaverage", "fsaverage-fwd.fif")
 
     # This list defines the desired channel set and order
@@ -467,8 +369,7 @@ def main():
     run_dipole_calculation_for_subject(
         subject=args.subject,
         subjects_directory_eeg=subjects_directory_eeg,
-        forward=forward,  # Corrected argument name
-        subjects_dir_fsaverage=subjects_dir_fsaverage, # Added necessary argument
+        forward=forward,
         save_results=True
     )
 
