@@ -545,7 +545,7 @@ def run_fold_pretraining(
                     checkpoint_dir = get_checkpoint_dir(run_output_dir)
                     save_path = (
                         checkpoint_dir
-                        / f"last_pretrained_{model_name}_ds_{dataset_name}_fold_{fold_idx+1}.pt"
+                        / f"pretrained_fold_{fold_idx+1}.pt"
                     )
                     save_checkpoint(
                         {"model_state_dict": model_pretrain.state_dict()}, save_path
@@ -582,7 +582,7 @@ def run_fold_pretraining(
                     torch.cuda.empty_cache()
 
         if 'global_backrot_matrix_np' in locals() and global_backrot_matrix_np is not None:
-            backrot_matrix_path = run_output_dir / f"global_backrot_matrix_ds_{dataset_name}_fold_{fold_idx+1}.npy"
+            backrot_matrix_path = run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
             try:
                 np.save(backrot_matrix_path, global_backrot_matrix_np)
                 console.print(f"    [green]Saved global back-rotation matrix to {backrot_matrix_path.name}[/green]")
@@ -763,7 +763,7 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
         log.info(f"Online sim finished. All (Bal Acc / ROC): {final_metrics.get('balanced_accuracy_all', np.nan):.4f} / {final_metrics.get('roc_auc_all', np.nan):.4f}.")
 
         if args.get('save_predictions_and_labels', False):
-            output_filename = run_output_dir / f"predictions_{model_name}_ds_{dataset_name}_subj_{subject_id}_fold_{fold_idx}.npz"
+            output_filename = run_output_dir / f"predictions_subj_{subject_id}_fold_{fold_idx}.npz"
             np.savez_compressed(output_filename, predictions=y_pred_all, actual_values=y_true_all)
             log.info(f"Saved predictions and actuals for Subj {subject_id} to {output_filename}")
 
@@ -792,7 +792,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
 
     global_backrot_matrix_np = None
     if getattr(args, "ea_backrotation", False):
-        backrot_matrix_path = run_output_dir / f"global_backrot_matrix_ds_{dataset_name}_fold_{fold_idx+1}.npy"
+        backrot_matrix_path = run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
         if backrot_matrix_path.exists():
             global_backrot_matrix_np = np.load(backrot_matrix_path)
             console.print(f"        [green]Loaded global back-rotation matrix for evaluation.[/green]")
@@ -977,7 +977,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                     # Save the final fine-tuned model state for interpretability analysis
                     if args.get('save_finetuned_model', False):
                         checkpoint_dir = get_checkpoint_dir(run_output_dir)
-                        save_path = checkpoint_dir / f"finetuned_{model_name}_ds_{dataset_name}_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
+                        save_path = checkpoint_dir / f"finetuned_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
                         
                         # We save the state_dict of the entire TTAWrapper to include alignment info
                         checkpoint_data = {
@@ -1046,7 +1046,7 @@ def run_cross_subject_experiment(
                         data_root=args.data_root, args=args
                     )
                     for model_name in args.models_to_run:
-                        chkpt_path = Path(args.pretrained_checkpoint_dir) / f"last_pretrained_{model_name}_ds_{dataset_name}_fold_{fold_idx+1}.pt"
+                        chkpt_path = Path(args.pretrained_checkpoint_dir) / f"pretrained_fold_{fold_idx+1}.pt"
                         if chkpt_path.is_file():
                             state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
                             fold_pretrained_models[model_name] = state_dict

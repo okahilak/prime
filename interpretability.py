@@ -90,6 +90,7 @@ ANALYSIS_CONFIG = {
         'Theta (4-8 Hz)': (4, 8), 'Alpha (8-13 Hz)': (8, 13),
         'Beta (13-25 Hz)': (13, 25), 'Gamma (25-47 Hz)': (25, 47),
     },
+    "dataset_name": "TMSEEGClassificationTEPfree",
     "model_args": {'n_chans': 60, 'n_outputs': 1, 'n_times': 50, 'filter_time_length': 10},
     "wrapper_args": argparse.Namespace(
         use_tta=False, alignment_type="none", finetune_mode="full", ea_backrotation=False,
@@ -366,10 +367,11 @@ def compute_spatial_occlusion_map(model, data_tensor, labels, info, n_times_mode
 def process_subject(checkpoint_path, config):
     """Main pipeline to process a single subject: load data, model, and run interpretability method."""
     try:
-        m = re.search(r"ds_(?P<dataset>.+?)_subj_(?P<subject>\d+)", checkpoint_path.name)
+        m = re.search(r"subj_(?P<subject>\d+)", checkpoint_path.name)
         if not m:
             return None, None, None, None
-        dataset_name, subject_id = m.group("dataset"), int(m.group("subject"))
+        dataset_name = config["dataset_name"]
+        subject_id = int(m.group("subject"))
         logging.info(f"\n--- Processing Subject {subject_id} | Dataset: {dataset_name} ---")
 
         epochs_np, labels, info = load_data_for_subject(dataset_name, subject_id, config["T_MIN"], config["T_MAX"], config)
@@ -527,7 +529,7 @@ def main():
     ANALYSIS_CONFIG["method"] = args.method
     
     if args.mode == 'submit':
-        checkpoint_paths = sorted(list(CHECKPOINTS_DIR.glob("finetuned_DeepTEPNet_ds_*_subj_*.pt")))
+        checkpoint_paths = sorted(list(CHECKPOINTS_DIR.glob("finetuned_subj_*.pt")))
         if not checkpoint_paths:
             logging.error(f"No checkpoints found in {CHECKPOINTS_DIR}. Exiting."); return
 
