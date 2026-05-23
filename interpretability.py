@@ -55,8 +55,7 @@ from statsmodels.stats.multitest import fdrcorrection
 # Project-specific imports (ensure these are in your PYTHONPATH)
 from models.deep_tepnet import PRIME
 from tta_wrapper import TTAWrapper
-from TMS_EEG_moabb import (TMSEEGClassificationTEPfree, TMSEEGDatasetTEPfree,
-                           TMSEEGClassificationTEP, TMSEEGDatasetTEP)
+from TMS_EEG_moabb import TMSEEGClassificationTEPfree, TMSEEGDatasetTEPfree
 
 
 # 1. CONFIGURATION
@@ -224,8 +223,9 @@ def load_model_from_checkpoint(checkpoint_path, model_args, wrapper_args):
 def load_data_for_subject(dataset_name, subject_id, tmin, tmax, config):
     """Loads epochs data and MNE info for a single subject."""
     logging.info(f"→ Loading data for Subject {subject_id} (Dataset: {dataset_name})")
-    dataset_map = {"TMSEEGClassificationTEPfree": (TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree),
-                   "TMSEEGClassificationTEP": (TMSEEGDatasetTEP, TMSEEGClassificationTEP)}
+    dataset_map = {
+        "TMSEEGClassificationTEPfree": (TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree),
+    }
     dataset_class, paradigm_class = dataset_map[dataset_name]
     dataset = dataset_class()
     paradigm = paradigm_class(tmin=tmin, tmax=tmax)

@@ -46,7 +46,7 @@ from torchinfo import summary
 
 # Local project-specific modules
 from datasets import *
-from TMS_EEG_moabb import TMSEEGClassificationTEP, TMSEEGDatasetTEP, TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree
+from TMS_EEG_moabb import TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree
 from models.builder import build_model
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 from utils import (RegressionMetricsTracker, evaluate_single_trial,
@@ -206,7 +206,7 @@ def setup_experiment(cli_args=None):
     """Parse arguments, setup configuration, and initialize experiment."""
     
     DEFAULT_YAML = """
-dataset_names: ["TMSEEGClassificationTEP"]
+dataset_names: ["TMSEEGClassificationTEPfree"]
 subjects: null
 data_root: "~/prime-data/processed"
 pretrained_checkpoint_dir: null
@@ -437,7 +437,7 @@ def run_fold_pretraining(
         if hasattr(args, "channel_subset") and args.channel_subset:
             paradigm_kwargs["channels"] = args.channel_subset
         
-        # This call will now be used for TMSEEGClassificationTEP, etc., as well.
+        # This call will now be used for TMSEEGClassificationTEPfree, etc., as well.
         pretrain_epochs_data, pretrain_labels_data, n_channels, n_timepoints, _, global_backrot_matrix_np = load_cached_pretrain_data(
             dataset_names=[dataset_name],
             subject_ids=actual_pretrain_subject_ids,
@@ -804,15 +804,11 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
         all_test_subj_epochs, all_test_subj_labels_soft = None, None
 
         # This logic correctly loads soft labels from all data sources
-        if dataset_name in ["TMSEEGClassificationTEP", "TMSEEGClassificationTEPfree"]:
+        if dataset_name == "TMSEEGClassificationTEPfree":
             console.print(f"    [bold green]Using Custom TMS/TEP Paradigm for test subject data.[/bold green]")
             try:
-                if dataset_name == "TMSEEGClassificationTEPfree":
-                    dataset = TMSEEGDatasetTEPfree(data_path=args.data_root)
-                    paradigm = TMSEEGClassificationTEPfree(tmin=args.tmin, tmax=args.tmax)
-                else: # TMSEEGClassificationTEP
-                    dataset = TMSEEGDatasetTEP(data_path=args.data_root)
-                    paradigm = TMSEEGClassificationTEP(tmin=args.tmin, tmax=args.tmax)
+                dataset = TMSEEGDatasetTEPfree(data_path=args.data_root)
+                paradigm = TMSEEGClassificationTEPfree(tmin=args.tmin, tmax=args.tmax)
 
                 all_test_subj_epochs, all_test_subj_labels_soft, _ = paradigm.get_data(
                     dataset=dataset,

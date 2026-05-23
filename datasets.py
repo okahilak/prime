@@ -6,8 +6,7 @@ Core Components:
 - `EEGDataset`: A PyTorch-compatible Dataset class.
 - `load_cached_pretrain_data`: Main function to load, preprocess, align, and
   concatenate data from multiple subjects.
-- Caching Paradigms: `CachingTMSEEGClassificationTEP` and
-  `CachingTMSEEGClassificationTEPfree` handle the specifics of data
+- Caching Paradigm: `CachingTMSEEGClassificationTEPfree` handles the specifics of data
   extraction and caching for different TMS-EEG data types.
 """
 
@@ -25,10 +24,8 @@ from torch.utils.data import Dataset
 # --- Local Imports ---
 import utils
 from TMS_EEG_moabb import (
-    TMSEEGClassificationTEP,
     TMSEEGClassificationTEPfree,
     TMSEEGDataset,
-    TMSEEGDatasetTEP,
     TMSEEGDatasetTEPfree,
 )
 from tta_wrapper import (
@@ -52,15 +49,12 @@ log.addHandler(logging.NullHandler())
 PARADIGM_DATA = {
     "CUSTOM_CLS": {
         "datasets": [
-            "TMSEEGClassificationTEP",
             "TMSEEGClassificationTEPfree",
         ],
         "class_map": {
-            "TMSEEGClassificationTEP": TMSEEGDatasetTEP,
             "TMSEEGClassificationTEPfree": TMSEEGDatasetTEPfree,
         },
         "specs": {
-            "TMSEEGClassificationTEP": dict(sr=1000, sec=0.995, n_cls=2),
             "TMSEEGClassificationTEPfree": dict(sr=1000, sec=0.995, n_cls=2),
         },
     },
@@ -165,7 +159,6 @@ def load_cached_pretrain_data(
     os.environ["MNE_DATASETS_MOABB_PATH"] = data_root
 
     paradigm_class_map = {
-        "TMSEEGClassificationTEP": CachingTMSEEGClassificationTEP,
         "TMSEEGClassificationTEPfree": CachingTMSEEGClassificationTEPfree,
     }
     paradigm_class = paradigm_class_map.get(dataset_name)
@@ -414,19 +407,6 @@ class BaseCachingParadigm:
         return final_X, final_y, final_meta
 
 
-class CachingTMSEEGClassificationTEP(BaseCachingParadigm, TMSEEGClassificationTEP):
-    """Caching wrapper for the TMSEEGClassificationTEP (TEP) paradigm."""
-
-    def __init__(self, num_trials_per_subject: Optional[int] = None, **kwargs):
-        super(CachingTMSEEGClassificationTEP, self).__init__(
-            data_type="TEP",
-            num_trials_per_subject=num_trials_per_subject,
-            **kwargs,
-        )
-        # Initialize the actual paradigm logic
-        TMSEEGClassificationTEP.__init__(self, **kwargs)
-
-
 class CachingTMSEEGClassificationTEPfree(
     BaseCachingParadigm, TMSEEGClassificationTEPfree
 ):
@@ -449,7 +429,6 @@ __all__ = [
     "EEGDataset",
     "get_subject_list_for_datasets",
     "load_cached_pretrain_data",
-    "CachingTMSEEGClassificationTEP",
     "CachingTMSEEGClassificationTEPfree",
     "PARADIGM_DATA",
 ]

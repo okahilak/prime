@@ -51,7 +51,7 @@ try:
     # and has been added to the Python path.
     from TMS_EEG_moabb import (
         TMSEEGClassificationTEPfree,
-        TMSEEGDatasetTEP
+        TMSEEGDatasetTEPfree,
     )
     from datasets import PARADIGM_DATA, load_cached_pretrain_data
     from utils import filter_args_for_model, get_model_class
@@ -135,7 +135,7 @@ def get_subject_list(dataset_name: str) -> List[int]:
 
     try:
         if dataset_name == "TMSEEGClassificationTEPfree":
-            dataset_instance = TMSEEGDatasetTEP()
+            dataset_instance = TMSEEGDatasetTEPfree()
             subjects = dataset_instance.subject_list
         else:
             print(f"  Warning: Subject list retrieval not implemented for '{dataset_name}'. Defaulting to subject [1].")
@@ -208,7 +208,7 @@ def load_latency_data(
         if "TMSEEG" in dataset_name:
             console.print("    [green]Using custom TMS paradigm loader.[/green]")
             if dataset_name == "TMSEEGClassificationTEPfree":
-                dataset = TMSEEGDatasetTEP()
+                dataset = TMSEEGDatasetTEPfree()
                 paradigm = TMSEEGClassificationTEPfree(tmin=cfg.tmin, tmax=cfg.tmax)
             else:
                 raise NotImplementedError(f"Loading for TMS dataset '{dataset_name}' is not implemented.")

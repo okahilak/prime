@@ -7,8 +7,8 @@ import TMS_EEG_moabb as m
 m.DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
 
 # Instantiate the TEP dataset + paradigm
-dataset  = m.TMSEEGDatasetTEP(subject_list=[18])
-paradigm = m.TMSEEGClassificationTEP(tmin=-0.5, tmax=-0.020)
+dataset  = m.TMSEEGDatasetTEPfree(subject_list=[18])
+paradigm = m.TMSEEGClassificationTEPfree(tmin=-0.5, tmax=-0.020)
 
 X, y, meta = paradigm.get_data(dataset, subjects=[18])
 

@@ -122,39 +122,6 @@ class TMSEEGDataset(BaseDataset):
         return [str(p) for p in paths if p.exists()]
 
 
-class TMSEEGDatasetTEP(TMSEEGDataset):
-    """Dataset for fixed-orientation TEP data, reusing the TMSEEGDataset structure."""
-    def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
-        super().__init__(data_path, subject_list)
-        self.code = "TMSEEGDatasetTEP"
-
-    def _get_single_subject_data(self, subject: int) -> dict:
-        subject_id_str = f"{subject:03d}"
-        subj_dir = self.data_path_root / f"sub-{subject_id_str}"
-        eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
-        tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
-
-        if not all([f.exists() for f in [eeg_file, tep_file]]):
-            log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
-            return {}
-
-        epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
-
-        try:
-            npz_data = np.load(tep_file, allow_pickle=True)
-            dipoles = npz_data['trial_dipoles_fixed_ori']
-            tep_amplitudes = np.array([d['amplitude'] for d in dipoles]).flatten()
-        except Exception as e:
-            log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
-            return {}
-
-        if not (len(epochs) == len(tep_amplitudes)):
-            log.error(f"S{subject}: Mismatch in TEP data lengths. Skipping.")
-            return {}
-
-        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes})
-        return {"0": {"0": epochs}}
-
 class TMSEEGDatasetTEPfree(TMSEEGDataset):
     """Dataset for free-orientation TEP data, reusing the TMSEEGDataset structure."""
     def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
@@ -279,33 +246,16 @@ class _BaseTMSEEGParadigm(BaseParadigm):
         return X_final, y_final, metadata_final
 
 
-# %%
-class _BaseTMSEEGParadigm(BaseParadigm):
-    """Classification paradigm for TEP data using the same real-time pipeline."""
-    def __init__(self, tmin: float = -0.5, tmax: float = -0.020, **kwargs):
-        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", events={"TMS_stim": 1}, **kwargs)
-
-    @property
-    def scoring(self):
-        return "roc_auc"
-
-    @property
-    def datasets(self):
-        return [TMSEEGDatasetTEP()]
-    
-    def make_labels_pipeline(self):
-        return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1.0)
-
-    def used_events(self, dataset):
-        if hasattr(self, 'events'):
-            return self.events
-        return None
-
-    
 class TMSEEGClassificationTEPfree(_BaseTMSEEGParadigm):
     """Classification paradigm for free-orientation TEP data."""
+
     def __init__(self, tmin: float = -0.5, tmax: float = -0.020, **kwargs):
-        super().__init__(tmin=tmin, tmax=tmax, target_metadata_col="TEP_amplitude", events={"TMS_stim": 1}, **kwargs)
+        super().__init__(
+            tmin=tmin,
+            tmax=tmax,
+            target_metadata_col="TEP_amplitude",
+            **kwargs,
+        )
 
     @property
     def scoring(self):
@@ -314,14 +264,9 @@ class TMSEEGClassificationTEPfree(_BaseTMSEEGParadigm):
     @property
     def datasets(self):
         return [TMSEEGDatasetTEPfree()]
-    
+
     def make_labels_pipeline(self):
         return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1.0)
-
-    def used_events(self, dataset):
-        if hasattr(self, 'events'):
-            return self.events
-        return None
 
 
 # %%
