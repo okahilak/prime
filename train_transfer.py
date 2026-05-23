@@ -243,8 +243,8 @@ print_dataset_structure_and_exit: false
 no_pretrain: false
 base_output_dir: "results"
 experiment_name: "transfer_kfold"
-save_last_pretrained_checkpoint: false
-save_last_finetuned_checkpoint: false
+save_pretrained_model: false
+save_finetuned_model: false
 save_checkpoints: false
 save_results: true
 save_predictions_and_labels: true
@@ -541,7 +541,7 @@ def run_fold_pretraining(
                 )
 
                 # Save the final pretrained model checkpoint if the new flag is enabled
-                if args.get("save_last_pretrained_checkpoint", False):
+                if args.get("save_pretrained_model", False):
                     checkpoint_dir = get_checkpoint_dir(run_output_dir)
                     save_path = (
                         checkpoint_dir
@@ -975,7 +975,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                     all_models_trial_metrics[model_name] = per_trial_metrics
 
                     # Save the final fine-tuned model state for interpretability analysis
-                    if args.get('save_last_finetuned_checkpoint', False):
+                    if args.get('save_finetuned_model', False):
                         checkpoint_dir = get_checkpoint_dir(run_output_dir)
                         save_path = checkpoint_dir / f"finetuned_{model_name}_ds_{dataset_name}_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
                         
