@@ -3,7 +3,7 @@ Part 1: Compute dipole fitting info from calibration trials.
 
 Uses the first N calibration trials to determine the optimal position,
 orientation, and time range for single-trial dipole fitting.
-Outputs: {subject}_dipole_fitting_info.npz
+Outputs: {subject}_dipole_fitting_info.npz (position_index, orientation, time_range)
 """
 import mne
 import numpy as np
@@ -11,7 +11,6 @@ import os
 import argparse
 from pathlib import Path
 import pandas as pd
-from sklearn.metrics import r2_score
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
@@ -116,64 +115,18 @@ def determine_optimal_time_range(dipoles, min_window_size, max_window_size, wind
 	time_range = (dipoles[start]['time'], dipoles[end - 1]['time'])
 	dipoles_in_time_range = dipoles[start:end]
     
-	return time_range, dipoles_in_time_range, df
+	return time_range, dipoles_in_time_range
 
 
-def determine_optimal_ori_and_pos(dipoles, forward, evoked):
-    #get the dipole amplitudes, orientations and positions
+def determine_optimal_ori_and_pos(dipoles, forward):
     dipole_amplitudes = np.array([dipole['amplitude'] for dipole in dipoles])
     dipole_orientations = np.array([dipole['orientation'] for dipole in dipoles])
     dipole_positions = np.array([dipole['position'] for dipole in dipoles])
-    dipole_times = np.array([dipole['time'] for dipole in dipoles])
-    #get weighted dipole position and orientation measures
     weighted_ori = np.average(dipole_orientations, weights=dipole_amplitudes, axis=0)
-    weighted_ori /= np.linalg.norm(weighted_ori) #ensure that the orientation is unit-length
-    weighted_pos = np.average(dipole_positions, weights=dipole_amplitudes, axis=0) #weighted dipole position
-   
-    #find the nearest valid position and position index to the weighted position
-    pos_index = np.argmin(np.linalg.norm(forward['source_rr'] - weighted_pos, axis=1))
-    pos_of_pos_index = forward['source_rr'][pos_index] #position of the nearest valid position index
-
-    #determine the properties of the weighted dipole
-    weighted_dipole_stats_fixed = {'dipole_moments':[], 'dipole_amplitudes': [], 'data_predicteds':[], 'data_measureds':[], 'r2_scores': [], 'times': [], 'orientation':weighted_ori, 'position':weighted_pos, 'scalar_dipole_amplitudes': []}
-    weighted_dipole_stats_free = {'dipole_moments':[], 'dipole_amplitudes': [], 'data_predicteds':[], 'data_measureds':[], 'r2_scores': [], 'times': [], 'orientations':[], 'position':weighted_pos}
-    evoked_cropped = evoked.copy().crop(np.min(dipole_times), np.max(dipole_times))
-    evoked_data = evoked_cropped.data
-    L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
-    position_now = pos_index*3
-    leadfield_at_pos = L[:,position_now:position_now+3] #leadfield at position
-    leadfield_in_ori = np.matmul(leadfield_at_pos, weighted_ori) #project to orientation
-    leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
-
-    for time_index in range(evoked_data.shape[1]): #get the dipole stats in the average response
-        data_measured = evoked_data[:, time_index]
-        amplitude = np.dot(leadfield_in_ori.T,data_measured) / np.dot(leadfield_in_ori.T, leadfield_in_ori)
-        dipole_moment = weighted_ori*amplitude #Q = aq
-        data_predicted = np.matmul(leadfield_at_pos, dipole_moment) #y_predicted = LQ
-        #update dictionary
-        weighted_dipole_stats_fixed['r2_scores'].append(r2_score(data_measured, data_predicted)) #coefficient of determination of the dipole fit
-        weighted_dipole_stats_fixed['dipole_moments'].append(dipole_moment)
-        weighted_dipole_stats_fixed['scalar_dipole_amplitudes'].append(amplitude)
-        weighted_dipole_stats_fixed['dipole_amplitudes'].append(np.abs(amplitude))
-        weighted_dipole_stats_fixed['data_predicteds'].append(data_predicted)
-        weighted_dipole_stats_fixed['data_measureds'].append(data_measured)
-        weighted_dipole_stats_fixed['times'].append(evoked_cropped.times[time_index])
-
-    for time_index in range(evoked_data.shape[1]): #get the dipole stats in the average response for free ori
-        data_measured = evoked_data[:, time_index]
-        dipole_moment = np.matmul(leadfield_at_pos_pinv,data_measured)
-        data_predicted = np.matmul(leadfield_at_pos, dipole_moment) #y_predicted = LQ
-        amplitude = np.linalg.norm(dipole_moment)
-        #update dictionary
-        weighted_dipole_stats_free['r2_scores'].append(r2_score(data_measured, data_predicted)) #coefficient of determination of the dipole fit
-        weighted_dipole_stats_free['dipole_moments'].append(dipole_moment)
-        weighted_dipole_stats_free['dipole_amplitudes'].append(amplitude)
-        weighted_dipole_stats_free['orientations'].append(dipole_moment/amplitude)
-        weighted_dipole_stats_free['data_predicteds'].append(data_predicted)
-        weighted_dipole_stats_free['data_measureds'].append(data_measured)
-        weighted_dipole_stats_free['times'].append(evoked_cropped.times[time_index])
-   
-    return weighted_pos, weighted_ori, pos_index, pos_of_pos_index, weighted_dipole_stats_fixed, weighted_dipole_stats_free
+    weighted_ori /= np.linalg.norm(weighted_ori)
+    weighted_pos = np.average(dipole_positions, weights=dipole_amplitudes, axis=0)
+    position_index = int(np.argmin(np.linalg.norm(forward['source_rr'] - weighted_pos, axis=1)))
+    return position_index, weighted_ori
 
 
 def run_calibration(subject, subjects_directory_eeg, forward):
@@ -205,31 +158,15 @@ def run_calibration(subject, subjects_directory_eeg, forward):
     # Scan all candidate dipole positions in the initial time window
     best_dipole_per_time = dipoles_for_times(evoked, forward, tmin_init, tmax_init)
 
-    # Determine optimal fitting time range
-    optimal_time_range, dipoles_in_time_range, windows_df = determine_optimal_time_range(
+    time_range, dipoles_in_time_range = determine_optimal_time_range(
         best_dipole_per_time, min_window_size, max_window_size, window_size_exponent
     )
+    position_index, orientation = determine_optimal_ori_and_pos(dipoles_in_time_range, forward)
 
-    best_dipole_index = np.argmax([dipole['r2'] for dipole in dipoles_in_time_range])
-
-    # Determine optimal position and orientation
-    weighted_pos, weighted_ori, position_index, pos_of_pos_index, weighted_dipole_stats_fixed, weighted_dipole_stats_free = determine_optimal_ori_and_pos(
-        dipoles_in_time_range, forward, evoked
-    )
-
-    # Assemble fitting info
     fitting_info = {
-        'best_dipole_per_time': best_dipole_per_time,
-        'optimal_time_range': optimal_time_range,
-        'dipoles_in_time_range': dipoles_in_time_range,
-        'windows_df': windows_df,
-        'best_dipole_to_evoked': dipoles_in_time_range[best_dipole_index],
-        'weighted_pos': weighted_pos,
-        'weighted_ori': weighted_ori,
-        'nearest_to_weighted_pos_pos_index': position_index,
-        'pos_of_weighted_pos_index': pos_of_pos_index,
-        'weighted_dipole_stats_fixed': weighted_dipole_stats_fixed,
-        'weighted_dipole_stats_free': weighted_dipole_stats_free,
+        'position_index': position_index,
+        'orientation': orientation,
+        'time_range': time_range,
     }
 
     # Save

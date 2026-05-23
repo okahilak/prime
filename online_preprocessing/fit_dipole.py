@@ -119,10 +119,10 @@ def run_fitting(subject, subjects_directory_eeg, forward):
         return
 
     fitting_info = np.load(fitting_info_path, allow_pickle=True)
-    position_index = int(fitting_info['nearest_to_weighted_pos_pos_index'])
-    weighted_ori = fitting_info['weighted_ori']
-    optimal_time_range = fitting_info['optimal_time_range']
-    tmin, tmax = float(optimal_time_range[0]), float(optimal_time_range[1])
+    position_index = int(fitting_info['position_index'])
+    orientation = fitting_info['orientation']
+    time_range = fitting_info['time_range']
+    tmin, tmax = float(time_range[0]), float(time_range[1])
 
     # Load epochs
     try:
@@ -136,7 +136,7 @@ def run_fitting(subject, subjects_directory_eeg, forward):
 
     # Fit dipoles with fixed and free orientation
     fitted_dipoles = {}
-    for fixed_orientation in [weighted_ori, None]:
+    for fixed_orientation in [orientation, None]:
         dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
             epochs, forward, position_index, fixed_orientation, tmin, tmax
         )
