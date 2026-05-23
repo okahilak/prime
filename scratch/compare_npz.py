@@ -2,10 +2,6 @@
 """
 Compare two .npz files field by field on their common top-level keys.
 
-Designed for verifying that refactored dipole fitting matches the original
-(e.g. response_extraction_info.npz vs fitted_dipoles.npz, which only overlap
-on trial_dipoles_fixed_ori / trial_dipoles_free_ori).
-
 Usage:
     python compare_npz.py REF.npz NEW.npz [--rtol 1e-6] [--atol 1e-10]
     python compare_npz.py REF.npz NEW.npz --keys trial_dipoles_fixed_ori trial_dipoles_free_ori
