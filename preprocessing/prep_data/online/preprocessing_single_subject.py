@@ -534,12 +534,9 @@ def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfiel
     rejected_trials['bad_trials_emg'] = bad_emg
 
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_emg)
-    n_trials_left = epochs_pre.get_data(copy=True).shape[0]
+    n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
-    if n_trials_left < cfg.n_trials_goal:
-        return cfg.n_trials_goal - n_trials_left
-
-    return epochs_pre, epochs_post, ica, calibration_params, rejected_trials
+    return epochs_pre, epochs_post, ica, calibration_params, rejected_trials, n_successful_trials
 
 
 # ==================== Single-Trial Processing ====================
@@ -806,15 +803,17 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
     n_trials_use = cfg.n_trials_goal + 25
 
     while True:
-        out = preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield)
-        if isinstance(out, int):
-            n_trials_use += out
-        else:
+        epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_successful_trials = (
+            preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield))
+
+        if n_successful_trials >= cfg.n_trials_goal:
             break
 
-    epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration = out
+        n_trials_use += cfg.n_trials_goal - n_successful_trials
+
     bundle = _build_calibration_bundle(
         epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use)
+
     _save_calibration_bundle(calibration_bundle_path, bundle)
     bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
     _verify_calibration_bundle(bundle, bundle_loaded)
