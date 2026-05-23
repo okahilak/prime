@@ -437,7 +437,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
 
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
-    return epochs_pre, epochs_post, ica, calibration_params, rejected_trials, n_successful_trials
+    return ica, calibration_params, rejected_trials, n_successful_trials
 
 
 # ==================== Single-Trial Processing ====================
@@ -613,13 +613,11 @@ def _process_online_trial_worker(trial_idx):
 
 # ==================== Calibration persistence (two-step simulation) ====================
 
-def _build_calibration_bundle(epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use):
+def _build_calibration_bundle(ica, calibration_params, rejected_calibration, n_trials_use):
     return {
         'calibration_params': calibration_params,
         'ica': ica,
         'rejected_calibration': rejected_calibration,
-        'epochs_pre_cal': epochs_pre_cal,
-        'epochs_post_cal': epochs_post_cal,
         'n_trials_use': n_trials_use,
     }
 
@@ -657,13 +655,6 @@ def _verify_calibration_bundle(original, loaded):
     assert original['ica'].exclude == loaded['ica'].exclude
     assert np.allclose(original['ica'].mixing_matrix_, loaded['ica'].mixing_matrix_)
     assert np.allclose(original['ica'].unmixing_matrix_, loaded['ica'].unmixing_matrix_)
-    for orig_epochs, load_epochs in (
-        (original['epochs_pre_cal'], loaded['epochs_pre_cal']),
-        (original['epochs_post_cal'], loaded['epochs_post_cal']),
-    ):
-        assert np.allclose(orig_epochs.get_data(), load_epochs.get_data())
-        assert orig_epochs.ch_names == load_epochs.ch_names
-        assert np.array_equal(orig_epochs.events, load_epochs.events)
     _assert_calibration_value_equal(
         original['calibration_params'], loaded['calibration_params'], 'calibration_params')
 
@@ -722,7 +713,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     start_time = time.time()
     while True:
-        epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_successful_trials = (
+        ica, calibration_params, rejected_calibration, n_successful_trials = (
             preprocess_calibration(
                 epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield))
 
@@ -740,7 +731,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
         n_trials_use += 1
 
     bundle = _build_calibration_bundle(
-        epochs_pre_cal, epochs_post_cal, ica, calibration_params, rejected_calibration, n_trials_use)
+        ica, calibration_params, rejected_calibration, n_trials_use)
 
     _save_calibration_bundle(calibration_bundle_path, bundle)
     bundle_loaded = _load_calibration_bundle(calibration_bundle_path)
@@ -760,29 +751,22 @@ def _run_online_processing_stage(
     calibration_params = bundle['calibration_params']
     ica = bundle['ica']
     rejected_calibration = bundle['rejected_calibration']
-    epochs_pre_cal = bundle['epochs_pre_cal']
-    epochs_post_cal = bundle['epochs_post_cal']
-    n_trials_use = bundle['n_trials_use']
 
-    n_online = len(epochs) - n_trials_use
+    n_total = len(epochs)
     all_eeg_data = epochs.get_data(copy=False)
 
-    # Build temporary epochs for pre/post from the online trials, crop & resample in batch
-    online_eeg_data = all_eeg_data[n_trials_use:]
-    online_events = epochs.events[n_trials_use:]
-
-    # Batch-crop and resample pre-stim epochs
+    # Batch-crop and resample pre-stim epochs for all trials
     epochs_pre_batch = mne.EpochsArray(
-        online_eeg_data, info=epochs.info, events=online_events, tmin=epochs.tmin, verbose=False)
+        all_eeg_data, info=epochs.info, events=epochs.events, tmin=epochs.tmin, verbose=False)
     epochs_pre_batch.crop(cfg.pre_range[0], cfg.pre_range[1]).resample(cfg.target_sfreq, method='polyphase')
     pre_batch_data = epochs_pre_batch.get_data(copy=False)
     pre_batch_info = epochs_pre_batch.info
     pre_batch_tmin = epochs_pre_batch.tmin
     pre_batch_events = epochs_pre_batch.events
 
-    # Batch-crop and resample post-stim epochs
+    # Batch-crop and resample post-stim epochs for all trials
     epochs_post_batch = mne.EpochsArray(
-        online_eeg_data, info=epochs.info, events=online_events, tmin=epochs.tmin, verbose=False)
+        all_eeg_data, info=epochs.info, events=epochs.events, tmin=epochs.tmin, verbose=False)
     epochs_post_batch.crop(cfg.post_range[0], cfg.post_range[1]).resample(cfg.target_sfreq, method='polyphase')
     post_batch_data = epochs_post_batch.get_data(copy=False)
     post_batch_tmin = epochs_post_batch.tmin
@@ -790,11 +774,10 @@ def _run_online_processing_stage(
 
     # Free memory from originals
     del epochs_pre_batch, epochs_post_batch
-    del online_eeg_data
 
     # --- Parallel single-trial processing ---
-    pre_list = [epochs_pre_cal]
-    post_list = [epochs_post_cal]
+    pre_list = []
+    post_list = []
     bad_trials_online = []
 
     initargs = (
@@ -807,14 +790,14 @@ def _run_online_processing_stage(
         initializer=_init_online_trial_worker,
         initargs=initargs,
     ) as executor:
-        results = list(executor.map(_process_online_trial_worker, range(n_online)))
+        results = list(executor.map(_process_online_trial_worker, range(n_total)))
 
     for i, (_, success, result_pre, result_post) in enumerate(results):
         if success:
             pre_list.append(result_pre)
             post_list.append(result_post)
         else:
-            bad_trials_online.append(n_trials_use + i)
+            bad_trials_online.append(i)
 
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
