@@ -355,36 +355,53 @@ def _select_best_emg_channel(epochs_emg, ptp_opts, filter_opts):
 
 # ==================== Main Calibration Pipeline ====================
 
-def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
-                           artifact_window_1, artifact_window_2, reject_range,
-                           emg_time_range, channel_reject_opts, ica_opts, trial_reject_opts,
-                           emg_reject_opts, sound_opts, ssp_sir_opts, leadfield,
-                           filter_opts, filter_opts_emg, line_freq, target_sfreq,
-                           n_trials_goal, use_ica_on_pre, emg_filter_coefficients):
+def preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield):
     """Full calibration preprocessing pipeline for pre-stim, post-stim, and EMG epochs."""
+    channel_reject_opts = opts['channel_reject_opts']
+    ica_opts = opts['ica_opts']
+    trial_reject_opts = opts['trial_reject_opts']
+    emg_reject_opts = opts['emg_reject_opts']
+    sound_opts = opts['sound_opts']
+    ssp_sir_opts = opts['ssp_sir_opts']
+    filter_opts = opts['filter_opts']
+    filter_opts_emg = opts['filter_opts_emg']
+
+    epochs = epochs[:n_trials_use]
+    epochs_emg = epochs_emg[:n_trials_use]
+
+    check_emg = epochs_emg.copy().crop(
+        cfg.emg_time_range[0], cfg.emg_time_range[1]
+    ).resample(cfg.target_sfreq, method='polyphase')
+    picked_channel, emg_filter_coefficients = _select_best_emg_channel(
+        check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
+    epochs_emg.pick(picked_channel)
+
     calibration_params = {}
     rejected_trials = {}
     ica_time_range = ica_opts['pre_timerange']
 
     # Crop into segments
-    epochs_emg.crop(emg_time_range[0], emg_time_range[1])
-    epochs_pre = epochs.copy().crop(pre_range[0], pre_range[1])
+    epochs_emg.crop(cfg.emg_time_range[0], cfg.emg_time_range[1])
+    epochs_pre = epochs.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
     epochs_pre_ica = epochs.copy().crop(ica_time_range[0], ica_time_range[1])
-    epochs_post = epochs.copy().crop(post_range[0], post_range[1])
+    epochs_post = epochs.copy().crop(cfg.post_range[0], cfg.post_range[1])
     del epochs
 
     # Resample
     for epoch in [epochs_pre, epochs_pre_ica, epochs_post, epochs_emg]:
-        epoch.resample(target_sfreq, method='polyphase')
+        epoch.resample(cfg.target_sfreq, method='polyphase')
 
     # Post-stim: baseline and artifact interpolation
-    epochs_post.apply_baseline(baseline)
-    epochs_post = mne.preprocessing.fix_stim_artifact(epochs_post, tmin=artifact_window_1[0], tmax=artifact_window_1[1], mode='window')
+    epochs_post.apply_baseline(cfg.baseline)
+    epochs_post = mne.preprocessing.fix_stim_artifact(
+        epochs_post, tmin=cfg.artifact_window_1[0], tmax=cfg.artifact_window_1[1], mode='window')
 
     # Detect and interpolate bad channels
-    bad_channels_pre, pre_filter_coefficients = _detect_bad_channels_pre(epochs_pre, channel_reject_opts['pre'], filter_opts)
+    bad_channels_pre, pre_filter_coefficients = _detect_bad_channels_pre(
+        epochs_pre, channel_reject_opts['pre'], filter_opts)
     calibration_params['pre_stim_filter'] = pre_filter_coefficients
-    bad_channels_post = _detect_bad_channels_post(epochs_post, channel_reject_opts['post'], reject_range)
+    bad_channels_post = _detect_bad_channels_post(
+        epochs_post, channel_reject_opts['post'], cfg.reject_range)
     bad_channels = list(np.union1d(bad_channels_pre, bad_channels_post))
 
     if bad_channels:
@@ -417,12 +434,12 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     pre_data = epochs_pre.get_data(copy=True)
     pre_data = _apply_filter(pre_data, pre_filter_coefficients, filter_opts['pad_time'], epochs_pre.info['sfreq'])
     epochs_pre = mne.EpochsArray(pre_data, info=epochs_pre.info, events=epochs_pre.events, tmin=epochs_pre.times[0])
-    if use_ica_on_pre:
+    if cfg.use_ica_on_pre:
         epochs_pre.set_eeg_reference('average', projection=False, verbose=False)
     del pre_data
 
     # Detect ocular artifact trials
-    if use_ica_on_pre:
+    if cfg.use_ica_on_pre:
         bad_ocular_pre, _ = _detect_ocular_trials(
             ica, epochs_pre, trial_reject_opts['ocular']['pre_timerange_min'], None,
             excluded_components['eye blink'], trial_reject_opts['ocular']['z_thresh'])
@@ -432,7 +449,7 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
         trial_reject_opts['ocular']['post_timerange'][1],
         excluded_components['eye blink'], trial_reject_opts['ocular']['z_thresh'])
 
-    if use_ica_on_pre:
+    if cfg.use_ica_on_pre:
         bad_ocular = list(np.union1d(bad_ocular_pre, bad_ocular_post).astype(int))
     else:
         bad_ocular = bad_ocular_post
@@ -441,7 +458,7 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     calibration_params['ocular_thresholds_post'] = ocular_threshold_post
 
     # Apply ICA
-    if use_ica_on_pre:
+    if cfg.use_ica_on_pre:
         ica.apply(epochs_pre)
     ica.apply(epochs_post)
 
@@ -457,7 +474,7 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_pre)
 
     # Apply SOUND to post-stim
-    epochs_post.apply_baseline(baseline).set_eeg_reference('average', projection=False, verbose=False)
+    epochs_post.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
     post_t0 = epochs_post.times[epochs_post.times > 0][0]
     calibration_params['post_mintime'] = post_t0
     epochs_post.crop(post_t0, None)
@@ -492,12 +509,13 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     calibration_params['sspsir_sir_projmat_orig'] = projection_original
 
     # Second artifact interpolation
-    epochs_post = mne.preprocessing.fix_stim_artifact(epochs_post, tmin=post_t0, tmax=artifact_window_2[1], mode='window')
+    epochs_post = mne.preprocessing.fix_stim_artifact(
+        epochs_post, tmin=post_t0, tmax=cfg.artifact_window_2[1], mode='window')
     epochs_post.set_eeg_reference('average', projection=False, verbose=False)
 
     # Detect bad post-stim trials
     bad_post, stats_post = _find_bad_trials(
-        epochs_post.copy().crop(reject_range[0], reject_range[1]),
+        epochs_post.copy().crop(cfg.reject_range[0], cfg.reject_range[1]),
         trial_reject_opts['post']['global_zscore_threshold'],
         trial_reject_opts['post']['local_zscore_threshold'], False, False)
     rejected_trials['bad_trials_post'] = bad_post
@@ -509,7 +527,7 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     emg_data = _apply_filter(emg_data, emg_filter_coefficients, filter_opts_emg['pad_time'], epochs_emg.info['sfreq'])
     epochs_emg = mne.EpochsArray(emg_data, info=epochs_emg.info, events=epochs_emg.events, tmin=epochs_emg.times[0])
     bad_emg, epochs_emg, emg_time_info = _detect_bad_emg_trials(
-        epochs_emg, emg_reject_opts['pre_innervation_options'], emg_reject_opts['ptp_options'], line_freq)
+        epochs_emg, emg_reject_opts['pre_innervation_options'], emg_reject_opts['ptp_options'], cfg.line_freq)
 
     calibration_params['emg_filter'] = emg_filter_coefficients
     calibration_params['emg_prep_times'] = emg_time_info
@@ -518,8 +536,8 @@ def preprocess_calibration(epochs, epochs_emg, pre_range, post_range, baseline,
     epochs_pre, epochs_post, epochs_emg = _drop_bad_trials([epochs_pre, epochs_post, epochs_emg], bad_emg)
     n_trials_left = epochs_pre.get_data(copy=True).shape[0]
 
-    if n_trials_left < n_trials_goal:
-        return n_trials_goal - n_trials_left
+    if n_trials_left < cfg.n_trials_goal:
+        return cfg.n_trials_goal - n_trials_left
 
     return epochs_pre, epochs_post, ica, calibration_params, rejected_trials
 
@@ -783,34 +801,12 @@ def _run_calibration_stage(epochs, epochs_emg, cfg, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     start_time = time.time()
 
-    dicts = cfg.to_dicts()
-    channel_reject_opts = dicts['channel_reject_opts']
-    ica_opts = dicts['ica_opts']
-    sound_opts = dicts['sound_opts']
-    ssp_sir_opts = dicts['ssp_sir_opts']
-    trial_reject_opts = dicts['trial_reject_opts']
-    emg_reject_opts = dicts['emg_reject_opts']
-    filter_opts = dicts['filter_opts']
-    filter_opts_emg = dicts['filter_opts_emg']
+    opts = cfg.to_dicts()
     leadfield = _compute_leadfield()
-
     n_trials_use = cfg.n_trials_goal + 25
-    check_emg = epochs_emg.copy()[0:n_trials_use].crop(
-        cfg.emg_time_range[0], cfg.emg_time_range[1]
-    ).resample(cfg.target_sfreq, method='polyphase')
-    picked_channel, emg_filter_coefficients = _select_best_emg_channel(
-        check_emg, emg_reject_opts['ptp_options'], filter_opts_emg)
-    epochs_emg.pick(picked_channel)
 
     while True:
-        out = preprocess_calibration(
-            epochs[0:n_trials_use], epochs_emg[0:n_trials_use],
-            cfg.pre_range, cfg.post_range, cfg.baseline,
-            cfg.artifact_window_1, cfg.artifact_window_2, cfg.reject_range,
-            cfg.emg_time_range, channel_reject_opts, ica_opts, trial_reject_opts,
-            emg_reject_opts, sound_opts, ssp_sir_opts, leadfield,
-            filter_opts, filter_opts_emg, cfg.line_freq, cfg.target_sfreq,
-            cfg.n_trials_goal, cfg.use_ica_on_pre, emg_filter_coefficients)
+        out = preprocess_calibration(epochs, epochs_emg, n_trials_use, cfg, opts, leadfield)
         if isinstance(out, int):
             n_trials_use += out
         else:
