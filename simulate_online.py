@@ -34,8 +34,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing")
 from online_preprocessing.config import get_default_config
 from online_preprocessing.calibrator import Calibrator
 from online_preprocessing.preprocess import (
-    preprocess_pre_trial,
-    preprocess_post_trial,
     _compute_leadfield,
     _load_subject_epochs,
     _single_trial_epochs_from_arrays,
@@ -105,7 +103,7 @@ def main():
     # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
     t0 = time.time()
-    calibration_params, n_successful_trials = calibrator.calibrate(leadfield)
+    n_successful_trials = calibrator.calibrate(leadfield)
     print(f"Calibration preprocessing done in {time.time() - t0:.2f}s, "
           f"used {n_successful_trials} trials")
 
@@ -115,10 +113,7 @@ def main():
     cal_post_list = []
     for trial_idx in range(N_CALIBRATION_TRIALS):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        epoch_post = trial.copy().crop(cfg.post_range[0], cfg.post_range[1])
-        epoch_post.resample(cfg.target_sfreq, method='polyphase')
-
-        result_post = preprocess_post_trial(epoch_post, calibration_params, cfg)
+        result_post = calibrator.preprocess_post(trial)
         if result_post is not False:
             cal_post_list.append(result_post)
 
@@ -148,10 +143,7 @@ def main():
     cal_pre_list = []
     for trial_idx in range(N_CALIBRATION_TRIALS):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        epoch_pre = trial.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
-        epoch_pre.resample(cfg.target_sfreq, method='polyphase')
-
-        result_pre = preprocess_pre_trial(epoch_pre, calibration_params, cfg)
+        result_pre = calibrator.preprocess_pre(trial)
         if result_pre is not False:
             cal_pre_list.append(result_pre)
 
@@ -171,7 +163,7 @@ def main():
     # --- Summary ---
     print("\n" + "=" * 70)
     print("CALIBRATION COMPLETE")
-    print(f"  Calibration params obtained: {list(calibration_params.keys())}")
+    print(f"  Calibration params obtained: {list(calibrator.calibration_params.keys())}")
     print(f"  Dipole position index: {position_index}")
     print(f"  Dipole fit window: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
     print(f"  Pre-stim epochs for classifier: {cal_pre_epochs.get_data(copy=False).shape}")

@@ -1,8 +1,6 @@
 """
-Calibrator: stateful object that accumulates trials and runs calibration.
-
-Also contains all internal calibration-pipeline helpers so that the single-trial
-processing module (preprocess.py) can import from here rather than the reverse.
+Calibrator: stateful object that accumulates trials, runs calibration, and
+preprocesses individual trials using the resulting calibration parameters.
 
 Usage
 -----
@@ -10,7 +8,10 @@ Usage
     for trial in incoming_trials:
         calibrator.add_trial(trial)
 
-    calibration_params, n_ok = calibrator.calibrate(leadfield)
+    n_ok = calibrator.calibrate(leadfield)
+
+    result_pre  = calibrator.preprocess_pre(trial)   # False if rejected
+    result_post = calibrator.preprocess_post(trial)  # False if rejected
 """
 
 import warnings
@@ -22,7 +23,7 @@ from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
 
 from utils.ica_calibrator import get_number_of_components, get_ica
-from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials
+from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
 from utils.sound_modified import sound
 from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
 
@@ -454,6 +455,121 @@ def _compute_leadfield():
     return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
 
 
+# ==================== Single-trial processing ====================
+
+def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
+    """Preprocess a single pre-stimulus trial using calibrated parameters."""
+    dicts = cfg.to_dicts()
+    trial_reject_opts = dicts['trial_reject_opts']
+    filter_opts = dicts['filter_opts']
+
+    if calibration_params['bad_channels']:
+        epoch_pre, _ = _interpolate_bad_channels(
+            epoch_pre, calibration_params['bad_channels'],
+            calibration_params['channel_interpolation_info'])
+
+    if cfg.use_ica_on_pre:
+        raise NotImplementedError(
+            "Applying ICA to pre-stimulus in single-trials is not currently implemented")
+
+    data = epoch_pre.get_data(copy=True)
+
+    data = _apply_filter(
+        data, calibration_params['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
+
+    # Mean subtraction (average reference)
+    data -= np.mean(data, axis=1)
+
+    # Global MAD check
+    mad_val = median_abs_deviation(data, axis=(1, 2))[0]
+    z_mad = (mad_val - calibration_params['good_trial_stats_pre']['mads_mean']) / calibration_params['good_trial_stats_pre']['mads_std']
+    threshold = trial_reject_opts['pre']['global_zscore_threshold']
+    if z_mad < threshold[0] or z_mad > threshold[1]:
+        return False
+
+    # Local MAD check
+    local_mad = median_abs_deviation(data, axis=2)
+    z_local = zscore(local_mad, axis=1)
+    if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
+        return False
+
+    return mne.EpochsArray(data, info=epoch_pre.info, events=epoch_pre.events,
+                           tmin=epoch_pre.times[0], verbose=False)
+
+
+def preprocess_post_trial(epoch_post, calibration_params, cfg):
+    """Preprocess a single post-stimulus trial using calibrated parameters."""
+    dicts = cfg.to_dicts()
+    trial_reject_opts = dicts['trial_reject_opts']
+
+    epoch_post.apply_baseline(cfg.baseline)
+    epoch_post = mne.preprocessing.fix_stim_artifact(
+        epoch_post, tmin=cfg.artifact_window_1[0], tmax=cfg.artifact_window_1[1], mode='window')
+
+    if calibration_params['bad_channels']:
+        epoch_post, _ = _interpolate_bad_channels(
+            epoch_post, calibration_params['bad_channels'],
+            calibration_params['channel_interpolation_info'])
+
+    epoch_post.set_eeg_reference('average', projection=False, verbose=False)
+
+    ica = calibration_params['ica']
+
+    # Check ocular ICA components
+    source_time_course = ica.get_sources(epoch_post)
+    source_data = source_time_course.get_data(copy=True)
+    for component_idx in calibration_params['ocular_thresholds_post']:
+        component_info = calibration_params['ocular_thresholds_post'][component_idx]
+        z_comp = (
+            np.abs(source_data[0, component_idx, component_info['time_indices_of_interest']])
+            - component_info['mean']
+        ) / component_info['std']
+        if np.median(z_comp) > trial_reject_opts['ocular']['z_threshold']:
+            return False
+
+    ica.apply(epoch_post)
+
+    epoch_post.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
+    epoch_post.crop(calibration_params['post_mintime'], None)
+
+    # Apply SOUND
+    data = epoch_post.get_data(copy=True)
+    data = np.matmul(calibration_params['sound_filter'], data)
+    epoch_post = mne.EpochsArray(data, epoch_post.info, events=epoch_post.events,
+                                 tmin=epoch_post.times[0], verbose=False)
+    epoch_post.set_eeg_reference('average', projection=False, verbose=False)
+
+    # Apply SSP-SIR
+    data = epoch_post.get_data(copy=True)
+    data = ssp_sir_single_trial(
+        data[0, :, :], calibration_params['sspsir_suppression_matrix_P'],
+        calibration_params['sspsir_sir_projmat_suppr'], calibration_params['sspsir_sir_projmat_orig'],
+        calibration_params['sspsir_filter_kernel'])
+    epoch_post = mne.EpochsArray(data.reshape(1, data.shape[0], data.shape[1]),
+                                 epoch_post.info, events=epoch_post.events, tmin=epoch_post.times[0])
+
+    epoch_post = mne.preprocessing.fix_stim_artifact(
+        epoch_post, tmin=calibration_params['post_mintime'], tmax=cfg.artifact_window_2[1],
+        mode='window')
+    epoch_post.set_eeg_reference('average', projection=False, verbose=False)
+
+    # Global MAD check
+    reject_data = epoch_post.copy().crop(cfg.reject_range[0], cfg.reject_range[1]).get_data(copy=True)
+    mad_val = median_abs_deviation(reject_data, axis=(1, 2))[0]
+    z_mad = (mad_val - calibration_params['good_trial_stats_post']['mads_mean']) / calibration_params['good_trial_stats_post']['mads_std']
+    threshold = trial_reject_opts['post']['global_zscore_threshold']
+    if z_mad < threshold[0] or z_mad > threshold[1]:
+        return False
+
+    # Local MAD check
+    local_mad = median_abs_deviation(reject_data, axis=2)
+    z_local = zscore(local_mad, axis=1)
+    if np.any(np.abs(z_local) > trial_reject_opts['post']['local_zscore_threshold']):
+        return False
+
+    return epoch_post
+
+
 # ==================== Calibrator class ====================
 
 class Calibrator:
@@ -473,6 +589,7 @@ class Calibrator:
         self._epochs_pre = None
         self._epochs_pre_ica = None
         self._epochs_post = None
+        self._calibration_params = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -494,6 +611,9 @@ class Calibrator:
     def calibrate(self, leadfield=None):
         """Run calibration on the accumulated trials.
 
+        Stores the resulting parameters internally.  Call ``preprocess_pre`` /
+        ``preprocess_post`` on individual trials afterwards.
+
         Parameters
         ----------
         leadfield : np.ndarray or None
@@ -502,9 +622,6 @@ class Calibrator:
 
         Returns
         -------
-        calibration_params : dict
-            Calibration parameters to pass to ``preprocess_pre_trial`` /
-            ``preprocess_post_trial``.
         n_successful_trials : int
             Number of trials that survived artifact rejection.
         """
@@ -522,11 +639,66 @@ class Calibrator:
             self._opts,
             leadfield,
         )
-        return calibration_params, n_successful_trials
+        self._calibration_params = calibration_params
+        return n_successful_trials
+
+    @classmethod
+    def from_bundle(cls, cfg, calibration_params):
+        """Create a calibrated Calibrator from pre-computed params (e.g. loaded from disk)."""
+        instance = cls(cfg)
+        instance._calibration_params = calibration_params
+        return instance
+
+    def preprocess_pre(self, trial):
+        """Crop, resample, and preprocess a single pre-stim trial.
+
+        Must be called after ``calibrate()``.
+
+        Parameters
+        ----------
+        trial : mne.EpochsArray
+            Full raw single-trial epoch.
+
+        Returns
+        -------
+        mne.EpochsArray or False
+            Preprocessed epoch, or ``False`` if the trial was rejected.
+        """
+        if self._calibration_params is None:
+            raise RuntimeError("calibrate() must be called before preprocessing trials.")
+        epoch = trial.copy().crop(self._cfg.pre_range[0], self._cfg.pre_range[1])
+        epoch.resample(self._cfg.target_sfreq, method='polyphase')
+        return preprocess_pre_trial(epoch, self._calibration_params, self._cfg)
+
+    def preprocess_post(self, trial):
+        """Crop, resample, and preprocess a single post-stim trial.
+
+        Must be called after ``calibrate()``.
+
+        Parameters
+        ----------
+        trial : mne.EpochsArray
+            Full raw single-trial epoch.
+
+        Returns
+        -------
+        mne.EpochsArray or False
+            Preprocessed epoch, or ``False`` if the trial was rejected.
+        """
+        if self._calibration_params is None:
+            raise RuntimeError("calibrate() must be called before preprocessing trials.")
+        epoch = trial.copy().crop(self._cfg.post_range[0], self._cfg.post_range[1])
+        epoch.resample(self._cfg.target_sfreq, method='polyphase')
+        return preprocess_post_trial(epoch, self._calibration_params, self._cfg)
 
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
+
+    @property
+    def calibration_params(self):
+        """Calibration parameters dict (available after ``calibrate()`` is called)."""
+        return self._calibration_params
 
     @property
     def n_trials(self):
