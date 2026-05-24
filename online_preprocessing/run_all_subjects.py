@@ -51,11 +51,11 @@ def _run_command(command: List[str], env: dict, label: str) -> None:
 
 
 def preprocess_done(subject: str) -> bool:
-    return (PROCESSED_DIR / subject / f"{subject}_post.fif").is_file()
+    return (PROCESSED_DIR / subject / f"{subject}_intervention_post.fif").is_file()
 
 
 def dipole_done(subject: str) -> bool:
-    return (PROCESSED_DIR / subject / f"{subject}_fitted_dipoles.npz").is_file()
+    return (PROCESSED_DIR / subject / f"{subject}_intervention_dipoles.npz").is_file()
 
 
 def _build_prep_env() -> dict:

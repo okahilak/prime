@@ -3,7 +3,7 @@ Part 2: Fit dipoles to single trials using pre-computed fitting info.
 
 Loads the fitting info produced by calibrate_dipole.py and fits
 dipoles to every trial in the epoch file.
-Outputs: {subject}_fitted_dipoles.npz
+Outputs: {subject}_calibration_dipoles.npz, {subject}_intervention_dipoles.npz
 """
 import mne
 import numpy as np
@@ -124,31 +124,32 @@ def run_fitting(subject, subjects_directory_eeg, forward):
     time_range = fitting_info['time_range']
     tmin, tmax = float(time_range[0]), float(time_range[1])
 
-    # Load epochs
-    try:
-        epochs = mne.read_epochs(os.path.join(subject_directory, f'{subject}_post.fif'), verbose=False)
-    except FileNotFoundError:
-        print(f"ERROR: Could not find post-stimulus epoch file for subject {subject}. Skipping.")
-        return
+    # Fit and save dipoles separately for calibration and intervention trials
+    for group_label in ('calibration', 'intervention'):
+        epoch_path = os.path.join(subject_directory, f'{subject}_{group_label}_post.fif')
+        try:
+            epochs = mne.read_epochs(epoch_path, verbose=False)
+        except FileNotFoundError:
+            print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
+            continue
 
-    if not epochs.info['ch_names'] == forward.ch_names:
-        raise ValueError(f"Channel mismatch for subject {subject}. Aborting.")
+        if not epochs.info['ch_names'] == forward.ch_names:
+            raise ValueError(f"Channel mismatch for subject {subject} ({group_label}). Aborting.")
 
-    # Fit dipoles with fixed and free orientation
-    fitted_dipoles = {}
-    for fixed_orientation in [orientation, None]:
-        dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
-            epochs, forward, position_index, fixed_orientation, tmin, tmax
-        )
-        orientation_identifier = 'free_ori' if fixed_orientation is None else 'fixed_ori'
-        fitted_dipoles[f'trial_dipoles_{orientation_identifier}'] = dipoles_for_trials
-        print(f"Average {orientation_identifier} dipole extraction time: {np.mean(extraction_times)*1e3:.2f} ms")
+        fitted_dipoles = {}
+        for fixed_orientation in [orientation, None]:
+            dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
+                epochs, forward, position_index, fixed_orientation, tmin, tmax
+            )
+            orientation_identifier = 'free_ori' if fixed_orientation is None else 'fixed_ori'
+            fitted_dipoles[f'trial_dipoles_{orientation_identifier}'] = dipoles_for_trials
+            print(f"[{group_label}] Average {orientation_identifier} dipole extraction time: {np.mean(extraction_times)*1e3:.2f} ms")
 
-    # Save
-    os.makedirs(subject_directory, exist_ok=True)
-    output_path = os.path.join(subject_directory, f'{subject}_fitted_dipoles.npz')
-    np.savez(output_path, **fitted_dipoles)
-    print(f"Fitted dipoles saved to {output_path}")
+        os.makedirs(subject_directory, exist_ok=True)
+        output_path = os.path.join(subject_directory, f'{subject}_{group_label}_dipoles.npz')
+        np.savez(output_path, **fitted_dipoles)
+        print(f"Fitted dipoles saved to {output_path}")
+
     print(f"--- Fitting: finished for subject {subject} ---")
 
 
