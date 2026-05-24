@@ -119,7 +119,7 @@ class PreprocConfig:
 
     # General
     target_sfreq: float
-    n_trials_goal: int
+    n_trials_calibrate: int
     use_ica_on_pre: bool
 
     # Channels
@@ -262,7 +262,7 @@ def get_default_config() -> PreprocConfig:
         ),
         filter_opts=FilterOpts(cutoff=[2, 47], btype='bandpass', order=2, pad_time=0.1),
         target_sfreq=1000,
-        n_trials_goal=100,
+        n_trials_calibrate=125,
         use_ica_on_pre=False,
         common_channels=[
             'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',

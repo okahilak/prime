@@ -660,35 +660,19 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     all_eeg_data = epochs.get_data(copy=False)
     all_events = epochs.events
 
-    epochs_pre = epochs_pre_ica = epochs_post = None
-    n_trials_use = 0
     print("Appending calibration trials...")
-    for trial_idx in range(125):
+
+    epochs_pre = epochs_pre_ica = epochs_post = None
+    for trial_idx in range(cfg.n_trials_calibrate):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
             epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
-        n_trials_use += 1
 
     print("Calibrating...")
 
     start_time = time.time()
-    while True:
-        calibration_params, n_successful_trials = (
-            preprocess_calibration(
-                epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield))
-
-        if n_successful_trials >= cfg.n_trials_goal:
-            break
-
-        if n_trials_use >= len(epochs):
-            raise RuntimeError(
-                f"Only {n_successful_trials} calibration trials passed (goal {cfg.n_trials_goal}); "
-                f"exhausted all {len(epochs)} epochs.")
-
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, n_trials_use)
-        epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
-            epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
-        n_trials_use += 1
+    calibration_params, n_successful_trials = preprocess_calibration(
+        epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield)
 
     _save_calibration_bundle(calibration_bundle_path, calibration_params)
 
