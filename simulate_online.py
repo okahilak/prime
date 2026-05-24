@@ -48,14 +48,6 @@ N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 
-def load_forward(cfg):
-    """Load the fsaverage forward solution with common channels."""
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-    forward = mne.read_forward_solution(str(forward_path), verbose=False)
-    forward = forward.pick_channels(cfg.common_channels, ordered=True)
-    return forward
-
-
 def main():
     print("=" * 70)
     print("SIMULATE ONLINE PROCESSING (trial-by-trial)")
@@ -65,8 +57,7 @@ def main():
 
     # --- Setup ---
     cfg = get_default_config()
-    leadfield = _compute_leadfield()
-    forward = load_forward(cfg)
+    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
@@ -84,7 +75,7 @@ def main():
     print("=" * 70)
 
     # --- Trial-by-trial accumulation ---
-    calibrator = Calibrator(cfg)
+    calibrator = Calibrator(cfg, forward_path)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
         # Simulate receiving a single trial
@@ -98,7 +89,7 @@ def main():
     # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
     t0 = time.time()
-    n_successful_trials = calibrator.calibrate(leadfield)
+    n_successful_trials = calibrator.calibrate()
     print(f"Calibration preprocessing done in {time.time() - t0:.2f}s, "
           f"used {n_successful_trials} trials")
 
@@ -117,7 +108,7 @@ def main():
 
     # --- Calibrate dipole fitting parameters ---
     print("\nCalibrating dipole parameters...")
-    dipole_fitter = DipoleFitter(forward)
+    dipole_fitter = DipoleFitter(forward_path)
     dipole_fitter.fit(cal_post_epochs)
     position_index = dipole_fitter.fitting_info['position_index']
     tmin_fit, tmax_fit = dipole_fitter.fitting_info['time_range']

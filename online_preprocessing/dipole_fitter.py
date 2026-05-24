@@ -4,7 +4,7 @@ data and fits dipoles to individual trials.
 
 Usage
 -----
-    fitter = DipoleFitter(forward)
+    fitter = DipoleFitter(forward_path)
     fitting_info = fitter.fit(epochs)       # also stored in fitter.fitting_info
     dipoles, times = fitter.fit_trials(epochs)              # fixed orientation
     dipoles, times = fitter.fit_trials(epochs, orientation=None)  # free orientation
@@ -14,6 +14,7 @@ import time
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
+import mne
 
 
 def dipoles_for_times(evoked, forward, tmin, tmax):
@@ -213,13 +214,23 @@ def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfie
 
 # ==================== DipoleFitter class ====================
 
+COMMON_CHANNELS = [
+    'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
+    'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz', 'F1', 'F2',
+    'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'FC1', 'FC2', 'FC3', 'FC4',
+    'FC5', 'FC6', 'FT7', 'FT8', 'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1',
+    'O2', 'Oz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'PO3',
+    'PO4', 'PO7', 'PO8', 'POz', 'Pz', 'T7', 'T8', 'TP7', 'TP8'
+]
+
+
 class DipoleFitter:
     """Fits a dipole to calibration-trial evoked data.
 
     Parameters
     ----------
-    forward : mne.Forward
-        Forward solution (already channel-picked).
+    forward_path : str
+        Path to the forward solution.
     tmin_init : float
         Start of the initial search window (seconds).
     tmax_init : float
@@ -232,9 +243,13 @@ class DipoleFitter:
         Exponent for window size scoring.
     """
 
-    def __init__(self, forward, tmin_init=0.038, tmax_init=0.050,
+    def __init__(self, forward_path, tmin_init=0.038, tmax_init=0.050,
                  min_window_size=3, max_window_size=6, window_size_exponent=1.5):
-        self._forward = forward
+        self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
+
+		# TODO: Is this necessary? Note that it's not done in the calibrator.
+        self._forward = self._forward.pick_channels(COMMON_CHANNELS, ordered=True)
+
         self._tmin_init = tmin_init
         self._tmax_init = tmax_init
         self._min_window_size = min_window_size
@@ -256,6 +271,9 @@ class DipoleFitter:
             Dictionary with keys ``position_index``, ``orientation``, and
             ``time_range``.  Also stored in ``self.fitting_info``.
         """
+        if not epochs.info['ch_names'] == self._forward.ch_names:
+            raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
+
         evoked = epochs.copy().average()
         best_dipole_per_time = dipoles_for_times(
             evoked, self._forward, self._tmin_init, self._tmax_init
@@ -292,6 +310,9 @@ class DipoleFitter:
         dipoles_for_trials : list of dict
         extraction_times : list of float
         """
+        if not epochs.info['ch_names'] == self._forward.ch_names:
+            raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
+
         if self._fitting_info is None:
             raise RuntimeError(
                 "fitting_info must be set before calling fit_trials(). "

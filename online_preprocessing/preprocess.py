@@ -12,7 +12,6 @@ from config import get_default_config
 from calibrator import (
     Calibrator,
     _single_trial_epochs_from_arrays,
-    _compute_leadfield,
 )
 
 DATA_ROOT = Path("~/prime-data").expanduser()
@@ -93,22 +92,14 @@ def _load_subject_epochs(subject_id, cfg):
     return epochs
 
 
-def _compute_leadfield():
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-    forward = mne.read_forward_solution(forward_path)
-    return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
-
-
-def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
+def _run_calibration_stage(epochs, cfg, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
-    leadfield = _compute_leadfield()
-
     all_eeg_data = epochs.get_data(copy=False)
     all_events = epochs.events
 
     print("Appending calibration trials...")
 
-    calibrator = Calibrator(cfg)
+    calibrator = Calibrator(cfg, forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         calibrator.add_trial(trial)
@@ -116,7 +107,7 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     print("Calibrating...")
 
     start_time = time.time()
-    n_successful_trials = calibrator.calibrate(leadfield)
+    n_successful_trials = calibrator.calibrate()
 
     _save_calibration_bundle(calibration_bundle_path, calibrator.calibration_params)
 
@@ -159,12 +150,13 @@ def _process_and_save_trial_group(
 
 def _run_online_processing_stage(
     epochs, cfg, subject_output, subject_id, calibration_bundle_path,
+    forward_path,
 ):
     """Online trial processing: only config, epochs, and calibration bundle from disk."""
     start_time = time.time()
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
-    calibrator = Calibrator.from_bundle(cfg, calibration_params)
+    calibrator = Calibrator.from_bundle(cfg, calibration_params, forward_path)
     epochs_data = epochs.get_data(copy=False)
 
     _process_and_save_trial_group(
@@ -189,14 +181,15 @@ def run_subject_processing(subject_id: str):
     subject_output = output_path / subject_id
     os.makedirs(subject_output, exist_ok=True)
 
+    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
     epochs = _load_subject_epochs(subject_id, cfg)
-    _run_calibration_stage(epochs, cfg, calibration_bundle_path)
+    _run_calibration_stage(epochs, cfg, forward_path, calibration_bundle_path)
 
     cfg = get_default_config()
     _run_online_processing_stage(
-        epochs, cfg, subject_output, subject_id, calibration_bundle_path)
+        epochs, cfg, subject_output, subject_id, calibration_bundle_path, forward_path)
 
     print("Done")
 

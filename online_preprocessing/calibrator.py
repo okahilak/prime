@@ -4,11 +4,11 @@ preprocesses individual trials using the resulting calibration parameters.
 
 Usage
 -----
-    calibrator = Calibrator(cfg)
+    calibrator = Calibrator(cfg, forward)
     for trial in incoming_trials:
         calibrator.add_trial(trial)
 
-    n_ok = calibrator.calibrate(leadfield)
+    n_ok = calibrator.calibrate()
 
     result_pre  = calibrator.preprocess_pre(trial)   # False if rejected
     result_post = calibrator.preprocess_post(trial)  # False if rejected
@@ -304,7 +304,7 @@ def append_calibration_trial(epochs_pre, epochs_pre_ica, epochs_post, trial, cfg
     return epochs_pre, epochs_pre_ica, epochs_post
 
 
-def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, leadfield):
+def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, forward):
     """Full calibration preprocessing pipeline for pre-stim and post-stim epochs."""
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
@@ -312,6 +312,8 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
     sound_opts = opts['sound_opts']
     ssp_sir_opts = opts['ssp_sir_opts']
     filter_opts = opts['filter_opts']
+
+    leadfield = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
 
     calibration_params = {}
 
@@ -449,12 +451,6 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, l
     return calibration_params, n_successful_trials
 
 
-def _compute_leadfield():
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-    forward = mne.read_forward_solution(forward_path)
-    return forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0)
-
-
 # ==================== Single-trial processing ====================
 
 def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
@@ -581,7 +577,7 @@ class Calibrator:
         Result of ``get_default_config()``.
     """
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, forward_path):
         self._cfg = cfg
         self._opts = cfg.to_dicts()
         self._ica_time_range = self._opts['ica_opts']['pre_timerange']
@@ -590,6 +586,9 @@ class Calibrator:
         self._epochs_pre_ica = None
         self._epochs_post = None
         self._calibration_params = None
+
+        self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
+		# TODO: Should we pick the common channels here? Note that it's done in the dipole fitter.
 
     # ------------------------------------------------------------------
     # Public API
@@ -608,17 +607,11 @@ class Calibrator:
             trial, self._cfg, self._ica_time_range,
         )
 
-    def calibrate(self, leadfield=None):
+    def calibrate(self):
         """Run calibration on the accumulated trials.
 
         Stores the resulting parameters internally.  Call ``preprocess_pre`` /
         ``preprocess_post`` on individual trials afterwards.
-
-        Parameters
-        ----------
-        leadfield : np.ndarray or None
-            Pre-computed leadfield matrix.  If *None*, it is computed
-            automatically (requires access to the forward solution on disk).
 
         Returns
         -------
@@ -628,24 +621,21 @@ class Calibrator:
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
 
-        if leadfield is None:
-            leadfield = _compute_leadfield()
-
         calibration_params, n_successful_trials = preprocess_calibration(
             self._epochs_pre.copy(),
             self._epochs_pre_ica.copy(),
             self._epochs_post.copy(),
             self._cfg,
             self._opts,
-            leadfield,
+            self._forward,
         )
         self._calibration_params = calibration_params
         return n_successful_trials
 
     @classmethod
-    def from_bundle(cls, cfg, calibration_params):
+    def from_bundle(cls, cfg, calibration_params, forward_path):
         """Create a calibrated Calibrator from pre-computed params (e.g. loaded from disk)."""
-        instance = cls(cfg)
+        instance = cls(cfg, forward_path)
         instance._calibration_params = calibration_params
         return instance
 

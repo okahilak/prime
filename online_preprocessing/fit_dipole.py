@@ -18,17 +18,8 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 
 mne.set_log_level("ERROR")
 
-COMMON_CHANNELS = [
-    'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
-    'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz', 'F1', 'F2',
-    'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'FC1', 'FC2', 'FC3', 'FC4',
-    'FC5', 'FC6', 'FT7', 'FT8', 'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1',
-    'O2', 'Oz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'PO3',
-    'PO4', 'PO7', 'PO8', 'POz', 'Pz', 'T7', 'T8', 'TP7', 'TP8'
-]
 
-
-def run_calibration(subject, subjects_directory_eeg, forward):
+def run_calibration(subject, subjects_directory_eeg, forward_path):
     """
     Computes dipole fitting parameters from calibration trials for a single subject.
     Saves the fitting info to an .npz file and returns the fitted DipoleFitter.
@@ -43,10 +34,7 @@ def run_calibration(subject, subjects_directory_eeg, forward):
         print(f"ERROR: Could not find post-stimulus epoch file for subject {subject}. Skipping.")
         return None
 
-    if not epochs.info['ch_names'] == forward.ch_names:
-        raise ValueError(f"Channel mismatch for subject {subject}. Aborting.")
-
-    fitter = DipoleFitter(forward)
+    fitter = DipoleFitter(forward_path)
     fitting_info = fitter.fit(epochs)
 
     # Save
@@ -58,7 +46,7 @@ def run_calibration(subject, subjects_directory_eeg, forward):
     return fitter
 
 
-def run_fitting(subject, subjects_directory_eeg, forward, fitter):
+def run_fitting(subject, subjects_directory_eeg, fitter):
     """
     Fits dipoles to all single trials using a calibrated DipoleFitter.
     Saves the fitted dipoles to an .npz file.
@@ -74,9 +62,6 @@ def run_fitting(subject, subjects_directory_eeg, forward, fitter):
         except FileNotFoundError:
             print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
             continue
-
-        if not epochs.info['ch_names'] == forward.ch_names:
-            raise ValueError(f"Channel mismatch for subject {subject} ({group_label}). Aborting.")
 
         fitted_dipoles = {}
         for orientation_label, orientation in [('fixed_ori', 'use_fitted'), ('free_ori', None)]:
@@ -98,15 +83,12 @@ def main():
     args = parser.parse_args()
 
     subjects_directory_eeg = str(DATA_ROOT / "processed")
-    fsaverage_forward_path = os.path.join(DATA_ROOT / "fsaverage", "fsaverage-fwd.fif")
-
+    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     os.makedirs(subjects_directory_eeg, exist_ok=True)
-    forward = mne.read_forward_solution(fsaverage_forward_path, verbose=False)
-    forward = forward.pick_channels(COMMON_CHANNELS, ordered=True)
 
-    fitter = run_calibration(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, forward=forward)
+    fitter = run_calibration(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, forward_path=forward_path)
     if fitter is not None:
-        run_fitting(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, forward=forward, fitter=fitter)
+        run_fitting(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, fitter=fitter)
 
 
 if __name__ == "__main__":
