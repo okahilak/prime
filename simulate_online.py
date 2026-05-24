@@ -32,9 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
 from online_preprocessing.config import get_default_config
+from online_preprocessing.calibrator import Calibrator
 from online_preprocessing.preprocess import (
-    append_calibration_trial,
-    preprocess_calibration,
     preprocess_pre_trial,
     preprocess_post_trial,
     _compute_leadfield,
@@ -73,10 +72,8 @@ def main():
 
     # --- Setup ---
     cfg = get_default_config()
-    opts = cfg.to_dicts()
     leadfield = _compute_leadfield()
     forward = load_forward(cfg)
-    ica_time_range = opts['ica_opts']['pre_timerange']
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
@@ -93,28 +90,22 @@ def main():
     print("CALIBRATION PHASE")
     print("=" * 70)
 
-    # These accumulate as we receive trials
-    epochs_pre = None
-    epochs_pre_ica = None
-    epochs_post = None
-
     # --- Trial-by-trial accumulation ---
+    calibrator = Calibrator(cfg)
+
     for trial_idx in range(N_CALIBRATION_TRIALS):
         # Simulate receiving a single trial
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
 
-        # Accumulate into calibration buffers
-        epochs_pre, epochs_pre_ica, epochs_post = append_calibration_trial(
-            epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range)
+        calibrator.add_trial(trial)
 
         if (trial_idx + 1) % 25 == 0:
             print(f"  Accumulated {trial_idx + 1}/{N_CALIBRATION_TRIALS} calibration trials")
 
-    # --- We have enough trials: run calibration preprocessing ---
+    # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
     t0 = time.time()
-    calibration_params, n_successful_trials = preprocess_calibration(
-        epochs_pre.copy(), epochs_pre_ica.copy(), epochs_post.copy(), cfg, opts, leadfield)
+    calibration_params, n_successful_trials = calibrator.calibrate(leadfield)
     print(f"Calibration preprocessing done in {time.time() - t0:.2f}s, "
           f"used {n_successful_trials} trials")
 
