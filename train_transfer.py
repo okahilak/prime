@@ -798,6 +798,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
     try:
         # --- Data Loading ---
         all_test_subj_epochs, all_test_subj_labels_soft = None, None
+        test_metadata = None
 
         # This logic correctly loads soft labels from all data sources
         if dataset_name == "TMSEEGClassificationTEPfree":
@@ -806,7 +807,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                 dataset = TMSEEGDatasetTEPfree(data_path=args.data_root)
                 paradigm = TMSEEGClassificationTEPfree(tmin=args.tmin, tmax=args.tmax)
 
-                all_test_subj_epochs, all_test_subj_labels_soft, _ = paradigm.get_data(
+                all_test_subj_epochs, all_test_subj_labels_soft, test_metadata = paradigm.get_data(
                     dataset=dataset,
                     subjects=[test_subject_id]
                 )
@@ -879,16 +880,15 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                 console.print(f"          [bold]Pre-Calib Bal. Acc / ROC AUC: {pre_calib_metrics.get('balanced_accuracy_all', np.nan):.4f} / {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
 
                 # --- Split data for calibration and online phases ---
-                if args.use_subject_specific_calibration and args.num_calibration_trials > 0 and len(all_test_subj_epochs) > args.num_calibration_trials:
-                    calib_idx = args.num_calibration_trials
-                    calibration_epochs, online_epochs = all_test_subj_epochs[:calib_idx], all_test_subj_epochs[calib_idx:]
-                    calibration_labels_for_training = all_test_subj_labels_ground_truth[:calib_idx]
-                    online_labels_for_finetuning = all_test_subj_labels_ground_truth[calib_idx:]
-                    online_labels_for_eval = all_test_subj_labels_for_eval[calib_idx:]
-                    online_is_extreme_mask = is_extreme_mask[calib_idx:]
-                else:
-                    online_epochs, online_labels_for_finetuning, online_labels_for_eval, online_is_extreme_mask = all_test_subj_epochs, all_test_subj_labels_ground_truth, all_test_subj_labels_for_eval, is_extreme_mask
-                    calibration_epochs, calibration_labels_for_training = None, None
+                # Use 'period' metadata from the dataset
+                cal_mask = (test_metadata['period'] == 'calibration').values
+                int_mask = (test_metadata['period'] == 'intervention').values
+                calibration_epochs = all_test_subj_epochs[cal_mask]
+                online_epochs = all_test_subj_epochs[int_mask]
+                calibration_labels_for_training = all_test_subj_labels_ground_truth[cal_mask]
+                online_labels_for_finetuning = all_test_subj_labels_ground_truth[int_mask]
+                online_labels_for_eval = all_test_subj_labels_for_eval[int_mask]
+                online_is_extreme_mask = is_extreme_mask[int_mask]
 
                 # --- STAGE 2: CALIBRATION (FINE-TUNING) ---
                 if calibration_epochs is not None and len(calibration_epochs) > 0:

@@ -117,7 +117,8 @@ class TMSEEGDataset(BaseDataset):
     def data_path(self, subject: int, **kwargs) -> List[str]:
         subject_id_str = f"{subject:03d}"
         paths = [
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_pre.fif",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_pre.fif",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_pre.fif",
         ]
         return [str(p) for p in paths if p.exists()]
 
@@ -131,28 +132,49 @@ class TMSEEGDatasetTEPfree(TMSEEGDataset):
     def _get_single_subject_data(self, subject: int) -> dict:
         subject_id_str = f"{subject:03d}"
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
-        eeg_file = subj_dir / f"sub-{subject_id_str}_pre.fif"
-        tep_file = subj_dir / f"sub-{subject_id_str}_fitted_dipoles.npz"
 
-        if not all([f.exists() for f in [eeg_file, tep_file]]):
+        # Load calibration and intervention files separately
+        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.fif"
+        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.fif"
+        tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_dipoles.npz"
+        tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_dipoles.npz"
+
+        required_files = [eeg_cal_file, eeg_int_file, tep_cal_file, tep_int_file]
+        if not all(f.exists() for f in required_files):
             log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
             return {}
 
-        epochs = mne.read_epochs(eeg_file, preload=True, verbose=False)
+        epochs_cal = mne.read_epochs(eeg_cal_file, preload=True, verbose=False)
+        epochs_int = mne.read_epochs(eeg_int_file, preload=True, verbose=False)
 
         try:
-            npz_data = np.load(tep_file, allow_pickle=True)
-            dipoles = npz_data['trial_dipoles_free_ori']
-            tep_amplitudes = np.array([d['amplitude'] for d in dipoles]).flatten()
+            npz_cal = np.load(tep_cal_file, allow_pickle=True)
+            dipoles_cal = npz_cal['trial_dipoles_free_ori']
+            tep_cal = np.array([d['amplitude'] for d in dipoles_cal]).flatten()
+
+            npz_int = np.load(tep_int_file, allow_pickle=True)
+            dipoles_int = npz_int['trial_dipoles_free_ori']
+            tep_int = np.array([d['amplitude'] for d in dipoles_int]).flatten()
         except Exception as e:
             log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
             return {}
 
-        if not (len(epochs) == len(tep_amplitudes)):
+        n_cal = len(epochs_cal)
+        n_int = len(epochs_int)
+
+        if n_cal != len(tep_cal) or n_int != len(tep_int):
             log.error(f"S{subject}: Mismatch in TEP data lengths. Skipping.")
             return {}
 
-        epochs.metadata = pd.DataFrame({"TEP_amplitude": tep_amplitudes})
+        # Concatenate calibration + intervention
+        epochs = mne.concatenate_epochs([epochs_cal, epochs_int])
+        tep_amplitudes = np.concatenate([tep_cal, tep_int])
+        period_labels = np.array(['calibration'] * n_cal + ['intervention'] * n_int)
+
+        epochs.metadata = pd.DataFrame({
+            "TEP_amplitude": tep_amplitudes,
+            "period": period_labels,
+        })
         return {"0": {"0": epochs}}
 
 
@@ -211,14 +233,13 @@ class _BaseTMSEEGParadigm(BaseParadigm):
             
             full_metadata = epochs.metadata.copy()
 
-            if len(full_metadata) < self.calibration_trials:
-                log.warning(
-                    f"S{subject}: Needs at least {self.calibration_trials} trials "
-                    f"for calibration, but found only {len(full_metadata)}. Skipping."
-                )
+            # Determine calibration trials from metadata 'period' column
+            cal_mask = full_metadata['period'] == 'calibration'
+            n_cal = cal_mask.sum()
+            if n_cal == 0:
+                log.warning(f"S{subject}: No calibration trials found in metadata. Skipping.")
                 continue
-
-            meta_calibration = full_metadata.iloc[:self.calibration_trials]
+            meta_calibration = full_metadata[cal_mask]
 
             labeler = self.make_labels_pipeline()
             labeler.fit(meta_calibration)
