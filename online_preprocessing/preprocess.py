@@ -676,6 +676,8 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
 
     _save_calibration_bundle(calibration_bundle_path, calibration_params)
 
+    print(f"Used {n_successful_trials} trials for calibration")
+
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
 
@@ -762,6 +764,8 @@ def run_subject_processing(subject_id: str):
     _run_online_processing_stage(
         epochs, cfg, subject_output, subject_id, calibration_bundle_path)
 
+    print("Done")
+
 
 # %%
 def main():
@@ -769,7 +773,6 @@ def main():
     parser.add_argument("--subject", required=True, type=str, help="Subject identifier.")
     args = parser.parse_args()
     run_subject_processing(subject_id=args.subject)
-
 
 if __name__ == "__main__":
     main()
