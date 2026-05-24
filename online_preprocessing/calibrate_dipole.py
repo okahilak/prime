@@ -140,12 +140,11 @@ def run_calibration(subject, subjects_directory_eeg, forward):
     min_window_size = 3
     max_window_size = 6
     window_size_exponent = 1.5
-    n_calibration_trials = 100
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
     try:
-        epochs = mne.read_epochs(os.path.join(subject_directory, f'{subject}_post.fif'), verbose=False)
+        epochs = mne.read_epochs(os.path.join(subject_directory, f'{subject}_calibration_post.fif'), verbose=False)
     except FileNotFoundError:
         print(f"ERROR: Could not find post-stimulus epoch file for subject {subject}. Skipping.")
         return
@@ -153,7 +152,7 @@ def run_calibration(subject, subjects_directory_eeg, forward):
     if not epochs.info['ch_names'] == forward.ch_names:
         raise ValueError(f"Channel mismatch for subject {subject}. Aborting.")
 
-    evoked = epochs.copy()[:n_calibration_trials].average()
+    evoked = epochs.copy().average()
 
     # Scan all candidate dipole positions in the initial time window
     best_dipole_per_time = dipoles_for_times(evoked, forward, tmin_init, tmax_init)
