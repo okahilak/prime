@@ -682,41 +682,33 @@ def _run_calibration_stage(epochs, cfg, calibration_bundle_path):
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
 
 
-def _run_online_processing_stage(
-    epochs, cfg, subject_output, subject_id, calibration_bundle_path,
+def _process_and_save_trial_group(
+    epochs_data, events, info, tmin, cfg, calibration_params, subject_output, subject_id, label
 ):
-    """Online trial processing: only config, epochs, and calibration bundle from disk."""
-    start_time = time.time()
-
-    calibration_params = _load_calibration_bundle(calibration_bundle_path)
-
-    n_total = len(epochs)
-    all_eeg_data = epochs.get_data(copy=False)
-
-    # Batch-crop and resample pre-stim epochs for all trials
+    """Batch-process a pre-indexed group of trials and save pre/post epochs to disk."""
+    # Batch-crop and resample pre-stim
     epochs_pre_batch = mne.EpochsArray(
-        all_eeg_data, info=epochs.info, events=epochs.events, tmin=epochs.tmin, verbose=False)
+        epochs_data, info=info, events=events, tmin=tmin, verbose=False)
     epochs_pre_batch.crop(cfg.pre_range[0], cfg.pre_range[1]).resample(cfg.target_sfreq, method='polyphase')
     pre_batch_data = epochs_pre_batch.get_data(copy=False)
     pre_batch_info = epochs_pre_batch.info
     pre_batch_tmin = epochs_pre_batch.tmin
     pre_batch_events = epochs_pre_batch.events
 
-    # Batch-crop and resample post-stim epochs for all trials
+    # Batch-crop and resample post-stim
     epochs_post_batch = mne.EpochsArray(
-        all_eeg_data, info=epochs.info, events=epochs.events, tmin=epochs.tmin, verbose=False)
+        epochs_data, info=info, events=events, tmin=tmin, verbose=False)
     epochs_post_batch.crop(cfg.post_range[0], cfg.post_range[1]).resample(cfg.target_sfreq, method='polyphase')
     post_batch_data = epochs_post_batch.get_data(copy=False)
     post_batch_tmin = epochs_post_batch.tmin
     post_batch_events = epochs_post_batch.events
 
-    # Free memory from originals
     del epochs_pre_batch, epochs_post_batch
 
-    # --- Parallel single-trial processing ---
+    n_trials = epochs_data.shape[0]
     pre_list = []
     post_list = []
-    bad_trials_online = []
+    bad_trials = []
 
     initargs = (
         pre_batch_data, pre_batch_info, pre_batch_tmin, pre_batch_events,
@@ -728,21 +720,43 @@ def _run_online_processing_stage(
         initializer=_init_online_trial_worker,
         initargs=initargs,
     ) as executor:
-        results = list(executor.map(_process_online_trial_worker, range(n_total)))
+        results = list(executor.map(_process_online_trial_worker, range(n_trials)))
 
     for i, (_, success, result_pre, result_post) in enumerate(results):
         if success:
             pre_list.append(result_pre)
             post_list.append(result_post)
         else:
-            bad_trials_online.append(i)
+            bad_trials.append(i)
 
     epochs_pre_final = mne.concatenate_epochs(pre_list)
     epochs_post_final = mne.concatenate_epochs(post_list)
 
-    # --- Save results ---
-    for epoch, label in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
-        epoch.save(os.path.join(subject_output, f"{subject_id}_{label}.fif"), overwrite=True)
+    for epoch, segment in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
+        epoch.save(os.path.join(subject_output, f"{subject_id}_{label}_{segment}.fif"), overwrite=True)
+
+
+def _run_online_processing_stage(
+    epochs, cfg, subject_output, subject_id, calibration_bundle_path,
+):
+    """Online trial processing: only config, epochs, and calibration bundle from disk."""
+    start_time = time.time()
+
+    calibration_params = _load_calibration_bundle(calibration_bundle_path)
+
+    n_calibration = cfg.n_trials_calibrate
+    epochs_data = epochs.get_data(copy=False)
+
+    _process_and_save_trial_group(
+        epochs_data[:n_calibration], epochs.events[:n_calibration],
+        epochs.info, epochs.tmin,
+        cfg, calibration_params, subject_output, subject_id, label='calibration',
+    )
+    _process_and_save_trial_group(
+        epochs_data[n_calibration:], epochs.events[n_calibration:],
+        epochs.info, epochs.tmin,
+        cfg, calibration_params, subject_output, subject_id, label='intervention',
+    )
 
     end_time = time.time()
     print(f"Online processing stage took {end_time - start_time:.2f} seconds")
