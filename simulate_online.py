@@ -33,17 +33,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing")
 
 from online_preprocessing.config import get_default_config
 from online_preprocessing.calibrator import Calibrator
+from online_preprocessing.dipole_fitter import DipoleFitter
 from online_preprocessing.preprocess import (
     _compute_leadfield,
     _load_subject_epochs,
     _single_trial_epochs_from_arrays,
 )
-from online_preprocessing.calibrate_dipole import (
-    dipoles_for_times,
-    determine_optimal_time_range,
-    determine_optimal_ori_and_pos,
-)
-from online_preprocessing.fit_dipole import fit_dipoles_to_single_trials
 
 # =============================================================================
 # Hard-coded constants
@@ -122,19 +117,10 @@ def main():
 
     # --- Calibrate dipole fitting parameters ---
     print("\nCalibrating dipole parameters...")
-    evoked = cal_post_epochs.copy().average()
-
-    tmin_init, tmax_init = 0.038, 0.050
-    min_window_size = 3
-    max_window_size = 6
-    window_size_exponent = 1.5
-
-    best_dipole_per_time = dipoles_for_times(evoked, forward, tmin_init, tmax_init)
-    time_range, dipoles_in_time_range = determine_optimal_time_range(
-        best_dipole_per_time, min_window_size, max_window_size, window_size_exponent)
-    position_index, orientation = determine_optimal_ori_and_pos(dipoles_in_time_range, forward)
-
-    tmin_fit, tmax_fit = float(time_range[0]), float(time_range[1])
+    dipole_fitter = DipoleFitter(forward)
+    dipole_fitter.fit(cal_post_epochs)
+    position_index = dipole_fitter.fitting_info['position_index']
+    tmin_fit, tmax_fit = dipole_fitter.fitting_info['time_range']
     print(f"  Position index: {position_index}")
     print(f"  Time range: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
 
@@ -152,12 +138,11 @@ def main():
 
     # --- Fit dipoles to calibration post-stim trials ---
     print("\nFitting dipoles to calibration trials...")
-    for fixed_ori in [orientation, None]:
-        ori_label = "fixed" if fixed_ori is not None else "free"
-        dipoles_for_trials, extraction_times = fit_dipoles_to_single_trials(
-            cal_post_epochs, forward, position_index, fixed_ori, tmin_fit, tmax_fit)
+    for orientation_label, orientation in [('fixed', 'use_fitted'), ('free', None)]:
+        dipoles_for_trials, extraction_times = dipole_fitter.fit_trials(
+            cal_post_epochs, orientation=orientation)
         mean_time_ms = np.mean(extraction_times) * 1e3
-        print(f"  {ori_label} orientation: {len(dipoles_for_trials)} dipoles, "
+        print(f"  {orientation_label} orientation: {len(dipoles_for_trials)} dipoles, "
               f"avg extraction time {mean_time_ms:.2f} ms")
 
     # --- Summary ---
