@@ -12,7 +12,7 @@ import os
 import argparse
 from pathlib import Path
 
-from dipole_fitter import DipoleFitter
+from .dipole_fitter import DipoleFitter
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 

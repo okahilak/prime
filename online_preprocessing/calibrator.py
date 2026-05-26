@@ -22,10 +22,10 @@ import numpy as np
 from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
 
-from utils.ica_calibrator import get_number_of_components, get_ica
-from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
-from utils.sound_modified import sound
-from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
+from .utils.ica_calibrator import get_number_of_components, get_ica
+from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
+from .utils.sound_modified import sound
+from .utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 

@@ -35,7 +35,6 @@ from online_preprocessing.config import get_default_config
 from online_preprocessing.calibrator import Calibrator
 from online_preprocessing.dipole_fitter import DipoleFitter
 from online_preprocessing.preprocess import (
-    _compute_leadfield,
     _load_subject_epochs,
     _single_trial_epochs_from_arrays,
 )
