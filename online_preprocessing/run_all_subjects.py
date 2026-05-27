@@ -22,8 +22,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 RAW_DATA_DIR = DATA_ROOT / "raw"
-PREPROCESS_SCRIPT = SCRIPT_DIR / "preprocess.py"
-DIPOLE_CALIBRATION_SCRIPT = SCRIPT_DIR / "calibrate_dipole.py"
 DIPOLE_FIT_SCRIPT = SCRIPT_DIR / "fit_dipole.py"
 PROCESSED_DIR = DATA_ROOT / "processed"
 
@@ -84,10 +82,10 @@ def _process_subject(
             print(f"  SKIP preprocess: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} {PREPROCESS_SCRIPT} --subject {subject}")
+            print(f"  DRY-RUN: {python} -m online_preprocessing.preprocess --subject {subject}")
         else:
             _run_command(
-                [python, "-u", str(PREPROCESS_SCRIPT), "--subject", subject],
+                [python, "-u", "-m", "online_preprocessing.preprocess", "--subject", subject],
                 prep_env,
                 f"preprocess {subject}",
             )
@@ -98,16 +96,10 @@ def _process_subject(
             print(f"  SKIP dipole: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} {DIPOLE_CALIBRATION_SCRIPT} --subject {subject}")
-            print(f"  DRY-RUN: {python} {DIPOLE_FIT_SCRIPT} --subject {subject}")
+            print(f"  DRY-RUN: {python} -m online_preprocessing.fit_dipole --subject {subject}")
         else:
             _run_command(
-                [python, "-u", str(DIPOLE_CALIBRATION_SCRIPT), "--subject", subject],
-                os.environ.copy(),
-                f"dipole calibration {subject}",
-            )
-            _run_command(
-                [python, "-u", str(DIPOLE_FIT_SCRIPT), "--subject", subject],
+                [python, "-u", "-m", "online_preprocessing.fit_dipole", "--subject", subject],
                 os.environ.copy(),
                 f"dipole fit {subject}",
             )
