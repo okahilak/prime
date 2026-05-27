@@ -22,6 +22,7 @@ from pathlib import Path
 
 import mne
 import numpy as np
+import pandas as pd
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -38,6 +39,7 @@ from online_preprocessing.preprocess import (
     _load_subject_epochs,
     _single_trial_epochs_from_arrays,
 )
+from TMS_EEG_moabb import TEPNormalizer
 
 # =============================================================================
 # Hard-coded constants
@@ -92,17 +94,21 @@ def main():
     print(f"Calibration preprocessing done in {time.time() - t0:.2f}s, "
           f"used {n_successful_trials} trials")
 
-    # --- Calibrate dipole from calibration post-stim data ---
-    # First, preprocess each calibration trial's post-stim to get clean epochs for dipole calibration
-    print("\nPreprocessing calibration trials (post-stim) for dipole calibration...")
+    # --- Process calibration trials: pre + post together (offline requires both) ---
+    print("\nPreprocessing calibration trials (both pre & post)...")
+    cal_pre_list = []
     cal_post_list = []
     for trial_idx in range(N_CALIBRATION_TRIALS):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
+        result_pre = calibrator.preprocess_pre(trial)
         result_post = calibrator.preprocess_post(trial)
-        if result_post is not False:
+        if result_pre is not False and result_post is not False:
+            cal_pre_list.append(result_pre)
             cal_post_list.append(result_post)
 
-    print(f"  {len(cal_post_list)}/{N_CALIBRATION_TRIALS} post-stim trials survived preprocessing")
+    print(f"  {len(cal_post_list)}/{N_CALIBRATION_TRIALS} calibration trials survived "
+          f"(both pre & post)")
+    cal_pre_epochs = mne.concatenate_epochs(cal_pre_list)
     cal_post_epochs = mne.concatenate_epochs(cal_post_list)
 
     # --- Calibrate dipole fitting parameters ---
@@ -114,26 +120,17 @@ def main():
     print(f"  Position index: {position_index}")
     print(f"  Time range: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
 
-    # --- Preprocess calibration trials (pre-stim) for classifier input ---
-    print("\nPreprocessing calibration trials (pre-stim) for classifier...")
-    cal_pre_list = []
-    for trial_idx in range(N_CALIBRATION_TRIALS):
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        result_pre = calibrator.preprocess_pre(trial)
-        if result_pre is not False:
-            cal_pre_list.append(result_pre)
-
-    print(f"  {len(cal_pre_list)}/{N_CALIBRATION_TRIALS} pre-stim trials survived preprocessing")
-    cal_pre_epochs = mne.concatenate_epochs(cal_pre_list)
-
     # --- Fit dipoles to calibration post-stim trials ---
     print("\nFitting dipoles to calibration trials...")
+    cal_dipoles_free = None
     for orientation_label, orientation in [('fixed', 'use_fitted'), ('free', None)]:
         dipoles_for_trials, extraction_times = dipole_fitter.fit_trials(
             cal_post_epochs, orientation=orientation)
         mean_time_ms = np.mean(extraction_times) * 1e3
         print(f"  {orientation_label} orientation: {len(dipoles_for_trials)} dipoles, "
               f"avg extraction time {mean_time_ms:.2f} ms")
+        if orientation is None:
+            cal_dipoles_free = dipoles_for_trials
 
     # --- Summary ---
     print("\n" + "=" * 70)
@@ -146,31 +143,102 @@ def main():
     print("=" * 70)
 
     # =========================================================================
-    # REFERENCE: offline pipeline prediction for the first non-calibration trial
-    #
-    # The .npz file contains predictions from the fully offline pipeline
-    # (train_transfer.py) for the intervention (post-calibration) phase only —
-    # calibration trials are excluded, so index 0 is the first trial after the
-    # N_CALIBRATION_TRIALS boundary.
-    #
-    # This is what the online path should eventually reproduce for each trial.
-    # (Missing code parts: feature extraction → model inference → decision.)
+    # INTERVENTION PHASE — process post-calibration trials, fit dipoles,
+    # compute normalized TEP labels using the same Calibrator preprocessing
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("INTERVENTION PHASE — TEP label computation")
+    print("=" * 70)
+
+    n_intervention = n_total_trials - N_CALIBRATION_TRIALS
+    print(f"Processing {n_intervention} intervention trials...")
+
+    # --- Process intervention trials: require both pre & post to pass ---
+    int_post_list = []
+    int_pre_list = []
+    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
+        result_pre = calibrator.preprocess_pre(trial)
+        result_post = calibrator.preprocess_post(trial)
+        if result_pre is not False and result_post is not False:
+            int_pre_list.append(result_pre)
+            int_post_list.append(result_post)
+        if (trial_idx - N_CALIBRATION_TRIALS + 1) % 100 == 0:
+            print(f"  Preprocessed {trial_idx - N_CALIBRATION_TRIALS + 1}/{n_intervention} "
+                  f"intervention trials")
+
+    print(f"  {len(int_post_list)}/{n_intervention} intervention trials survived "
+          f"(both pre & post)")
+    int_post_epochs = mne.concatenate_epochs(int_post_list)
+
+    print("\nFitting free-orientation dipoles to intervention trials...")
+    int_dipoles_free, int_extraction_times = dipole_fitter.fit_trials(
+        int_post_epochs, orientation=None)
+    print(f"  {len(int_dipoles_free)} dipoles fitted, "
+          f"avg time {np.mean(int_extraction_times)*1e3:.2f} ms")
+
+    # --- TEP normalization (matching offline path) ---
+    cal_tep_amplitudes = np.array([d['amplitude'] for d in cal_dipoles_free]).flatten()
+    int_tep_amplitudes = np.array([d['amplitude'] for d in int_dipoles_free]).flatten()
+    all_tep_amplitudes = np.concatenate([cal_tep_amplitudes, int_tep_amplitudes])
+    period_labels = (['calibration'] * len(cal_tep_amplitudes) +
+                     ['intervention'] * len(int_tep_amplitudes))
+
+    full_metadata = pd.DataFrame({
+        'TEP_amplitude': all_tep_amplitudes,
+        'period': period_labels,
+    })
+    cal_metadata = full_metadata[full_metadata['period'] == 'calibration']
+
+    # Fit normalizer on calibration, transform full sequence
+    normalizer = TEPNormalizer(target_col='TEP_amplitude', scale_factor=1.0)
+    normalizer.fit(cal_metadata)
+    all_labels = normalizer.transform(full_metadata)
+
+    # Extract intervention labels
+    int_labels = all_labels[len(cal_tep_amplitudes):]
+    print(f"\n  Calibration TEP amplitudes: {len(cal_tep_amplitudes)}")
+    print(f"  Intervention TEP amplitudes: {len(int_tep_amplitudes)}")
+    print(f"  Intervention labels (first 5): {int_labels[:5]}")
+
+    # =========================================================================
+    # COMPARE WITH OFFLINE LABELS
     # =========================================================================
     OFFLINE_PREDICTIONS_PATH = (
         Path(__file__).resolve().parent
-        / "results/replicate_prime/2026-05-24_09-34-12"
+        / "results/replicate_prime/2026-05-27_20-26-55"
         / f"predictions_subj_18_fold_2.npz"
     )
     print("\n" + "=" * 70)
-    print("OFFLINE REFERENCE (first non-calibration trial)")
+    print("COMPARE ONLINE vs OFFLINE LABELS")
     print("=" * 70)
     offline = np.load(OFFLINE_PREDICTIONS_PATH)
-    first_pred = offline["predictions"][0]
-    first_actual = offline["actual_values"][0]
-    print(f"  Raw prediction (sigmoid prob): {first_pred:.6f}")
-    print(f"  Actual value (soft label):     {first_actual:.6f}")
-    print(f"  Hard label (>0.5):             {int(first_actual > 0.5)}")
-    print(f"  Hard prediction (>0.5):        {int(first_pred > 0.5)}")
+    offline_labels = offline["actual_values"]
+
+    n_compare = min(len(int_labels), len(offline_labels))
+    online_labels = int_labels[:n_compare]
+    offline_labels_cmp = offline_labels[:n_compare]
+
+    print(f"  Online labels count:  {len(int_labels)}")
+    print(f"  Offline labels count: {len(offline_labels)}")
+    print(f"  Comparing first {n_compare} labels...")
+    print(f"")
+    print(f"  First online label:   {online_labels[0]:.6f}")
+    print(f"  First offline label:  {offline_labels_cmp[0]:.6f}")
+    print(f"  Match (first):        {np.isclose(online_labels[0], offline_labels_cmp[0], atol=1e-4)}")
+    print(f"")
+    diffs = np.abs(online_labels - offline_labels_cmp)
+    print(f"  Max absolute diff:    {np.max(diffs):.8f}")
+    print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
+    print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
+    print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
+    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-4)
+    print(f"  All match (atol=1e-4): {match_all}")
+    # Note: a single-label ECDF quantization difference of ~1/N_stable is expected
+    # when float32 (offline) vs float64 (online) puts a value on different sides
+    # of an ECDF step boundary.
+    match_tolerant = np.allclose(online_labels, offline_labels_cmp, atol=0.011)
+    print(f"  All match (atol=0.011, accounting for ECDF step): {match_tolerant}")
     print("=" * 70)
 
 
