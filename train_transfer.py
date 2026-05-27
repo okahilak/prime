@@ -1020,6 +1020,12 @@ def run_cross_subject_experiment(
         for fold_idx, (train_indices, test_indices) in enumerate(kf.split(subjects_to_run)):
             train_subject_ids = [subjects_to_run[i] for i in train_indices]
             test_subject_ids = [subjects_to_run[i] for i in test_indices]
+
+            # Skip folds not matching run_only_fold (1-indexed) if specified
+            run_only_fold = getattr(args, "run_only_fold", None)
+            if run_only_fold is not None and (fold_idx + 1) != run_only_fold:
+                continue
+
             console.print(f"\n  [bold blue]=> Fold {fold_idx+1}/{args.n_splits} | Train: {train_subject_ids} | Test: {test_subject_ids}[/bold blue]")
             
             try:
