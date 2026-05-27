@@ -658,7 +658,7 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
                 single_label_for_evaluation_np = labels_for_evaluation[trial_idx]
                 
                 single_epoch_t = torch.from_numpy(single_epoch_np).float().unsqueeze(0).to(device)
-                single_label_for_eval_t = torch.tensor([single_label_for_evaluation_np], dtype=torch.float, device=device)
+                single_label_for_eval_t = torch.tensor([single_label_for_evaluation_np], dtype=torch.float64, device=device)
 
                 model.eval()
                 # --------------- PREDICT ---------------
