@@ -145,6 +145,34 @@ def main():
     print(f"  Post-stim epochs (dipole-fitted): {cal_post_epochs.get_data(copy=False).shape}")
     print("=" * 70)
 
+    # =========================================================================
+    # REFERENCE: offline pipeline prediction for the first non-calibration trial
+    #
+    # The .npz file contains predictions from the fully offline pipeline
+    # (train_transfer.py) for the intervention (post-calibration) phase only —
+    # calibration trials are excluded, so index 0 is the first trial after the
+    # N_CALIBRATION_TRIALS boundary.
+    #
+    # This is what the online path should eventually reproduce for each trial.
+    # (Missing code parts: feature extraction → model inference → decision.)
+    # =========================================================================
+    OFFLINE_PREDICTIONS_PATH = (
+        Path(__file__).resolve().parent
+        / "results/replicate_prime/2026-05-24_09-34-12"
+        / f"predictions_subj_18_fold_2.npz"
+    )
+    print("\n" + "=" * 70)
+    print("OFFLINE REFERENCE (first non-calibration trial)")
+    print("=" * 70)
+    offline = np.load(OFFLINE_PREDICTIONS_PATH)
+    first_pred = offline["predictions"][0]
+    first_actual = offline["actual_values"][0]
+    print(f"  Raw prediction (sigmoid prob): {first_pred:.6f}")
+    print(f"  Actual value (soft label):     {first_actual:.6f}")
+    print(f"  Hard label (>0.5):             {int(first_actual > 0.5)}")
+    print(f"  Hard prediction (>0.5):        {int(first_pred > 0.5)}")
+    print("=" * 70)
+
 
 if __name__ == "__main__":
     main()
