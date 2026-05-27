@@ -26,10 +26,10 @@ log = logging.getLogger(__name__)
 DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
 
 # %%
-# Real-Time Compatible Labeler with Warm-up
-class RealTimeLabeler:
+# Real-Time Compatible TEP Normalizer with Warm-up
+class TEPNormalizer:
     """
-    A stateful labeler that learns from a calibration set and applies transformations
+    A stateful normalizer that learns from a calibration set and applies transformations
     causally to generate soft, probabilistic labels.
     """
     def __init__(
@@ -77,7 +77,7 @@ class RealTimeLabeler:
         Applies the learned transformations to the full session's data.
         """
         if not self.is_fitted:
-            raise RuntimeError("The labeler has not been fitted yet. Call .fit() first.")
+            raise RuntimeError("The normalizer has not been fitted yet. Call .fit() first.")
 
         metadata_copy = metadata_df_full.copy()
         values = metadata_copy[self.target_col].astype(float) * self.scale_factor
@@ -209,8 +209,8 @@ class _BaseTMSEEGParadigm(BaseParadigm):
     def used_events(self, dataset):
         return dict(dataset.event_id)
 
-    def make_labels_pipeline(self):
-        raise NotImplementedError("Subclasses must implement their own label pipeline.")
+    def make_normalizer_pipeline(self):
+        raise NotImplementedError("Subclasses must implement their own normalizer pipeline.")
 
     def get_data(self, dataset, subjects=None, return_epochs=False):
         """
@@ -241,9 +241,9 @@ class _BaseTMSEEGParadigm(BaseParadigm):
                 continue
             meta_calibration = full_metadata[cal_mask]
 
-            labeler = self.make_labels_pipeline()
-            labeler.fit(meta_calibration)
-            y_run = labeler.transform(full_metadata)
+            normalizer = self.make_normalizer_pipeline()
+            normalizer.fit(meta_calibration)
+            y_run = normalizer.transform(full_metadata)
 
             nan_mask = np.isnan(y_run)
             if np.any(nan_mask):
@@ -289,17 +289,17 @@ class TMSEEGClassificationTEPfree(_BaseTMSEEGParadigm):
     def datasets(self):
         return [TMSEEGDatasetTEPfree()]
 
-    def make_labels_pipeline(self):
-        return RealTimeLabeler(target_col=self.target_metadata_col, scale_factor=1.0)
+    def make_normalizer_pipeline(self):
+        return TEPNormalizer(target_col=self.target_metadata_col, scale_factor=1.0)
 
 
 # %%
-def plot_realtimelabeler_diagnostics(subject_id, metadata, final_labels, target_col, scale_factor=1.0, ewma_span=25):
-    """Generates a multi-panel plot to visualize the new labeling process."""
+def plot_tep_normalizer_diagnostics(subject_id, metadata, final_labels, target_col, scale_factor=1.0, ewma_span=25):
+    """Generates a multi-panel plot to visualize the new normalization process."""
     warmup_period = ewma_span 
 
     fig, axes = plt.subplots(3, 1, figsize=(15, 12), sharex=True)
-    fig.suptitle(f"Real-Time Labeling Diagnostics for Subject {subject_id} ({target_col})", fontsize=16)
+    fig.suptitle(f"Real-Time Normalization Diagnostics for Subject {subject_id} ({target_col})", fontsize=16)
 
     raw_values = metadata[target_col].values * scale_factor
     blocks = metadata['block'].values
@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
         if y_tep.size > 0:
             log.info("Generating diagnostic plot for TEP processing...")
-            plot_realtimelabeler_diagnostics(
+            plot_tep_normalizer_diagnostics(
                 subject_id=subject_tep,
                 metadata=meta_tep,
                 final_labels=y_tep,
