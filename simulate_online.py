@@ -232,13 +232,8 @@ def main():
     print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
     print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
     print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
-    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-4)
-    print(f"  All match (atol=1e-4): {match_all}")
-    # Note: a single-label ECDF quantization difference of ~1/N_stable is expected
-    # when float32 (offline) vs float64 (online) puts a value on different sides
-    # of an ECDF step boundary.
-    match_tolerant = np.allclose(online_labels, offline_labels_cmp, atol=0.011)
-    print(f"  All match (atol=0.011, accounting for ECDF step): {match_tolerant}")
+    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-7)
+    print(f"  All match (atol=1e-7): {match_all}")
     print("=" * 70)
 
 

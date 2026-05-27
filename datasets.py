@@ -198,7 +198,7 @@ def load_cached_pretrain_data(
         return None, None, None, None, None, None
 
     # --- Label and Data Shape Processing ---
-    labels_numeric = np.array(y_values).astype(np.float32)
+    labels_numeric = np.array(y_values).astype(np.float64)
     log.info(f"Using probabilistic float labels (dtype: {labels_numeric.dtype}).")
     _, n_channels, n_timepoints = epochs_data.shape
 
