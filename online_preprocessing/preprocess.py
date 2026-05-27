@@ -8,11 +8,18 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-from .config import get_default_config
-from .calibrator import (
-    Calibrator,
-    _single_trial_epochs_from_arrays,
-)
+try:
+    from .config import get_default_config
+    from .calibrator import (
+        Calibrator,
+        _single_trial_epochs_from_arrays,
+    )
+except ImportError:
+    from config import get_default_config
+    from calibrator import (
+        Calibrator,
+        _single_trial_epochs_from_arrays,
+    )
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
