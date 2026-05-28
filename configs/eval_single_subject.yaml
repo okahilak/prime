@@ -5,7 +5,7 @@
 #   python train_transfer.py -c configs/eval_single_subject.yaml
 #
 dataset_names: ["TMSEEGClassificationTEPfree"]
-subjects: [21]              # null = all available subjects; or specify e.g. [21]
+subjects: [21, 22, 24, 38, 103, 114, 122]              # null = all available subjects; or specify e.g. [21]
 
 experiment_mode: "single_subject_eval"
 
