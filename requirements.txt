@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 einops==0.8.1
 matplotlib==3.10.5
 mne==1.10.0
@@ -13,7 +15,7 @@ scikit_learn==1.7.1
 scipy==1.16.1
 statsmodels==0.14.4
 submitit==1.5.3
-torch==2.7.0
+torch==2.7.0+cu128
 torchinfo==1.8.0
 tqdm==4.67.1
 wandb==0.21.0
