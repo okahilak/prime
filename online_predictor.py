@@ -26,10 +26,23 @@ class OnlinePredictor:
     Wraps a TTAWrapper model and provides a clean trial-by-trial interface
     for online prediction and finetuning.
 
+    Lifecycle contract:
+        A new OnlinePredictor (and its underlying TTAWrapper) must be
+        constructed per subject to avoid state leakage. Alternatively,
+        call reset() between subjects to clear buffers, optimizer moments,
+        and trial count.  Alignment state lives in the TTAWrapper and is
+        re-initialized by calibrate().
+
+    RNG contract:
+        This class does NOT reset the global torch RNG. The caller is
+        responsible for calling torch.manual_seed() before the trial loop
+        to ensure deterministic dropout etc. across paths.
+
     Usage:
         predictor = OnlinePredictor(model_wrapped, args, device)
         predictor.calibrate(calibration_epochs, calibration_labels)
 
+        torch.manual_seed(seed)  # caller's responsibility
         for epoch_np, label in stream:
             prob = predictor.predict(epoch_np)
             loss = predictor.finetune(epoch_np, label)
@@ -53,17 +66,11 @@ class OnlinePredictor:
         self._label_buffer: Optional[deque] = None
         self._trial_count = 0
 
-        if args.finetune_mode != "none" and args.finetune_epochs > 0:
-            optimizer_params = {
-                "lr": args.lr_finetune,
-                "weight_decay": args.weight_decay_finetune,
-            }
-            self._optimizer = torch.optim.AdamW(
-                model.parameters(), **optimizer_params
-            )
-            window_size = args.window_size
-            self._epoch_buffer = deque(maxlen=window_size)
-            self._label_buffer = deque(maxlen=window_size)
+        self._finetuning_enabled = (
+            args.finetune_mode != "none" and args.finetune_epochs > 0
+        )
+        if self._finetuning_enabled:
+            self._init_optimizer_and_buffers()
 
     def predict(self, epoch_np: np.ndarray) -> float:
         """
@@ -75,14 +82,25 @@ class OnlinePredictor:
         Returns:
             Predicted probability (float in [0, 1]).
         """
+        # TTAWrapper.predict returns raw logits (output - decision_criterion).
+        # We apply sigmoid here — this is the single point of logit→prob conversion.
+        logits = self.predict_logits(epoch_np)
+        return torch.sigmoid(torch.tensor(logits)).item()
+
+    def predict_logits(self, epoch_np: np.ndarray) -> float:
+        """
+        Return raw logit for a single epoch (no sigmoid).
+
+        Useful when callers need the unnormalized output, e.g. for custom
+        thresholding or external evaluation functions.
+        """
         self.model.eval()
         epoch_t = (
             torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
         )
         with torch.no_grad():
             logits = self.model.predict(epoch_t)
-        prob = torch.sigmoid(logits).item()
-        return prob
+        return logits.item()
 
     def finetune(self, epoch_np: np.ndarray, label: float) -> Optional[float]:
         """
@@ -109,12 +127,29 @@ class OnlinePredictor:
         self._label_buffer.append(label)
         self._trial_count += 1
 
-        # 3. Finetune when buffer has enough samples
+        # 3. Finetune when buffer has enough samples.
+        # NOTE: with default config (window_size=50, batch_size_finetune=50),
+        # the buffer fires exactly when full.  If these diverge, the first
+        # finetuning step triggers at batch_size_finetune trials — not when
+        # the buffer is full.
         min_buffer = self.args.batch_size_finetune
         if len(self._epoch_buffer) < min_buffer:
             return None
 
         return self._run_finetuning_step()
+
+    def reset(self) -> None:
+        """
+        Reset all mutable state for reuse on a new subject.
+
+        Clears the epoch/label buffers, trial count, and reinitializes the
+        finetuning optimizer (discarding Adam moments).  Alignment state
+        in the TTAWrapper is NOT reset here — call calibrate() on the new
+        subject's data to reinitialize it.
+        """
+        self._trial_count = 0
+        if self._finetuning_enabled:
+            self._init_optimizer_and_buffers()
 
     def calibrate(
         self, epochs_np: np.ndarray, labels: np.ndarray, **kwargs
@@ -122,6 +157,10 @@ class OnlinePredictor:
         """
         Perform initial calibration: initialize alignment from calibration
         data and do supervised training over multiple epochs.
+
+        Note: calibrate uses a throwaway optimizer (separate from the online
+        finetune optimizer) whose Adam moments are intentionally discarded.
+        This matches the original training path.
 
         Args:
             epochs_np: Calibration epochs, shape (n_trials, n_channels, n_times).
@@ -225,6 +264,19 @@ class OnlinePredictor:
         self.model.eval()
         avg_loss = total_loss / (len(loader) * self.args.finetune_epochs)
         return avg_loss
+
+    def _init_optimizer_and_buffers(self) -> None:
+        """(Re)initialize the finetuning optimizer and sliding-window buffers."""
+        optimizer_params = {
+            "lr": self.args.lr_finetune,
+            "weight_decay": self.args.weight_decay_finetune,
+        }
+        self._optimizer = torch.optim.AdamW(
+            self.model.parameters(), **optimizer_params
+        )
+        window_size = self.args.window_size
+        self._epoch_buffer = deque(maxlen=window_size)
+        self._label_buffer = deque(maxlen=window_size)
 
     @staticmethod
     def _make_loader(
