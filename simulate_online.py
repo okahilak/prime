@@ -11,7 +11,7 @@ what a true online system would do. Currently implements the calibration phase:
 5. Fit dipoles to the calibration post-stim epochs.
 
 Hard-coded settings:
-- Subject: sub-018
+- Subject: sub-021
 - Number of calibration trials: 125
 """
 

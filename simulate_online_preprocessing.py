@@ -44,7 +44,7 @@ from TMS_EEG_moabb import TEPNormalizer
 # =============================================================================
 # Hard-coded constants
 # =============================================================================
-SUBJECT_ID = "sub-018"
+SUBJECT_ID = "sub-021"
 N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
