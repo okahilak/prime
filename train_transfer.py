@@ -31,7 +31,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
-from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
@@ -48,9 +47,9 @@ from datasets import *
 from TMS_EEG_moabb import TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree
 from models.builder import build_model
 from tta_wrapper import TTAWrapper
-from online_predictor import OnlinePredictor
-from utils import (RegressionMetricsTracker, evaluate_single_trial,
-                   evaluate_zero_shot, filter_args_for_model,get_checkpoint_dir, get_model_class,
+from online_predictor import OnlinePredictor, score_predictions
+from utils import (RegressionMetricsTracker, filter_args_for_model,
+                   get_checkpoint_dir, get_model_class,
                    get_output_dir, save_checkpoint, save_results_df)
 
 # Optional dependencies for specific functionalities
@@ -627,13 +626,13 @@ def log_memory_usage(stage: str, log_obj=None):
         log_obj.debug(f"Memory usage at {stage}: {memory_mb:.1f} MB")
 
 #%%
-def run_online_finetuning_simulation(model, test_subj_epochs,
+def run_online_finetuning_simulation(predictor, test_subj_epochs,
                                      labels_for_finetuning, labels_for_evaluation,
                                      is_extreme_mask, original_soft_labels,
                                      args, device, console, wandb_run,
-                                     run_output_dir, model_name, dataset_name, subject_id, fold_idx, global_backrot_matrix_np: Optional[np.ndarray] = None):
+                                     run_output_dir, model_name, dataset_name, subject_id, fold_idx):
     """
-    Run an online finetuning simulation using OnlinePredictor.
+    Run an online finetuning simulation using an already-constructed OnlinePredictor.
     """
     if test_subj_epochs is None or test_subj_epochs.size == 0:
         log.error(f"Empty test data provided for Subj {subject_id}. Skipping simulation.")
@@ -648,12 +647,7 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
     trial_metrics_log = []
 
     try:
-        predictor = OnlinePredictor(
-            model=model, args=args, device=device,
-            global_backrot_matrix_np=global_backrot_matrix_np,
-        )
-
-        torch.manual_seed(args.seed)
+        predictor.prepare_for_stream(args.seed)
         online_iterator = tqdm(range(n_trials_subj), desc=f"Online Sim ({log_prefix})", leave=False)
         for trial_idx in online_iterator:
             trial_start_time = time.time()
@@ -701,25 +695,12 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
         y_true_all = np.array(metrics_tracker.all_y_true)
         y_pred_all = np.array(metrics_tracker.all_y_pred)
 
-        final_metrics = {}
-
-        y_true_hard_all = (y_true_all > 0.5).astype(int)
-        if len(np.unique(y_true_hard_all)) > 1:
-            final_metrics["balanced_accuracy_all"] = balanced_accuracy_score(y_true_hard_all, y_pred_all > 0.5)
-            final_metrics["roc_auc_all"] = roc_auc_score(y_true_hard_all, y_pred_all)
-
-        final_metrics.update({"balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan})
-
-        if is_extreme_mask is not None and np.any(is_extreme_mask):
-            extreme_indices = np.where(is_extreme_mask)[0]
-            if len(extreme_indices) > 1:
-                extreme_preds_soft = y_pred_all[extreme_indices]
-                extreme_true_soft = original_soft_labels[extreme_indices]
-                extreme_true_hard = (extreme_true_soft > 0.5).astype(int)
-
-                if len(np.unique(extreme_true_hard)) > 1:
-                    final_metrics["balanced_accuracy_extreme"] = balanced_accuracy_score(extreme_true_hard, (extreme_preds_soft > 0.5))
-                    final_metrics["roc_auc_extreme"] = roc_auc_score(extreme_true_hard, extreme_preds_soft)
+        final_metrics = score_predictions(
+            predictions=y_pred_all,
+            labels=y_true_all,
+            is_extreme_mask=is_extreme_mask,
+            original_soft_labels=original_soft_labels,
+        )
 
         log.info(f"Online sim finished. All (Bal Acc / ROC): {final_metrics.get('balanced_accuracy_all', np.nan):.4f} / {final_metrics.get('roc_auc_all', np.nan):.4f}.")
 
@@ -837,14 +818,20 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                     model_eval_wrapped.wrapped_model.load_state_dict(pretrained_models_fold[model_name])
                     console.print("        Loaded generic pre-trained state.")
 
+                # --- Construct the single predictor for this (subject, model) ---
+                predictor = OnlinePredictor(
+                    model=model_eval_wrapped, args=args, device=device,
+                    global_backrot_matrix_np=global_backrot_matrix_np,
+                )
+
                 # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
                 console.print(f"          Evaluating Pre-Calibration Zero-Shot Performance on all {len(all_test_subj_epochs)} trials...")
-                pre_calib_metrics = evaluate_zero_shot(
-                    model=model_eval_wrapped, test_epochs=all_test_subj_epochs,
-                    test_labels=all_test_subj_labels_for_eval,
-                    device=device, batch_size=args.batch_size_finetune,
+                pre_calib_preds = predictor.predict_batch(all_test_subj_epochs, batch_size=args.batch_size_finetune)
+                pre_calib_metrics = score_predictions(
+                    predictions=pre_calib_preds,
+                    labels=all_test_subj_labels_for_eval,
                     is_extreme_mask=is_extreme_mask,
-                    original_soft_labels=all_test_subj_labels_for_eval
+                    original_soft_labels=all_test_subj_labels_for_eval,
                 )
                 subject_results[model_name]["pre_calib_zero_shot"] = pre_calib_metrics
                 console.print(f"          [bold]Pre-Calib Bal. Acc / ROC AUC: {pre_calib_metrics.get('balanced_accuracy_all', np.nan):.4f} / {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
@@ -863,29 +850,25 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                 # --- STAGE 2: CALIBRATION (FINE-TUNING) ---
                 if calibration_epochs is not None and len(calibration_epochs) > 0:
                     console.print(f"        Starting subject-specific calibration for {args.calibration_epochs} epochs...")
-                    calibration_predictor = OnlinePredictor(
-                        model=model_eval_wrapped, args=args, device=device,
-                        global_backrot_matrix_np=global_backrot_matrix_np,
-                    )
-                    calibration_predictor.calibrate(calibration_epochs, calibration_labels_for_training)
+                    predictor.calibrate(calibration_epochs, calibration_labels_for_training)
                     console.print("        [green]Calibration complete.[/green]")
 
                 # --- STAGE 3: ONLINE EVALUATION ---
                 if online_epochs is not None and len(online_epochs) > 0:
                     console.print(f"          Evaluating Post-Calibration Zero-Shot Performance on {len(online_epochs)} trials...")
-                    post_calib_metrics = evaluate_zero_shot(
-                        model=model_eval_wrapped, test_epochs=online_epochs,
-                        test_labels=online_labels_for_eval,
-                        device=device, batch_size=args.batch_size_finetune,
+                    post_calib_preds = predictor.predict_batch(online_epochs, batch_size=args.batch_size_finetune)
+                    post_calib_metrics = score_predictions(
+                        predictions=post_calib_preds,
+                        labels=online_labels_for_eval,
                         is_extreme_mask=online_is_extreme_mask,
-                        original_soft_labels=online_labels_for_eval
+                        original_soft_labels=online_labels_for_eval,
                     )
                     subject_results[model_name]["post_calib_zero_shot"] = post_calib_metrics
                     console.print(f"          [bold]Post-Calib Bal. Acc / ROC AUC: {post_calib_metrics.get('balanced_accuracy_all', np.nan):.4f} / {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
                     
                     console.print(f"        Starting online finetuning simulation on the remaining {len(online_epochs)} trials...")
                     final_finetuned_metrics, _, per_trial_metrics = run_online_finetuning_simulation(
-                        model=model_eval_wrapped, 
+                        predictor=predictor,
                         test_subj_epochs=online_epochs, 
                         labels_for_finetuning=online_labels_for_finetuning,
                         labels_for_evaluation=online_labels_for_eval,
@@ -894,7 +877,6 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                         args=args, device=device, console=console, wandb_run=None,
                         run_output_dir=run_output_dir, model_name=model_name, dataset_name=dataset_name,
                         subject_id=test_subject_id, fold_idx=fold_idx + 1,
-                        global_backrot_matrix_np=global_backrot_matrix_np
                     )
                     subject_results[model_name]["finetuned"] = final_finetuned_metrics
                     all_models_trial_metrics[model_name] = per_trial_metrics

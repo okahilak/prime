@@ -21,6 +21,72 @@ from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 log = logging.getLogger(__name__)
 
 
+def score_predictions(
+    predictions: np.ndarray,
+    labels: np.ndarray,
+    is_extreme_mask: Optional[np.ndarray] = None,
+    original_soft_labels: Optional[np.ndarray] = None,
+) -> dict:
+    """
+    Compute classification metrics from predicted probabilities and labels.
+
+    This is the single scoring function used by all evaluation stages
+    (pre-calib, post-calib, online) to ensure numeric comparability.
+
+    Args:
+        predictions: Predicted probabilities, shape (n_trials,).
+        labels: Ground-truth soft labels, shape (n_trials,).
+        is_extreme_mask: Boolean mask for extreme trials (optional).
+        original_soft_labels: Original soft labels for extreme scoring
+                              (defaults to labels if not provided).
+
+    Returns:
+        Dict of metric name → value.
+    """
+    from sklearn.metrics import balanced_accuracy_score, roc_auc_score
+
+    metrics: dict = {}
+
+    if predictions is None or len(predictions) == 0:
+        return {
+            "balanced_accuracy_all": np.nan, "roc_auc_all": np.nan,
+            "balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan,
+        }
+
+    # --- All trials ---
+    true_hard = (np.asarray(labels) > 0.5).astype(int)
+    if len(np.unique(true_hard)) > 1:
+        metrics["balanced_accuracy_all"] = balanced_accuracy_score(
+            true_hard, (predictions > 0.5)
+        )
+        metrics["roc_auc_all"] = roc_auc_score(true_hard, predictions)
+    else:
+        metrics["balanced_accuracy_all"] = np.nan
+        metrics["roc_auc_all"] = np.nan
+
+    # --- Extreme trials ---
+    metrics["balanced_accuracy_extreme"] = np.nan
+    metrics["roc_auc_extreme"] = np.nan
+
+    if is_extreme_mask is not None and np.any(is_extreme_mask):
+        extreme_idx = np.where(is_extreme_mask)[0]
+        if len(extreme_idx) > 1:
+            ext_preds = predictions[extreme_idx]
+            ext_labels = (
+                original_soft_labels[extreme_idx]
+                if original_soft_labels is not None
+                else labels[extreme_idx]
+            )
+            ext_hard = (ext_labels > 0.5).astype(int)
+            if len(np.unique(ext_hard)) > 1:
+                metrics["balanced_accuracy_extreme"] = balanced_accuracy_score(
+                    ext_hard, (ext_preds > 0.5)
+                )
+                metrics["roc_auc_extreme"] = roc_auc_score(ext_hard, ext_preds)
+
+    return metrics
+
+
 class OnlinePredictor:
     """
     Wraps a TTAWrapper model and provides a clean trial-by-trial interface
@@ -101,6 +167,43 @@ class OnlinePredictor:
         with torch.no_grad():
             logits = self.model.predict(epoch_t)
         return logits.item()
+
+    def predict_batch(self, epochs_np: np.ndarray, batch_size: int = 64) -> np.ndarray:
+        """
+        Predict probabilities for a batch of epochs.
+
+        Uses the same code path as predict() (model.predict → sigmoid),
+        ensuring numeric equivalence between batch evaluation and the
+        per-trial online loop.
+
+        Args:
+            epochs_np: EEG epochs, shape (n_trials, n_channels, n_times).
+            batch_size: Number of trials per forward pass.
+
+        Returns:
+            Array of predicted probabilities, shape (n_trials,).
+        """
+        self.model.eval()
+        all_probs = []
+        n_trials = len(epochs_np)
+        with torch.no_grad():
+            for start in range(0, n_trials, batch_size):
+                batch_np = epochs_np[start : start + batch_size]
+                batch_t = torch.from_numpy(batch_np).float().to(self.device)
+                logits = self.model.predict(batch_t)
+                probs = torch.sigmoid(logits)
+                all_probs.append(probs.cpu().numpy().ravel())
+        return np.concatenate(all_probs)
+
+    def prepare_for_stream(self, seed: int) -> None:
+        """
+        Prepare the predictor for a trial-by-trial stream.
+
+        Resets the global torch RNG to ensure deterministic dropout/BN
+        behavior during online inference and finetuning.  Call this once,
+        immediately before the trial loop.
+        """
+        torch.manual_seed(seed)
 
     def finetune(self, epoch_np: np.ndarray, label: float) -> Optional[float]:
         """
