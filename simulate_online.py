@@ -55,10 +55,12 @@ N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 # Offline results directory (for pretrained model & comparison)
-OFFLINE_RESULTS_DIR = (
-    Path(__file__).resolve().parent
-    / "results/2026-05-28_13-54-29_replicate_prime_short"
+PREDICTIONS_PATH = (
+    "results/2026-05-28_16-41-27_eval_single_subject/predictions_subj_21_fold_1.npz"
 )
+
+PRETRAINED_MODEL_PATH = "pretrained_fold_1.pt"
+GLOBAL_BACKROT_PATH = "global_backrotation_matrix_fold_1.npy"
 
 # Config matching replicate_prime.yaml
 CONFIG = {
@@ -240,15 +242,10 @@ def main():
     # =========================================================================
     # COMPARE WITH OFFLINE LABELS
     # =========================================================================
-    OFFLINE_PREDICTIONS_PATH = (
-        Path(__file__).resolve().parent
-        / "results/2026-05-28_16-41-27_eval_single_subject"
-        / f"predictions_subj_21_fold_1.npz"
-    )
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE LABELS")
     print("=" * 70)
-    offline = np.load(OFFLINE_PREDICTIONS_PATH)
+    offline = np.load(PREDICTIONS_PATH)
     offline_labels = offline["actual_values"]
 
     n_compare = min(len(int_labels), len(offline_labels))
@@ -313,10 +310,7 @@ def main():
     )
 
     # Load global back-rotation matrix
-    backrot_path = OFFLINE_RESULTS_DIR / "global_backrotation_matrix_fold_1.npy"
-    global_backrot_matrix_np = np.load(backrot_path) if backrot_path.exists() else None
-    if global_backrot_matrix_np is not None:
-        print(f"  Loaded global back-rotation matrix: {global_backrot_matrix_np.shape}")
+    global_backrot_matrix_np = np.load(GLOBAL_BACKROT_PATH)
 
     # Wrap model with TTA
     model_wrapped = TTAWrapper(
@@ -324,10 +318,9 @@ def main():
     ).to(device)
 
     # Load pretrained weights
-    pretrained_path = OFFLINE_RESULTS_DIR / "pretrained_fold_1.pt"
-    checkpoint = torch.load(pretrained_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=device, weights_only=False)
     model_wrapped.wrapped_model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"  Loaded pretrained model from: {pretrained_path.name}")
+    print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---
     # NOTE: The offline path has a bug (missing loss.backward()) so calibration
@@ -407,6 +400,10 @@ def main():
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)
     n_online_trials = len(int_pre_data)
+
+    # Restrict to first 150 trials
+    n_online_trials = min(n_online_trials, 150)
+    
     print(f"  Online trials: {n_online_trials}")
 
     # Setup optimizer and buffers
@@ -488,11 +485,10 @@ def main():
     # =========================================================================
     # COMPARE WITH OFFLINE PREDICTIONS
     # =========================================================================
-    OFFLINE_PREDICTIONS_PATH = OFFLINE_RESULTS_DIR / "predictions_subj_21_fold_1.npz"
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE")
     print("=" * 70)
-    offline = np.load(OFFLINE_PREDICTIONS_PATH)
+    offline = np.load(PREDICTIONS_PATH)
     offline_preds = offline["predictions"]
     offline_labels = offline["actual_values"]
 
