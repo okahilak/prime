@@ -168,6 +168,9 @@ def pretrain_model(model: nn.Module, train_loader: DataLoader, optimizer: torch.
 def train_finetuning_step(model: nn.Module, loader: DataLoader, optimizer: torch.optim.Optimizer,
                           device: torch.device, args: OmegaConf, trial_idx: int, wandb_run) -> Tuple[nn.Module, float]:
     """Performs a single fine-tuning step on a small window of recent trials.
+
+    Note: The main online path now uses OnlinePredictor._run_finetuning_step().
+    This function is retained only for simulate_online_initial.py.
     """
     if not loader:
         return model, 0.0

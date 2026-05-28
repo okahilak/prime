@@ -149,9 +149,15 @@ class OnlinePredictor:
             Predicted probability (float in [0, 1]).
         """
         # TTAWrapper.predict returns raw logits (output - decision_criterion).
-        # We apply sigmoid here — this is the single point of logit→prob conversion.
-        logits = self.predict_logits(epoch_np)
-        return torch.sigmoid(torch.tensor(logits)).item()
+        # Sigmoid is applied on-device to match predict_batch exactly.
+        self.model.eval()
+        epoch_t = (
+            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
+        )
+        with torch.no_grad():
+            logits = self.model.predict(epoch_t)
+            prob = torch.sigmoid(logits)
+        return prob.item()
 
     def predict_logits(self, epoch_np: np.ndarray) -> float:
         """
@@ -168,7 +174,7 @@ class OnlinePredictor:
             logits = self.model.predict(epoch_t)
         return logits.item()
 
-    def predict_batch(self, epochs_np: np.ndarray, batch_size: int = 64) -> np.ndarray:
+    def predict_batch(self, epochs_np: np.ndarray, batch_size: int = 50) -> np.ndarray:
         """
         Predict probabilities for a batch of epochs.
 
@@ -199,11 +205,14 @@ class OnlinePredictor:
         """
         Prepare the predictor for a trial-by-trial stream.
 
-        Resets the global torch RNG to ensure deterministic dropout/BN
-        behavior during online inference and finetuning.  Call this once,
-        immediately before the trial loop.
+        Resets the global torch (CPU + CUDA) and numpy RNGs to ensure
+        deterministic behavior during online inference and finetuning.
+        Call this once, immediately before the trial loop.
         """
+        np.random.seed(seed)
         torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
 
     def finetune(self, epoch_np: np.ndarray, label: float) -> Optional[float]:
         """
