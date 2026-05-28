@@ -206,8 +206,8 @@ def main():
     # =========================================================================
     OFFLINE_PREDICTIONS_PATH = (
         Path(__file__).resolve().parent
-        / "results/replicate_prime/2026-05-27_20-26-55"
-        / f"predictions_subj_18_fold_2.npz"
+        / "results/2026-05-28_13-26-46_replicate_prime"
+        / f"predictions_subj_21_fold_1.npz"
     )
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE LABELS")
