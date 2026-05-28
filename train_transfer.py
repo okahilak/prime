@@ -793,9 +793,14 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
 
 # %%
 def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_channels, n_timepoints,
-                           args, device, console, run_output_dir, no_pretrain, dataset_name):
+                           args, device, console, run_output_dir, no_pretrain, dataset_name,
+                           backrot_matrix_dir: Optional[Path] = None):
     """
     Load data, run pre-calib eval, optional calibration, post-calib eval, and online finetuning.
+
+    Args:
+        backrot_matrix_dir: Directory to look for global_backrotation_matrix_fold_N.npy.
+                            If None, defaults to run_output_dir.
     """
     subject_results = {model_name: {} for model_name in args.models_to_run}
     all_models_trial_metrics = {}
@@ -803,12 +808,13 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
 
     global_backrot_matrix_np = None
     if getattr(args, "ea_backrotation", False):
-        backrot_matrix_path = run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+        search_dir = Path(backrot_matrix_dir) if backrot_matrix_dir else run_output_dir
+        backrot_matrix_path = search_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
         if backrot_matrix_path.exists():
             global_backrot_matrix_np = np.load(backrot_matrix_path)
-            console.print(f"        [green]Loaded global back-rotation matrix for evaluation.[/green]")
+            console.print(f"        [green]Loaded global back-rotation matrix from {search_dir}.[/green]")
         else:
-            console.print(f"        [yellow]Warning: Back-rotation is ON but matrix file was not found at {backrot_matrix_path}.[/yellow]")
+            raise FileNotFoundError(f"Back-rotation is ON but matrix file was not found at {backrot_matrix_path}.")
 
     try:
         # --- Data Loading ---
@@ -1064,7 +1070,7 @@ def run_cross_subject_experiment(
                     # First, get data dimensions from a sample test subject.
                     _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
                         dataset_names=[dataset_name], subject_ids=[test_subject_ids[0]],
-                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "resample": args.resample},
+                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
                         data_root=args.data_root, args=args
                     )
                     for model_name in args.models_to_run:
@@ -1085,7 +1091,7 @@ def run_cross_subject_experiment(
                     log.info("`no_pretrain` is True. Models will be randomly initialized.")
                     _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
                         dataset_names=[dataset_name], subject_ids=[test_subject_ids[0]],
-                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "resample": args.resample},
+                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
                         data_root=args.data_root, args=args
                     )
                     pretrain_success = n_channels > 0 and n_timepoints > 0
@@ -1096,10 +1102,17 @@ def run_cross_subject_experiment(
                 
                 # --- Evaluate on each test subject in the fold ---
                 max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
+                # Determine where to find the back-rotation matrix
+                if args.pretrained_checkpoint_dir:
+                    backrot_dir = Path(args.pretrained_checkpoint_dir)
+                else:
+                    backrot_dir = run_output_dir
+
                 for subj_count, test_subject_id in enumerate(test_subject_ids):
                     subject_results, subject_trial_metrics = run_subject_evaluation(
                         test_subject_id, fold_idx, fold_pretrained_models,
-                        n_channels, n_timepoints, args, device, console, run_output_dir, args.no_pretrain, dataset_name
+                        n_channels, n_timepoints, args, device, console, run_output_dir, args.no_pretrain, dataset_name,
+                        backrot_matrix_dir=backrot_dir
                     )
 
                     # Store results and trial metrics
@@ -1119,6 +1132,99 @@ def run_cross_subject_experiment(
         
         all_datasets_results[dataset_name] = results_current_dataset
         
+    return all_datasets_results, processed_dataset_names, all_trial_metrics
+
+
+def run_single_subject_eval(
+    args: OmegaConf, device: torch.device,
+    console: Console, run_output_dir: Path
+) -> Tuple[dict, list, list]:
+    """Evaluate a pretrained model on locally available subjects without cross-validation.
+
+    This mode is for the case where you have a pretrained checkpoint and one or
+    more local subjects to test on, without needing multiple subjects for k-fold
+    splits.
+    """
+    console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
+
+    if not args.pretrained_checkpoint_dir:
+        raise ValueError("single_subject_eval mode requires 'pretrained_checkpoint_dir' to be set.")
+
+    all_datasets_results = {}
+    processed_dataset_names = []
+    all_trial_metrics = []
+
+    for dataset_name in args.dataset_names:
+        console.print(f"\n[bold cyan]### Dataset: {dataset_name} ###[/bold cyan]")
+
+        all_subjects = get_subject_list_for_datasets([dataset_name], args.data_root)
+        subjects_to_run = [s for s in all_subjects if s in args.subjects] if args.subjects else all_subjects
+
+        if not subjects_to_run:
+            log.warning(f"No subjects available for dataset '{dataset_name}'. Skipping.")
+            continue
+
+        processed_dataset_names.append(dataset_name)
+        results_current_dataset = {m: {0: {}} for m in args.models_to_run}
+
+        # Use fold_idx=0 as the canonical fold for checkpoint loading
+        fold_idx = (getattr(args, "run_only_fold", 1) or 1) - 1
+
+        # Seed for reproducibility
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+
+        # --- Load pretrained models ---
+        log.info(f"Loading pre-trained models from: {args.pretrained_checkpoint_dir}")
+        _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
+            dataset_names=[dataset_name], subject_ids=[subjects_to_run[0]],
+            paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
+            data_root=args.data_root, args=args
+        )
+
+        fold_pretrained_models = {}
+        for model_name in args.models_to_run:
+            chkpt_path = Path(args.pretrained_checkpoint_dir) / f"pretrained_fold_{fold_idx+1}.pt"
+            if chkpt_path.is_file():
+                state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
+                fold_pretrained_models[model_name] = state_dict
+                console.print(f"  Loaded checkpoint: {chkpt_path}")
+            else:
+                log.error(f"Checkpoint not found: {chkpt_path}")
+
+        if not fold_pretrained_models:
+            log.error("No pretrained models could be loaded. Skipping dataset.")
+            continue
+
+        # --- Evaluate each local subject ---
+        max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
+        console.print(f"  Evaluating on {len(subjects_to_run)} subject(s): {subjects_to_run}")
+
+        backrot_dir = Path(args.pretrained_checkpoint_dir)
+
+        for subj_count, test_subject_id in enumerate(subjects_to_run):
+            subject_results, subject_trial_metrics = run_subject_evaluation(
+                test_subject_id, fold_idx, fold_pretrained_models,
+                n_channels, n_timepoints, args, device, console, run_output_dir,
+                args.no_pretrain, dataset_name,
+                backrot_matrix_dir=backrot_dir
+            )
+
+            for model_name, res_dict in subject_results.items():
+                results_current_dataset[model_name][0][test_subject_id] = res_dict
+            for model_name, trial_data in subject_trial_metrics.items():
+                for entry in trial_data:
+                    entry.update({"dataset": dataset_name, "model": model_name, "fold": 1, "subject_id": test_subject_id})
+                    all_trial_metrics.append(entry)
+
+            if max_test_subjs is not None and (subj_count + 1) >= max_test_subjs:
+                console.print(f"  [bold yellow]Reached max_test_subjects_per_fold={max_test_subjs}. Stopping.[/bold yellow]")
+                break
+
+        all_datasets_results[dataset_name] = results_current_dataset
+
     return all_datasets_results, processed_dataset_names, all_trial_metrics
 
 
@@ -1221,6 +1327,10 @@ if __name__ == "__main__":
     try:
         if args.experiment_mode == "cross_subject_kfold":
             all_results, processed_datasets, trial_metrics = run_cross_subject_experiment(
+                args, device, console, run_output_dir
+            )
+        elif args.experiment_mode == "single_subject_eval":
+            all_results, processed_datasets, trial_metrics = run_single_subject_eval(
                 args, device, console, run_output_dir
             )
         else:

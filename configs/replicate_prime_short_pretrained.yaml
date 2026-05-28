@@ -1,0 +1,54 @@
+# Same as replicate_prime_short.yaml but skips pretraining by loading
+# pretrained_fold_1.pt from the project root directory.
+dataset_names: ["TMSEEGClassificationTEPfree"]
+subjects: null              # all 50 subjects
+n_splits: 2                 # 2-fold cross-subject CV
+run_only_fold: 1            # only run fold 1
+max_test_subjects_per_fold: 1  # stop after first test subject (= 21)
+num_pretrain_subjects: "max"
+
+# Load pretrained classifier instead of training from scratch
+pretrained_checkpoint_dir: "."
+
+models_to_run:
+  - PRIME
+
+# Phase 1: population pretraining — skipped (loaded from checkpoint)
+pretrain_epochs: 100
+batch_size_pretrain: 64
+lr_pretrain: 0.0003
+optimizer_type_pretrain: "AdamW"
+
+# Phase 2: subject-specific calibration (first 100 trials)
+use_subject_specific_calibration: true
+num_calibration_trials: 100
+calibration_epochs: 50
+lr_calibration: 0.0001
+
+# Phase 3: online continual full finetuning
+finetune_mode: "full"
+finetune_epochs: 1
+finetune_warmup_trials: 50
+batch_size_finetune: 50
+lr_finetune: 0.0001
+
+# 50 ms window ending 10 ms before TMS pulse
+tmin: -0.060
+tmax: -0.010
+
+# Euclidean alignment + back-rotation (paper default for PRE-FT)
+use_tta: true
+alignment_type: "euclidean"
+ea_backrotation: true
+alignment_ref_ema_beta: 0.99
+tta_cov_buffer_size: 50
+
+window_size: 100
+seed: 42
+device: "cuda"
+save_results: true
+save_predictions_and_labels: true
+save_checkpoints: false
+
+save_pretrained_model: false
+save_finetuned_model: true

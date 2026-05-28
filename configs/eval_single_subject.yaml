@@ -1,0 +1,48 @@
+# Evaluate a pretrained model on locally available subject(s).
+# No cross-validation or multi-subject requirement.
+#
+# Usage:
+#   python train_transfer.py -c configs/eval_single_subject.yaml
+#
+dataset_names: ["TMSEEGClassificationTEPfree"]
+subjects: [21]              # null = all available subjects; or specify e.g. [21]
+
+experiment_mode: "single_subject_eval"
+
+# Load pretrained classifier (expects pretrained_fold_1.pt in this directory)
+pretrained_checkpoint_dir: "."
+run_only_fold: 1            # which fold checkpoint to load (pretrained_fold_N.pt)
+
+models_to_run:
+  - PRIME
+
+# Subject-specific calibration (first 100 trials)
+use_subject_specific_calibration: true
+num_calibration_trials: 100
+calibration_epochs: 50
+lr_calibration: 0.0001
+
+# Online continual finetuning
+finetune_mode: "full"
+finetune_epochs: 1
+finetune_warmup_trials: 50
+batch_size_finetune: 50
+lr_finetune: 0.0001
+
+# 50 ms window ending 10 ms before TMS pulse
+tmin: -0.060
+tmax: -0.010
+
+# Euclidean alignment + back-rotation
+use_tta: true
+alignment_type: "euclidean"
+ea_backrotation: true
+alignment_ref_ema_beta: 0.99
+tta_cov_buffer_size: 50
+
+window_size: 100
+seed: 42
+device: "cuda"
+save_results: true
+save_predictions_and_labels: true
+save_finetuned_model: true
