@@ -238,6 +238,41 @@ def main():
     print(f"  Intervention labels (first 5): {int_labels[:5]}")
 
     # =========================================================================
+    # COMPARE WITH OFFLINE LABELS
+    # =========================================================================
+    OFFLINE_PREDICTIONS_PATH = (
+        Path(__file__).resolve().parent
+        / "results/2026-05-28_16-41-27_eval_single_subject"
+        / f"predictions_subj_21_fold_1.npz"
+    )
+    print("\n" + "=" * 70)
+    print("COMPARE ONLINE vs OFFLINE LABELS")
+    print("=" * 70)
+    offline = np.load(OFFLINE_PREDICTIONS_PATH)
+    offline_labels = offline["actual_values"]
+
+    n_compare = min(len(int_labels), len(offline_labels))
+    online_labels = int_labels[:n_compare]
+    offline_labels_cmp = offline_labels[:n_compare]
+
+    print(f"  Online labels count:  {len(int_labels)}")
+    print(f"  Offline labels count: {len(offline_labels)}")
+    print(f"  Comparing first {n_compare} labels...")
+    print(f"")
+    print(f"  First online label:   {online_labels[0]:.6f}")
+    print(f"  First offline label:  {offline_labels_cmp[0]:.6f}")
+    print(f"  Match (first):        {np.isclose(online_labels[0], offline_labels_cmp[0], atol=1e-4)}")
+    print(f"")
+    diffs = np.abs(online_labels - offline_labels_cmp)
+    print(f"  Max absolute diff:    {np.max(diffs):.8f}")
+    print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
+    print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
+    print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
+    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-7)
+    print(f"  All match (atol=1e-7): {match_all}")
+    print("=" * 70)
+
+    # =========================================================================
     # CLASSIFIER — Load pretrained, calibrate, run online finetuning
     # =========================================================================
     print("\n" + "=" * 70)
