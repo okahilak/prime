@@ -99,7 +99,7 @@ class DictDataset(Dataset):
         return {"epoch": self.epochs[index], "label": self.labels[index]}
 
 
-def create_dataloader(epochs: np.ndarray, labels: np.ndarray, batch_size: int, shuffle_data: bool = True) -> Optional[DataLoader]:
+def create_dataloader(epochs: np.ndarray, labels: np.ndarray, batch_size: int, shuffle_data: bool = True, generator: torch.Generator = None) -> Optional[DataLoader]:
     """Creates a PyTorch DataLoader from NumPy arrays of epochs and labels.
     
     Args:
@@ -107,6 +107,7 @@ def create_dataloader(epochs: np.ndarray, labels: np.ndarray, batch_size: int, s
         labels: Target labels with shape (n_trials,).
         batch_size: The number of samples per batch.
         shuffle_data: Whether to shuffle the data at every epoch.
+        generator: Optional torch.Generator for reproducible shuffling.
 
     Returns:
         A DataLoader instance or None if input data is invalid.
@@ -124,7 +125,8 @@ def create_dataloader(epochs: np.ndarray, labels: np.ndarray, batch_size: int, s
         batch_size=batch_size,
         shuffle=shuffle_data,
         num_workers=0,  # Set to 0 for main process loading, adjust if needed
-        pin_memory=True
+        pin_memory=True,
+        generator=generator
     )
 
 
@@ -462,9 +464,11 @@ def run_fold_pretraining(
 
         # --- Create DataLoader ---
         # Pass the flag to ensure labels are formatted correctly by the dataloader
+        pretrain_gen = torch.Generator()
+        pretrain_gen.manual_seed(args.seed)
         pretrain_loader = create_dataloader(
             X_train, y_train, args.batch_size_pretrain, 
-            shuffle_data=True       )
+            shuffle_data=True, generator=pretrain_gen)
         
         if pretrain_loader is None or len(pretrain_loader) == 0:
             console.print(
@@ -649,6 +653,8 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
             label_buffer = deque(maxlen=max_window_size)
 
         # --- Main Trial-by-Trial Loop ---
+        # Reset RNG state for deterministic dropout/operations during online simulation
+        torch.manual_seed(args.seed)
         online_iterator = tqdm(range(n_trials_subj), desc=f"Online Sim ({log_prefix})", leave=False)
         for trial_idx in online_iterator:
             trial_start_time = time.time()
@@ -699,10 +705,13 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
                                 epochs_for_finetune, global_backrot_matrix_np
                             )
                     
+                    finetune_gen = torch.Generator()
+                    finetune_gen.manual_seed(args.seed + trial_idx)
                     window_loader = create_dataloader(
                         epochs_for_finetune, labels_for_finetune_from_buffer,
                         batch_size=min(args.batch_size_finetune, len(epochs_for_finetune)), 
                         shuffle_data=True,
+                        generator=finetune_gen
                     )
                     
                     if window_loader:
@@ -903,11 +912,14 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                             aligned_calibration_epochs = _apply_alignment_transform_np(aligned_calibration_epochs, global_backrot_matrix_np)
                         epochs_for_calib_loader = aligned_calibration_epochs
 
+                    calib_gen = torch.Generator()
+                    calib_gen.manual_seed(args.seed)
                     calib_loader = create_dataloader(
                         epochs_for_calib_loader,
                         calibration_labels_for_training,
                         batch_size=min(args.batch_size_finetune, len(calibration_epochs)),
-                        shuffle_data=True
+                        shuffle_data=True,
+                        generator=calib_gen
                     )
 
                     if calib_loader:
@@ -1025,6 +1037,12 @@ def run_cross_subject_experiment(
             run_only_fold = getattr(args, "run_only_fold", None)
             if run_only_fold is not None and (fold_idx + 1) != run_only_fold:
                 continue
+
+            # Reset RNG per-fold so each fold is deterministic regardless of which folds ran before
+            np.random.seed(args.seed)
+            torch.manual_seed(args.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(args.seed)
 
             console.print(f"\n  [bold blue]=> Fold {fold_idx+1}/{args.n_splits} | Train: {train_subject_ids} | Test: {test_subject_ids}[/bold blue]")
             
