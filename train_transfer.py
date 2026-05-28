@@ -164,45 +164,6 @@ def pretrain_model(model: nn.Module, train_loader: DataLoader, optimizer: torch.
     return model
 
 
-
-def train_finetuning_step(model: nn.Module, loader: DataLoader, optimizer: torch.optim.Optimizer,
-                          device: torch.device, args: OmegaConf, trial_idx: int, wandb_run) -> Tuple[nn.Module, float]:
-    """Performs a single fine-tuning step on a small window of recent trials.
-
-    Note: The main online path now uses OnlinePredictor._run_finetuning_step().
-    This function is retained only for simulate_online_initial.py.
-    """
-    if not loader:
-        return model, 0.0
-    
-    criterion = nn.BCEWithLogitsLoss() 
-  
-    model.train()
-    total_loss = 0.0
-    
-    for epoch in range(args.finetune_epochs):
-        for batch in loader:
-            x_batch = batch["epoch"].to(device, non_blocking=True)
-            y_batch = batch["label"].to(device, non_blocking=True).unsqueeze(1)
-            
-            optimizer.zero_grad(set_to_none=True)
-            logits = model(x_batch, is_finetuning_batch=True)
-            loss = criterion(logits, y_batch)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-    
-    avg_loss = total_loss / (len(loader) * args.finetune_epochs)
-    
-    # Optional W&B logging
-    if WANDB_AVAILABLE and wandb.run:
-        wandb.log({
-            "finetune_step_loss": avg_loss,
-            "finetune_lr": optimizer.param_groups[0]["lr"]
-        }, step=trial_idx)
-    
-    return model, avg_loss
-
 # %%
 # Experiment setup
 
