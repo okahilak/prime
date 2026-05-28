@@ -273,15 +273,18 @@ def run_timestamp() -> str:
 
 
 def get_output_dir(
-    base_output_root: Union[str, Path], experiment_name: str, timestamp: bool = True
+    base_output_root: Union[str, Path], config_name: str = ""
 ) -> Path:
-    """Create and return unique output directory for experiment run."""
-    base_path = Path(base_output_root) / experiment_name
-    if timestamp:
-        timestamp_str = run_timestamp()
-        run_dir = base_path / timestamp_str
+    """Create and return unique output directory for experiment run.
+    
+    Output path: base_output_root/[timestamp]_[config_name]/
+    """
+    timestamp_str = run_timestamp()
+    if config_name:
+        dir_name = f"{timestamp_str}_{config_name}"
     else:
-        run_dir = base_path
+        dir_name = timestamp_str
+    run_dir = Path(base_output_root) / dir_name
 
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir

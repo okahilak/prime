@@ -244,7 +244,6 @@ device: "cuda"
 print_dataset_structure_and_exit: false
 no_pretrain: false
 base_output_dir: "results"
-experiment_name: "transfer_kfold"
 save_pretrained_model: false
 save_finetuned_model: false
 save_checkpoints: false
@@ -347,11 +346,13 @@ max_test_subjects_per_fold: null
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     torch.use_deterministic_algorithms(True, warn_only=True)
     
-    # Create output directory
+    # Create output directory — results/[timestamp]_[config_name]/
+    config_name = ""
+    if parsed_args.config:
+        config_name = Path(parsed_args.config[-1]).stem
     run_output_dir = get_output_dir(
         base_output_root=config.base_output_dir,
-        experiment_name=config.experiment_name,
-        timestamp=True,
+        config_name=config_name,
     )
     console = Console()
     console.print(f"[blue]Output directory: {run_output_dir}[/blue]")
