@@ -55,10 +55,9 @@ N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 # Offline results directory (for pretrained model & comparison)
-# Update this path after running replicate_prime_short.yaml
 OFFLINE_RESULTS_DIR = (
     Path(__file__).resolve().parent
-    / "results/replicate_prime/PLACEHOLDER"
+    / "results/2026-05-28_13-54-29_replicate_prime_short"
 )
 
 # Config matching replicate_prime.yaml
