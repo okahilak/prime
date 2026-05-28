@@ -15,18 +15,15 @@ Hard-coded settings:
 - Number of calibration trials: 125
 """
 
-import copy
 import sys
 import time
 import warnings
-from collections import deque
 from pathlib import Path
 
 import mne
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -45,7 +42,8 @@ from online_preprocessing.preprocess import (
 )
 from TMS_EEG_moabb import TEPNormalizer
 from models.builder import build_model
-from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
+from tta_wrapper import TTAWrapper
+from online_predictor import OnlinePredictor
 
 # =============================================================================
 # Hard-coded constants
@@ -56,7 +54,7 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 
 # Offline results directory (for pretrained model & comparison)
 PREDICTIONS_PATH = (
-    "results/2026-05-28_16-41-27_eval_single_subject/predictions_subj_21_fold_1.npz"
+    "results/2026-05-28_22-15-02_eval_single_subject/predictions_subj_21_fold_1.npz"
 )
 
 PRETRAINED_MODEL_PATH = "pretrained_fold_1.pt"
@@ -291,13 +289,8 @@ def main():
     print(f"  Calibration trials for classifier: {cal_pre_data.shape[0]}")
 
     # --- Build model and load pretrained weights ---
-    class ArgsNamespace:
-        """Minimal namespace to satisfy TTAWrapper and model building."""
-        pass
-
-    args = ArgsNamespace()
-    for k, v in CONFIG.items():
-        setattr(args, k, v)
+    from omegaconf import OmegaConf
+    args = OmegaConf.create(CONFIG)
 
     model = build_model(
         model_name="PRIME",
@@ -321,77 +314,20 @@ def main():
     model_wrapped.wrapped_model.load_state_dict(checkpoint["model_state_dict"])
     print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
 
+    # --- Create the OnlinePredictor (single instance for calibration + online) ---
+    predictor = OnlinePredictor(
+        model=model_wrapped, args=args, device=device,
+        global_backrot_matrix_np=global_backrot_matrix_np,
+    )
+
     # --- STAGE 2: CALIBRATION FINE-TUNING ---
-    # NOTE: The offline path has a bug (missing loss.backward()) so calibration
-    # training does nothing. We skip it but still initialize alignment.
-    print("\n  --- Calibration (alignment init only, no training due to offline bug) ---")
-
-    # Initialize alignment from calibration pre-stim
-    model_wrapped.init_alignment_from_calibration(cal_pre_data)
-    print(f"  Initialized EA alignment from {len(cal_pre_data)} calibration trials")
-
-    # Run the calibration "training" loop to match offline behavior exactly
-    # (consuming RNG state from DataLoader shuffling + optimizer state init)
-    transform_np = model_wrapped.alignment_transform_torch.cpu().numpy()
-    aligned_cal_data = _apply_alignment_transform_np(cal_pre_data, transform_np)
-    if global_backrot_matrix_np is not None:
-        aligned_cal_data = _apply_alignment_transform_np(aligned_cal_data, global_backrot_matrix_np)
-
-    cal_epochs_t = torch.from_numpy(aligned_cal_data).float()
-    cal_labels_t = torch.from_numpy(cal_labels).float()
-    batch_size_cal = min(CONFIG["batch_size_finetune"], len(cal_pre_data))
-
-    is_decision_only_mode = CONFIG["finetune_mode"] == "decision_only"
-    if is_decision_only_mode:
-        model_wrapped.enable_full_model_update(enabled=True)
-
-    optimizer_calib = torch.optim.AdamW(
-        model_wrapped.parameters(), lr=CONFIG["lr_calibration"]
-    )
-    criterion = nn.BCEWithLogitsLoss()
-
-    # Match offline: run forward pass but no backward (reproduces the offline bug)
-    model_wrapped.train()
-    from torch.utils.data import DataLoader, TensorDataset
-
-    class DictDataset(torch.utils.data.Dataset):
-        def __init__(self, epochs_t, labels_t):
-            self.epochs = epochs_t
-            self.labels = labels_t
-        def __len__(self):
-            return len(self.epochs)
-        def __getitem__(self, idx):
-            return {"epoch": self.epochs[idx], "label": self.labels[idx]}
-
-    calib_dataset = DictDataset(cal_epochs_t, cal_labels_t)
-    calib_gen = torch.Generator()
-    calib_gen.manual_seed(CONFIG["seed"])
-    calib_loader = DataLoader(
-        calib_dataset, batch_size=batch_size_cal, shuffle=True,
-        num_workers=0, pin_memory=True, generator=calib_gen
-    )
-
-    for epoch in range(CONFIG["calibration_epochs"]):
-        for batch in calib_loader:
-            X_batch = batch['epoch'].to(device)
-            y_batch = batch['label'].to(device).unsqueeze(1)
-            optimizer_calib.zero_grad()
-            logits = model_wrapped(X_batch)
-            loss = criterion(logits, y_batch)
-            # NOTE: no loss.backward() — matching offline bug
-            optimizer_calib.step()
-    model_wrapped.eval()
-
-    if is_decision_only_mode:
-        model_wrapped.enable_full_model_update(enabled=False)
-
-    print(f"  Calibration phase complete (no actual weight update due to missing backward)")
+    print("\n  --- Calibration (using OnlinePredictor.calibrate) ---")
+    predictor.calibrate(cal_pre_data, cal_labels)
+    print(f"  Calibration complete ({len(cal_pre_data)} trials, "
+          f"{CONFIG['calibration_epochs']} epochs)")
 
     # --- STAGE 3: ONLINE FINE-TUNING (trial-by-trial) ---
     print("\n  --- Online fine-tuning simulation ---")
-
-    # Reset RNG state for deterministic dropout/operations during online simulation
-    torch.manual_seed(CONFIG["seed"])
 
     # Prepare intervention pre-stim data
     int_pre_epochs = mne.concatenate_epochs(int_pre_list)
@@ -401,78 +337,25 @@ def main():
     n_online_trials = len(int_pre_data)
 
     # Restrict to first 150 trials
-    n_online_trials = min(n_online_trials, 150)
-    
+#    n_online_trials = min(n_online_trials, 150)
+
     print(f"  Online trials: {n_online_trials}")
 
-    # Setup optimizer and buffers
-    optimizer_finetune = torch.optim.AdamW(
-        model_wrapped.parameters(),
-        lr=CONFIG["lr_finetune"],
-        weight_decay=CONFIG["weight_decay_finetune"],
-    )
-    max_window_size = min(CONFIG["window_size"], n_online_trials)
-    epoch_buffer = deque(maxlen=max_window_size)
-    label_buffer = deque(maxlen=max_window_size)
+    # Reset RNG state for deterministic behavior during online simulation
+    predictor.prepare_for_stream(CONFIG["seed"])
 
     all_predictions = []
-    batch_size_ft = CONFIG["batch_size_finetune"]
 
     for trial_idx in range(n_online_trials):
         single_epoch_np = int_pre_data[trial_idx]
         single_label_np = int_labels[trial_idx]
 
         # --- PREDICT ---
-        single_epoch_t = torch.from_numpy(single_epoch_np).float().unsqueeze(0).to(device)
-        model_wrapped.eval()
-        with torch.no_grad():
-            logits = model_wrapped.predict(single_epoch_t)
-        pred_prob = torch.sigmoid(logits).item()
+        pred_prob = predictor.predict(single_epoch_np)
         all_predictions.append(pred_prob)
 
-        # --- ADAPT ALIGNMENT ---
-        model_wrapped.adapt_alignment(single_epoch_np)
-
-        # --- BUFFER for fine-tuning ---
-        epoch_buffer.append(single_epoch_np)
-        label_buffer.append(single_label_np)
-
-        # --- FINE-TUNE when buffer is full ---
-        if len(epoch_buffer) >= batch_size_ft:
-            epochs_for_ft = np.array(epoch_buffer)
-            labels_for_ft = np.array(label_buffer)
-
-            # Apply current alignment transform + back-rotation
-            transform = model_wrapped.alignment_transform_torch.cpu().numpy()
-            epochs_for_ft = _apply_alignment_transform_np(epochs_for_ft, transform)
-            if global_backrot_matrix_np is not None:
-                epochs_for_ft = _apply_alignment_transform_np(
-                    epochs_for_ft, global_backrot_matrix_np
-                )
-
-            # Create batch and train using DataLoader with seeded generator (matches offline)
-            ft_epochs_t = torch.from_numpy(epochs_for_ft).float()
-            ft_labels_t = torch.from_numpy(labels_for_ft).float()
-            ft_dataset = DictDataset(ft_epochs_t, ft_labels_t)
-            ft_gen = torch.Generator()
-            ft_gen.manual_seed(CONFIG["seed"] + trial_idx)
-            ft_loader = DataLoader(
-                ft_dataset, batch_size=batch_size_ft, shuffle=True,
-                num_workers=0, pin_memory=True, generator=ft_gen
-            )
-
-            model_wrapped.train()
-            # Single epoch of fine-tuning on the buffer
-            for _ in range(CONFIG["finetune_epochs"]):
-                for batch in ft_loader:
-                    X_batch = batch['epoch'].to(device)
-                    y_batch = batch['label'].to(device).unsqueeze(1)
-                    optimizer_finetune.zero_grad(set_to_none=True)
-                    logits_ft = model_wrapped(X_batch, is_finetuning_batch=True)
-                    loss_ft = criterion(logits_ft, y_batch)
-                    loss_ft.backward()
-                    optimizer_finetune.step()
-            model_wrapped.eval()
+        # --- FINETUNE (adapt alignment + buffered supervised update) ---
+        predictor.finetune(single_epoch_np, single_label_np)
 
         if (trial_idx + 1) % 100 == 0:
             print(f"    Trial {trial_idx + 1}/{n_online_trials}")
