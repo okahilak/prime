@@ -1,0 +1,250 @@
+#%%
+"""
+OnlinePredictor: an abstraction that encapsulates trial-by-trial prediction
+and online finetuning for EEG classification models.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import deque
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader, TensorDataset
+
+from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
+
+log = logging.getLogger(__name__)
+
+
+class OnlinePredictor:
+    """
+    Wraps a TTAWrapper model and provides a clean trial-by-trial interface
+    for online prediction and finetuning.
+
+    Usage:
+        predictor = OnlinePredictor(model_wrapped, args, device)
+        predictor.calibrate(calibration_epochs, calibration_labels)
+
+        for epoch_np, label in stream:
+            prob = predictor.predict(epoch_np)
+            loss = predictor.finetune(epoch_np, label)
+    """
+
+    def __init__(
+        self,
+        model: TTAWrapper,
+        args: OmegaConf,
+        device: torch.device,
+        global_backrot_matrix_np: Optional[np.ndarray] = None,
+    ):
+        self.model = model
+        self.args = args
+        self.device = device
+        self.global_backrot_matrix_np = global_backrot_matrix_np
+
+        # Setup finetuning optimizer and history buffers
+        self._optimizer: Optional[torch.optim.Optimizer] = None
+        self._epoch_buffer: Optional[deque] = None
+        self._label_buffer: Optional[deque] = None
+        self._trial_count = 0
+
+        if args.finetune_mode != "none" and args.finetune_epochs > 0:
+            optimizer_params = {
+                "lr": args.lr_finetune,
+                "weight_decay": args.weight_decay_finetune,
+            }
+            self._optimizer = torch.optim.AdamW(
+                model.parameters(), **optimizer_params
+            )
+            window_size = args.window_size
+            self._epoch_buffer = deque(maxlen=window_size)
+            self._label_buffer = deque(maxlen=window_size)
+
+    def predict(self, epoch_np: np.ndarray) -> float:
+        """
+        Predict the probability for a single epoch without side effects.
+
+        Args:
+            epoch_np: A single EEG epoch array of shape (n_channels, n_times).
+
+        Returns:
+            Predicted probability (float in [0, 1]).
+        """
+        self.model.eval()
+        epoch_t = (
+            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
+        )
+        with torch.no_grad():
+            logits = self.model.predict(epoch_t)
+        prob = torch.sigmoid(logits).item()
+        return prob
+
+    def finetune(self, epoch_np: np.ndarray, label: float) -> Optional[float]:
+        """
+        Adapt alignment (unsupervised) and perform buffered supervised
+        finetuning on recent trials.
+
+        Args:
+            epoch_np: The EEG epoch array of shape (n_channels, n_times).
+            label: The ground-truth label for this trial.
+
+        Returns:
+            The average finetuning loss if a training step was performed,
+            None otherwise.
+        """
+        # 1. Unsupervised alignment adaptation
+        if self.args.use_tta and self.args.alignment_type not in ("none", None):
+            self.model.adapt_alignment(epoch_np)
+
+        # 2. Add to finetuning buffer
+        if self._optimizer is None:
+            return None
+
+        self._epoch_buffer.append(epoch_np)
+        self._label_buffer.append(label)
+        self._trial_count += 1
+
+        # 3. Finetune when buffer has enough samples
+        min_buffer = self.args.batch_size_finetune
+        if len(self._epoch_buffer) < min_buffer:
+            return None
+
+        return self._run_finetuning_step()
+
+    def calibrate(
+        self, epochs_np: np.ndarray, labels: np.ndarray, **kwargs
+    ) -> None:
+        """
+        Perform initial calibration: initialize alignment from calibration
+        data and do supervised training over multiple epochs.
+
+        Args:
+            epochs_np: Calibration epochs, shape (n_trials, n_channels, n_times).
+            labels: Calibration labels, shape (n_trials,).
+            **kwargs: Optional overrides for lr (lr_calibration) and
+                      n_epochs (calibration_epochs).
+        """
+        lr = kwargs.get("lr", getattr(self.args, "lr_calibration", 0.0001))
+        n_epochs = kwargs.get(
+            "n_epochs", getattr(self.args, "calibration_epochs", 50)
+        )
+        batch_size = min(
+            self.args.batch_size_finetune, len(epochs_np)
+        )
+
+        # Initialize alignment from calibration data
+        epochs_for_training = epochs_np
+        if self.args.use_tta and self.args.alignment_type not in ("none", None):
+            self.model.init_alignment_from_calibration(epochs_np)
+            transform_np = self.model.alignment_transform_torch.cpu().numpy()
+            epochs_for_training = _apply_alignment_transform_np(
+                epochs_np, transform_np
+            )
+            if self.global_backrot_matrix_np is not None:
+                epochs_for_training = _apply_alignment_transform_np(
+                    epochs_for_training, self.global_backrot_matrix_np
+                )
+
+        # Temporarily enable full model update if in decision_only mode
+        is_decision_only = (
+            getattr(self.args, "finetune_mode", "full") == "decision_only"
+        )
+        if is_decision_only:
+            self.model.enable_full_model_update(enabled=True)
+
+        try:
+            optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=lr
+            )
+            criterion = nn.BCEWithLogitsLoss()
+
+            loader = self._make_loader(
+                epochs_for_training, labels, batch_size, shuffle=True
+            )
+            if loader is None:
+                return
+
+            self.model.train()
+            for epoch_idx in range(n_epochs):
+                for batch_x, batch_y in loader:
+                    batch_x = batch_x.to(self.device)
+                    batch_y = batch_y.to(self.device).unsqueeze(1)
+                    optimizer.zero_grad()
+                    logits = self.model(batch_x)
+                    loss = criterion(logits, batch_y)
+                    loss.backward()
+                    optimizer.step()
+            self.model.eval()
+        finally:
+            if is_decision_only:
+                self.model.enable_full_model_update(enabled=False)
+
+    def _run_finetuning_step(self) -> float:
+        """Run one finetuning step on the current buffer contents."""
+        epochs_np = np.array(self._epoch_buffer)
+        labels_np = np.array(self._label_buffer)
+
+        # Apply alignment transform to buffered epochs
+        if self.args.use_tta and self.args.alignment_type not in ("none", None):
+            transform = self.model.alignment_transform_torch.cpu().numpy()
+            epochs_np = _apply_alignment_transform_np(epochs_np, transform)
+            if self.global_backrot_matrix_np is not None:
+                epochs_np = _apply_alignment_transform_np(
+                    epochs_np, self.global_backrot_matrix_np
+                )
+
+        batch_size = min(self.args.batch_size_finetune, len(epochs_np))
+        finetune_gen = torch.Generator()
+        finetune_gen.manual_seed(self.args.seed + self._trial_count)
+        loader = self._make_loader(
+            epochs_np, labels_np, batch_size, shuffle=True, generator=finetune_gen
+        )
+        if loader is None:
+            return 0.0
+
+        criterion = nn.BCEWithLogitsLoss()
+        self.model.train()
+        total_loss = 0.0
+
+        for _ in range(self.args.finetune_epochs):
+            for batch_x, batch_y in loader:
+                batch_x = batch_x.to(self.device, non_blocking=True)
+                batch_y = batch_y.to(self.device, non_blocking=True).unsqueeze(1)
+                self._optimizer.zero_grad(set_to_none=True)
+                logits = self.model(batch_x, is_finetuning_batch=True)
+                loss = criterion(logits, batch_y)
+                loss.backward()
+                self._optimizer.step()
+                total_loss += loss.item()
+
+        self.model.eval()
+        avg_loss = total_loss / (len(loader) * self.args.finetune_epochs)
+        return avg_loss
+
+    @staticmethod
+    def _make_loader(
+        epochs_np: np.ndarray,
+        labels_np: np.ndarray,
+        batch_size: int,
+        shuffle: bool = True,
+        generator: Optional[torch.Generator] = None,
+    ) -> Optional[DataLoader]:
+        """Create a DataLoader from numpy arrays."""
+        if epochs_np is None or len(epochs_np) == 0:
+            return None
+        epochs_t = torch.from_numpy(epochs_np).float()
+        labels_t = torch.from_numpy(labels_np).float()
+        dataset = TensorDataset(epochs_t, labels_t)
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=0,
+            pin_memory=True,
+            generator=generator,
+        )

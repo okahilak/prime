@@ -23,7 +23,6 @@ import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import psutil
-from collections import deque
 
 # Third-party libraries for data handling and computation
 import mne
@@ -48,7 +47,8 @@ from torchinfo import summary
 from datasets import *
 from TMS_EEG_moabb import TMSEEGDatasetTEPfree, TMSEEGClassificationTEPfree
 from models.builder import build_model
-from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
+from tta_wrapper import TTAWrapper
+from online_predictor import OnlinePredictor
 from utils import (RegressionMetricsTracker, evaluate_single_trial,
                    evaluate_zero_shot, filter_args_for_model,get_checkpoint_dir, get_model_class,
                    get_output_dir, save_checkpoint, save_results_df)
@@ -633,7 +633,7 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
                                      args, device, console, wandb_run,
                                      run_output_dir, model_name, dataset_name, subject_id, fold_idx, global_backrot_matrix_np: Optional[np.ndarray] = None):
     """
-    Run an online finetuning simulation.
+    Run an online finetuning simulation using OnlinePredictor.
     """
     if test_subj_epochs is None or test_subj_epochs.size == 0:
         log.error(f"Empty test data provided for Subj {subject_id}. Skipping simulation.")
@@ -643,133 +643,83 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
     log_prefix = f"{dataset_name}_Fold_{fold_idx}_Subj_{subject_id}_{model_name}"
     log.info(f"Starting online simulation for {log_prefix} ({n_trials_subj} trials)")
 
-    # Initialize metrics tracker
     metrics_tracker = RegressionMetricsTracker(window_size=args.window_size)
-    optimizer_finetune = None
     trial_times = []
     trial_metrics_log = []
 
     try:
-        # --- Setup Optimizer and History Buffers ---
-        if args.finetune_mode != 'none' and args.finetune_epochs > 0:
-            optimizer_params = {"lr": args.lr_finetune, "weight_decay": args.weight_decay_finetune}
-            optimizer_finetune = torch.optim.AdamW(model.parameters(), **optimizer_params)
-            max_window_size = min(args.window_size, n_trials_subj)
-            epoch_buffer = deque(maxlen=max_window_size)
-            label_buffer = deque(maxlen=max_window_size)
+        predictor = OnlinePredictor(
+            model=model, args=args, device=device,
+            global_backrot_matrix_np=global_backrot_matrix_np,
+        )
 
-        # --- Main Trial-by-Trial Loop ---
-        # Reset RNG state for deterministic dropout/operations during online simulation
         torch.manual_seed(args.seed)
         online_iterator = tqdm(range(n_trials_subj), desc=f"Online Sim ({log_prefix})", leave=False)
         for trial_idx in online_iterator:
             trial_start_time = time.time()
             try:
                 single_epoch_np = test_subj_epochs[trial_idx]
-                single_label_for_finetuning_np = labels_for_finetuning[trial_idx]
-                single_label_for_evaluation_np = labels_for_evaluation[trial_idx]
-                
-                single_epoch_t = torch.from_numpy(single_epoch_np).float().unsqueeze(0).to(device)
-                single_label_for_eval_t = torch.tensor([single_label_for_evaluation_np], dtype=torch.float64, device=device)
+                single_label_for_finetuning = labels_for_finetuning[trial_idx]
+                single_label_for_evaluation = labels_for_evaluation[trial_idx]
 
-                model.eval()
-                # --------------- PREDICT ---------------
-                with torch.no_grad():
-                    logits = model.predict(single_epoch_t)
+                # --- PREDICT ---
+                pred_prob = predictor.predict(single_epoch_np)
 
-                # The model's prediction is scored against the (potentially shuffled) evaluation label.
-                eval_result = evaluate_single_trial(
-                    model.wrapped_model, single_epoch_t, single_label_for_eval_t,
-                    device, output_logits=logits
-                )
-
-                # --------------- ADAPT (unlabelled) ---------------
-                if args.use_tta and args.alignment_type not in ['none', None]:
-                    model.adapt_alignment(single_epoch_np)
+                # --- FINETUNE (adapt alignment + buffered supervised update) ---
+                step_loss_or_none = predictor.finetune(single_epoch_np, single_label_for_finetuning)
+                step_loss = step_loss_or_none if step_loss_or_none is not None else np.nan
 
                 metrics_tracker.update(
-                    y_true=eval_result["true_label"],
-                    y_pred=eval_result["pred_prob"]
+                    y_true=single_label_for_evaluation,
+                    y_pred=pred_prob,
                 )
-                
-                if optimizer_finetune:
-                    epoch_buffer.append(single_epoch_np)
-                    label_buffer.append(single_label_for_finetuning_np)
-
-                step_loss = np.nan
-                min_buffer_for_training = args.batch_size_finetune
-                if (optimizer_finetune and len(epoch_buffer) >= min_buffer_for_training):
-                    epochs_for_finetune = np.array(epoch_buffer)
-                    labels_for_finetune_from_buffer = np.array(label_buffer)
-
-                    if args.use_tta and args.alignment_type not in ['none', None]:
-                        transform = model.alignment_transform_torch.cpu().numpy()
-                        epochs_for_finetune = _apply_alignment_transform_np(epochs_for_finetune, transform)
-                        
-                        if global_backrot_matrix_np is not None:
-                            epochs_for_finetune = _apply_alignment_transform_np(
-                                epochs_for_finetune, global_backrot_matrix_np
-                            )
-                    
-                    finetune_gen = torch.Generator()
-                    finetune_gen.manual_seed(args.seed + trial_idx)
-                    window_loader = create_dataloader(
-                        epochs_for_finetune, labels_for_finetune_from_buffer,
-                        batch_size=min(args.batch_size_finetune, len(epochs_for_finetune)), 
-                        shuffle_data=True,
-                        generator=finetune_gen
-                    )
-                    
-                    if window_loader:
-                        model.train()
-                        _, step_loss = train_finetuning_step(
-                            model=model, loader=window_loader, optimizer=optimizer_finetune,
-                            device=device, args=args, trial_idx=trial_idx, wandb_run=wandb_run
-                        )
-                        model.eval()
 
                 trial_times.append(time.time() - trial_start_time)
-                
+
                 online_iterator.set_postfix(
-                    b_acc=f"{metrics_tracker.get_rolling_balanced_accuracy():.3f}", 
-                    auc=f"{metrics_tracker.get_rolling_roc_auc():.3f}", 
+                    b_acc=f"{metrics_tracker.get_rolling_balanced_accuracy():.3f}",
+                    auc=f"{metrics_tracker.get_rolling_roc_auc():.3f}",
                 )
 
-                trial_metrics_log.append({'trial_idx': trial_idx, 'rolling_balanced_accuracy': metrics_tracker.get_rolling_balanced_accuracy(), 'rolling_roc_auc': metrics_tracker.get_rolling_roc_auc(), 'overall_balanced_accuracy_at_trial': metrics_tracker.get_overall_balanced_accuracy(), 'overall_roc_auc_at_trial': metrics_tracker.get_overall_roc_auc(), 'finetune_loss': step_loss})
+                trial_metrics_log.append({
+                    'trial_idx': trial_idx,
+                    'rolling_balanced_accuracy': metrics_tracker.get_rolling_balanced_accuracy(),
+                    'rolling_roc_auc': metrics_tracker.get_rolling_roc_auc(),
+                    'overall_balanced_accuracy_at_trial': metrics_tracker.get_overall_balanced_accuracy(),
+                    'overall_roc_auc_at_trial': metrics_tracker.get_overall_roc_auc(),
+                    'finetune_loss': step_loss,
+                })
                 if wandb_run:
                     wandb_run.log({f"online/{log_prefix}/rolling_b_acc": metrics_tracker.get_rolling_balanced_accuracy()}, step=trial_idx)
                     wandb_run.log({f"online/{log_prefix}/rolling_roc_auc": metrics_tracker.get_rolling_roc_auc()}, step=trial_idx)
             except Exception as e:
                 log.error(f"Error processing trial {trial_idx} for {log_prefix}: {e}", exc_info=True)
                 continue
-        
+
         # --- Final Metrics Calculation ---
         avg_time_per_trial = np.mean(trial_times) if trial_times else 0.0
         y_true_all = np.array(metrics_tracker.all_y_true)
         y_pred_all = np.array(metrics_tracker.all_y_pred)
-        
+
         final_metrics = {}
-        
-        # Always derive hard labels from soft for classification metrics
+
         y_true_hard_all = (y_true_all > 0.5).astype(int)
         if len(np.unique(y_true_hard_all)) > 1:
             final_metrics["balanced_accuracy_all"] = balanced_accuracy_score(y_true_hard_all, y_pred_all > 0.5)
             final_metrics["roc_auc_all"] = roc_auc_score(y_true_hard_all, y_pred_all)
 
-
         final_metrics.update({"balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan})
-        
+
         if is_extreme_mask is not None and np.any(is_extreme_mask):
             extreme_indices = np.where(is_extreme_mask)[0]
             if len(extreme_indices) > 1:
                 extreme_preds_soft = y_pred_all[extreme_indices]
                 extreme_true_soft = original_soft_labels[extreme_indices]
                 extreme_true_hard = (extreme_true_soft > 0.5).astype(int)
-                
+
                 if len(np.unique(extreme_true_hard)) > 1:
                     final_metrics["balanced_accuracy_extreme"] = balanced_accuracy_score(extreme_true_hard, (extreme_preds_soft > 0.5))
                     final_metrics["roc_auc_extreme"] = roc_auc_score(extreme_true_hard, extreme_preds_soft)
-                
 
         log.info(f"Online sim finished. All (Bal Acc / ROC): {final_metrics.get('balanced_accuracy_all', np.nan):.4f} / {final_metrics.get('roc_auc_all', np.nan):.4f}.")
 
@@ -781,13 +731,12 @@ def run_online_finetuning_simulation(model, test_subj_epochs,
         if wandb_run: wandb_run.log({f"final/{log_prefix}": final_metrics})
 
         return final_metrics, avg_time_per_trial, trial_metrics_log
-        
+
     except Exception as e:
         log.error(f"Critical error in online simulation for {log_prefix}: {e}", exc_info=True)
         return {}, 0.0, []
     finally:
-        if 'optimizer_finetune' in locals(): del optimizer_finetune
-        if 'metrics_tracker' in locals(): del metrics_tracker
+        del metrics_tracker
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
@@ -914,56 +863,12 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                 # --- STAGE 2: CALIBRATION (FINE-TUNING) ---
                 if calibration_epochs is not None and len(calibration_epochs) > 0:
                     console.print(f"        Starting subject-specific calibration for {args.calibration_epochs} epochs...")
-                    
-                    epochs_for_calib_loader = calibration_epochs
-                    if args.use_tta and args.alignment_type not in ['none', None]:
-                        model_eval_wrapped.init_alignment_from_calibration(calibration_epochs)
-                        transform_matrix_np = model_eval_wrapped.alignment_transform_torch.cpu().numpy()
-                        aligned_calibration_epochs = _apply_alignment_transform_np(calibration_epochs, transform_matrix_np)
-                        if global_backrot_matrix_np is not None:
-                            aligned_calibration_epochs = _apply_alignment_transform_np(aligned_calibration_epochs, global_backrot_matrix_np)
-                        epochs_for_calib_loader = aligned_calibration_epochs
-
-                    calib_gen = torch.Generator()
-                    calib_gen.manual_seed(args.seed)
-                    calib_loader = create_dataloader(
-                        epochs_for_calib_loader,
-                        calibration_labels_for_training,
-                        batch_size=min(args.batch_size_finetune, len(calibration_epochs)),
-                        shuffle_data=True,
-                        generator=calib_gen
+                    calibration_predictor = OnlinePredictor(
+                        model=model_eval_wrapped, args=args, device=device,
+                        global_backrot_matrix_np=global_backrot_matrix_np,
                     )
-
-                    if calib_loader:
-                        is_decision_only_mode = getattr(args, "finetune_mode", "full") == "decision_only"
-                        try:
-                            # If mode is 'decision_only', temporarily enable full updates for this block
-                            if is_decision_only_mode:
-                                console.print("        [bold yellow]Temporarily enabling full model update for calibration phase.[/bold yellow]")
-                                model_eval_wrapped.enable_full_model_update(enabled=True)
-                            
-                            # This optimizer will now get ALL parameters if the override was enabled
-                            optimizer_calib = torch.optim.AdamW(model_eval_wrapped.parameters(), lr=args.lr_calibration)
-                            criterion = nn.BCEWithLogitsLoss() 
-                            model_eval_wrapped.train()
-                            for epoch in range(args.calibration_epochs):
-                                pbar = tqdm(calib_loader, desc=f"Calib. Epoch {epoch+1}/{args.calibration_epochs}", leave=False)
-                                for batch in pbar:
-                                    X_batch, y_batch = batch['epoch'].to(device), batch['label'].to(device).unsqueeze(1)
-                                    optimizer_calib.zero_grad()
-                                    logits = model_eval_wrapped(X_batch)
-                                    loss = criterion(logits, y_batch) 
-                                    optimizer_calib.step()
-                                    pbar.set_postfix(loss=loss.item())
-                            model_eval_wrapped.eval()
-                            
-                        finally:
-                            # ALWAYS revert the setting after calibration, even if an error occurred
-                            if is_decision_only_mode:
-                                console.print("        [bold yellow]Reverting to 'decision_only' for online phase.[/bold yellow]")
-                                model_eval_wrapped.enable_full_model_update(enabled=False)
-                        
-                        console.print("        [green]Calibration complete.[/green]")
+                    calibration_predictor.calibrate(calibration_epochs, calibration_labels_for_training)
+                    console.print("        [green]Calibration complete.[/green]")
 
                 # --- STAGE 3: ONLINE EVALUATION ---
                 if online_epochs is not None and len(online_epochs) > 0:

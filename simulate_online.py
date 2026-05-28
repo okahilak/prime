@@ -276,11 +276,10 @@ def main():
     print("CLASSIFIER — Pretrained model + Calibration + Online finetuning")
     print("=" * 70)
 
-    device = torch.device("cpu")
+    device = torch.device("cuda")
     np.random.seed(CONFIG["seed"])
     torch.manual_seed(CONFIG["seed"])
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(CONFIG["seed"])
+    torch.cuda.manual_seed_all(CONFIG["seed"])
 
     # --- Prepare pre-stim EEG data (matching offline tmin/tmax crop) ---
     cal_pre_data = cal_pre_epochs.copy().crop(
