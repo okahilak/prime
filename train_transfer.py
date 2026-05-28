@@ -290,6 +290,7 @@ lr_calibration: 0.0001
 calibration_epochs: 50           # Number of epochs to train on the small calibration set
 
 shuffle_test_labels: false
+max_test_subjects_per_fold: null
 """
     
     # Load default config
@@ -1089,7 +1090,8 @@ def run_cross_subject_experiment(
                     continue
                 
                 # --- Evaluate on each test subject in the fold ---
-                for test_subject_id in test_subject_ids:
+                max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
+                for subj_count, test_subject_id in enumerate(test_subject_ids):
                     subject_results, subject_trial_metrics = run_subject_evaluation(
                         test_subject_id, fold_idx, fold_pretrained_models,
                         n_channels, n_timepoints, args, device, console, run_output_dir, args.no_pretrain, dataset_name
@@ -1102,6 +1104,10 @@ def run_cross_subject_experiment(
                         for entry in trial_data:
                             entry.update({"dataset": dataset_name, "model": model_name, "fold": fold_idx + 1, "subject_id": test_subject_id})
                             all_trial_metrics.append(entry)
+
+                    if max_test_subjs is not None and (subj_count + 1) >= max_test_subjs:
+                        console.print(f"  [bold yellow]Reached max_test_subjects_per_fold={max_test_subjs}. Stopping early.[/bold yellow]")
+                        break
 
             except Exception as e:
                 log.error(f"Error processing Fold {fold_idx+1}: {e}", exc_info=True)
