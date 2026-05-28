@@ -73,7 +73,6 @@ def get_config() -> DictConfig:
     """
     conf = {
         # --- Experiment Setup ---
-        "experiment_name": "latency_analysis_merged",
         "base_output_dir": "results_latency_merged",
         "seed": 42,
 
@@ -434,7 +433,7 @@ def main():
 
     # Setup output directory
     ts = run_timestamp()
-    run_output_dir = Path(cfg.base_output_dir) / f"{cfg.experiment_name}_{ts}"
+    run_output_dir = Path(cfg.base_output_dir) / f"{ts}_latency_analysis"
     run_output_dir.mkdir(parents=True, exist_ok=True)
 
     # Setup logging

@@ -6,23 +6,18 @@ Core Components:
 - `EEGDataset`: A PyTorch-compatible Dataset class.
 - `load_cached_pretrain_data`: Main function to load, preprocess, align, and
   concatenate data from multiple subjects.
-- Caching Paradigm: `CachingTMSEEGClassificationTEPfree` handles the specifics of data
-  extraction and caching for different TMS-EEG data types.
+- `TMSEEGClassificationTEPfreeParadigm` handles the specifics of data
+  extraction for TMS-EEG data types.
 """
 
-import hashlib
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from moabb.datasets.base import BaseDataset
 from torch.utils.data import Dataset
-
-# --- Local Imports ---
-import utils
 from TMS_EEG_moabb import (
     TMSEEGClassificationTEPfree,
     TMSEEGDataset,
@@ -319,77 +314,29 @@ def load_cached_pretrain_data(
 
 
 # %%
-# CUSTOM CACHING PARADIGM CLASSES
-class BaseCachingParadigm:
-    """A base class for caching paradigms to reduce code duplication."""
+# PARADIGM WRAPPER CLASSES
 
-    def __init__(
-        self,
-        data_type: str,
-        num_trials_per_subject: Optional[int] = None,
-        **kwargs,
-    ):
-        """Initializes the base caching paradigm."""
-        self._data_type = data_type
+class TMSEEGClassificationTEPfreeParadigm(TMSEEGClassificationTEPfree):
+    """Thin wrapper for TMSEEGClassificationTEPfree with optional trial ablation."""
+
+    def __init__(self, num_trials_per_subject: Optional[int] = None, **kwargs):
+        super().__init__(**kwargs)
         self._num_trials_per_subject = num_trials_per_subject
-        self.paradigm_kwargs = kwargs  # Store kwargs for caching
-
-    def _get_cache_path(self, dataset: BaseDataset, subject: int) -> Path:
-        """Constructs a unique file path for the cache based on parameters."""
-        param_dict = self.paradigm_kwargs.copy()
-        param_dict["num_trials"] = (
-            str(self._num_trials_per_subject)
-            if self._num_trials_per_subject is not None
-            else "all"
-        )
-        param_str = "_".join(f"{k}={v}" for k, v in sorted(param_dict.items()))
-        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-        cache_dir = utils.CACHE_ROOT_DIR / dataset.code / f"subject_{subject:03d}"
-        return cache_dir / f"params_{param_hash}.npz"
 
     def get_data(
         self, dataset: BaseDataset, subjects: Optional[List[int]] = None, **kwargs
     ) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
-        """
-        Retrieves data, using cache if available, otherwise computes and saves.
-        This method is intended to be called by the inheriting child class.
-        """
+        """Load data for all subjects, optionally truncating per-subject trials."""
         if subjects is None:
             subjects = dataset.subject_list
 
         all_X, all_y, all_meta = [], [], []
 
         for subject in subjects:
-            cache_path = self._get_cache_path(dataset, subject)
+            X, y, metadata = super().get_data(dataset=dataset, subjects=[subject])
 
-            if cache_path.exists():
-                log.info(
-                    f"Loading cached {self._data_type} data for Subj {subject} from {cache_path}"
-                )
-                cached_data = np.load(cache_path, allow_pickle=True)
-                X, y, metadata = (
-                    cached_data["X"],
-                    cached_data["y"],
-                    pd.DataFrame(cached_data["metadata"].item()),
-                )
-            else:
-                log.info(
-                    f"Cache miss for {self._data_type} Subj {subject}. Computing data."
-                )
-                X, y, metadata = super().get_data(dataset=dataset, subjects=[subject])
-
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                np.savez(cache_path, X=X, y=y, metadata=metadata.to_dict())
-                log.info(
-                    f"Saved computed {self._data_type} data for Subj {subject} to {cache_path}"
-                )
-
-            if self._num_trials_per_subject is not None and len(
-                X
-            ) > self._num_trials_per_subject:
-                log.info(
-                    f"Slicing {self._data_type} data for Subj {subject} to {self._num_trials_per_subject} trials."
-                )
+            if self._num_trials_per_subject is not None and len(X) > self._num_trials_per_subject:
+                log.info(f"Slicing data for Subj {subject} to {self._num_trials_per_subject} trials.")
                 X = X[: self._num_trials_per_subject]
                 y = y[: self._num_trials_per_subject]
                 metadata = metadata.iloc[: self._num_trials_per_subject]
@@ -407,19 +354,8 @@ class BaseCachingParadigm:
         return final_X, final_y, final_meta
 
 
-class CachingTMSEEGClassificationTEPfree(
-    BaseCachingParadigm, TMSEEGClassificationTEPfree
-):
-    """Caching wrapper for the TMSEEGClassificationTEPfree paradigm."""
-
-    def __init__(self, num_trials_per_subject: Optional[int] = None, **kwargs):
-        super(CachingTMSEEGClassificationTEPfree, self).__init__(
-            data_type="TEPfree",
-            num_trials_per_subject=num_trials_per_subject,
-            **kwargs,
-        )
-        # Initialize the actual paradigm logic
-        TMSEEGClassificationTEPfree.__init__(self, **kwargs)
+# Keep old name as alias for compatibility
+CachingTMSEEGClassificationTEPfree = TMSEEGClassificationTEPfreeParadigm
 
 
 # %%
@@ -430,6 +366,7 @@ __all__ = [
     "get_subject_list_for_datasets",
     "load_cached_pretrain_data",
     "CachingTMSEEGClassificationTEPfree",
+    "TMSEEGClassificationTEPfreeParadigm",
     "PARADIGM_DATA",
 ]
 # %%

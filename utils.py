@@ -40,23 +40,6 @@ def replace_username(path_str, username=None):
     return Path(path_str)
 
 
-# Cache directory setup
-_repo_root = Path(__file__).parent
-_default_cache_dir_template = _repo_root / ".cache" / "moabb"
-_raw_cache_dir_source_str = os.environ.get("MOABB_CACHE_DIR", str(_default_cache_dir_template))
-
-CACHE_ROOT_DIR: Optional[Path] = None
-
-
-def update_cache_root_dir(target_username_for_replacement: str):
-    """Update the global CACHE_ROOT_DIR with username replacement."""
-    global CACHE_ROOT_DIR
-    CACHE_ROOT_DIR = replace_username(_raw_cache_dir_source_str, username=target_username_for_replacement)
-    log.info(f"CACHE_ROOT_DIR updated to: {CACHE_ROOT_DIR}")
-
-
-# Initialize with default username
-update_cache_root_dir(target_username_for_replacement="mwe626")
 
 # Regression Metrics Tracker
 class RegressionMetricsTracker:
