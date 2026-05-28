@@ -1,0 +1,52 @@
+# Small config: train on 26 subjects, test on subject 18 only.
+# Uses leave-one-out CV (n_splits=27). Subject 18 is in fold 5's test set,
+# trained on all 26 other subjects listed here.
+dataset_names: ["TMSEEGClassificationTEPfree"]
+subjects: [18, 21, 22, 24, 26, 27, 31, 34, 36, 38, 39, 41, 46, 48, 49, 103, 104, 105, 106, 109, 114, 117, 118, 121, 122, 123, 124]
+n_splits: 27                # leave-one-out CV
+run_only_fold: 5            # only run fold 5 (where subject 18 is in test set)
+num_pretrain_subjects: "max"
+
+models_to_run:
+  - PRIME
+
+# Phase 1: population pretraining
+pretrain_epochs: 100
+batch_size_pretrain: 64
+lr_pretrain: 0.0003
+optimizer_type_pretrain: "AdamW"
+
+# Phase 2: subject-specific calibration (first 100 trials)
+use_subject_specific_calibration: true
+num_calibration_trials: 100
+calibration_epochs: 50
+lr_calibration: 0.0001
+
+# Phase 3: online continual full finetuning
+finetune_mode: "full"
+finetune_epochs: 1
+finetune_warmup_trials: 50
+batch_size_finetune: 50
+lr_finetune: 0.0001
+
+# 50 ms window ending 10 ms before TMS pulse
+tmin: -0.060
+tmax: -0.010
+
+# Euclidean alignment + back-rotation (paper default for PRE-FT)
+use_tta: true
+alignment_type: "euclidean"
+ea_backrotation: true
+alignment_ref_ema_beta: 0.99
+tta_cov_buffer_size: 50
+
+window_size: 100
+seed: 42
+device: "cuda"
+experiment_name: "replicate_prime"
+save_results: true
+save_predictions_and_labels: true
+save_checkpoints: false
+
+save_pretrained_model: true
+save_finetuned_model: true
