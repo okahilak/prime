@@ -262,7 +262,8 @@ class CrossValidator:
         self.model_state_dict = copy.deepcopy(model.state_dict())
 
         if self.args.get("save_pretrained_model", False):
-            save_path = self.run_output_dir / "pretrained.pt"
+            suffix = "_all" if self.args.get("train_all", False) else ""
+            save_path = self.run_output_dir / f"pretrained{suffix}.pt"
             save_checkpoint({"model_state_dict": model.state_dict()}, save_path)
             self.console.print(f"      [green]Saved pretrained model to {save_path.name}[/green]")
 
@@ -273,7 +274,8 @@ class CrossValidator:
 
         # Save global back-rotation matrix if produced
         if self.global_backrot_matrix is not None:
-            backrot_path = self.run_output_dir / "global_backrotation_matrix.npy"
+            suffix = "_all" if self.args.get("train_all", False) else ""
+            backrot_path = self.run_output_dir / f"global_backrotation_matrix{suffix}.npy"
             np.save(backrot_path, self.global_backrot_matrix)
             self.console.print(f"    [green]Saved global back-rotation matrix to {backrot_path.name}[/green]")
 

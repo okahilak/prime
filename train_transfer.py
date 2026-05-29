@@ -65,17 +65,17 @@ def setup_experiment(cli_args=None):
 
     # Mode (mutually exclusive, required)
     mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument("--train", action="store_true",
-                            help="Train only (no CV or testing)")
-    mode_group.add_argument("--test", action="store_true",
-                            help="Test only using a pretrained checkpoint")
+    mode_group.add_argument("--train-all", action="store_true",
+                            help="Train on all subjects, save as pretrained_all.pt")
+    mode_group.add_argument("--train", type=int, nargs="+", metavar="SUBJECT",
+                            help="Train on specified subjects (e.g. --train 1 2 3 4)")
+    mode_group.add_argument("--test", type=int, nargs="+", metavar="SUBJECT",
+                            help="Test on specified subjects (e.g. --test 1 2 3)")
     mode_group.add_argument("--cv", action="store_true",
                             help="Full cross-subject k-fold cross-validation")
 
     parser.add_argument("-c", "--config", action="append",
                         help="Path to YAML config file(s)", required=True)
-    parser.add_argument("--subjects", type=int, nargs="+", default=None,
-                        help="Subject IDs to use (default: all available)")
     parser.add_argument("--n-splits", type=int, default=None,
                         help="Number of CV splits (default: 2)")
     parser.add_argument("--fold", type=int, default=None,
@@ -98,15 +98,24 @@ def setup_experiment(cli_args=None):
     OmegaConf.resolve(config)
 
     # Apply CLI overrides for mode, subjects, n_splits
-    if parsed_args.train:
+    if parsed_args.train_all:
         config.experiment_mode = "train_only"
+        config.subjects = None  # all subjects
+        config.train_all = True
+    elif parsed_args.train:
+        config.experiment_mode = "train_only"
+        config.subjects = parsed_args.train
+        config.train_all = False
     elif parsed_args.test:
         config.experiment_mode = "single_subject_eval"
         config.pretrained_checkpoint_dir = str(Path(config.base_output_dir) / "train")
+        config.subjects = parsed_args.test
+        config.train_all = False
     elif parsed_args.cv:
         config.experiment_mode = "cross_subject_kfold"
+        config.subjects = None  # all subjects for CV
+        config.train_all = False
 
-    config.subjects = parsed_args.subjects  # None means all
     config.n_splits = parsed_args.n_splits if parsed_args.n_splits is not None else 2
     config.num_pretrain_subjects = "max"
 
@@ -126,14 +135,14 @@ def setup_experiment(cli_args=None):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     # Create output directory
-    if parsed_args.train:
+    if parsed_args.train_all or parsed_args.train:
         run_output_dir = Path(config.base_output_dir) / "train"
     elif parsed_args.test:
         run_output_dir = Path(config.base_output_dir) / "test"
     else:
         config_name = Path(parsed_args.config[-1]).stem
         run_output_dir = get_output_dir(
-            base_output_root=config.base_output_dir,
+            base_output_root=str(Path(config.base_output_dir) / "cv"),
             config_name=config_name,
         )
     console = Console()
