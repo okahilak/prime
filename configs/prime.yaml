@@ -59,6 +59,7 @@ window_size: 100
 seed: 42
 device: "cuda"
 no_pretrain: false
+pretrained_checkpoint_dir: null
 
 # --- Output ---
 save_results: true
