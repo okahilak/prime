@@ -74,14 +74,17 @@ def setup_experiment(cli_args=None):
     mode_group.add_argument("--cv", action="store_true",
                             help="Full cross-subject k-fold cross-validation")
 
-    parser.add_argument("-c", "--config", action="append",
-                        help="Path to YAML config file(s)", required=True)
+    parser.add_argument("-c", "--config", action="append", default=None,
+                        help="Path to YAML config file(s) (default: configs/prime.yaml)")
     parser.add_argument("--n-splits", type=int, default=None,
                         help="Number of CV splits (default: 2)")
     parser.add_argument("--fold", type=int, default=None,
                         help="Run only this fold (1-based; for --cv)")
 
     parsed_args, remaining_argv = parser.parse_known_args(args=cli_args)
+
+    if parsed_args.config is None:
+        parsed_args.config = ["configs/prime.yaml"]
 
     config = OmegaConf.load(parsed_args.config[0])
     print(f"Loaded config from: {parsed_args.config[0]}")
