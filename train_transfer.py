@@ -769,6 +769,33 @@ def run_cross_subject_experiment(args, device, console, run_output_dir):
     return fold_results, trial_metrics
 
 
+def run_train_only(args, device, console, run_output_dir):
+    """Train a classifier on all (or selected) subjects and save it. No CV or testing."""
+    console.print("\n[bold magenta]===== Train-Only Mode =====[/bold magenta]")
+
+    all_subjects = get_subject_list(args.data_root)
+    subjects_to_run = (
+        [s for s in all_subjects if s in args.subjects]
+        if args.subjects else all_subjects
+    )
+    assert subjects_to_run, "No subjects available for training."
+
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    # Always save the pretrained model in this mode
+    args.save_pretrained_model = True
+
+    cv = CrossValidator(args, device, console, run_output_dir)
+    train_epochs, train_labels = cv._load_train_data(fold_idx=0, train_subject_ids=subjects_to_run)
+    assert train_epochs is not None and train_epochs.size > 0, "No training data loaded."
+    cv.train(train_epochs, train_labels, fold_idx=0)
+
+    console.print("[bold green]Training complete. Model saved to output directory.[/bold green]")
+
+
 def run_single_subject_eval(args, device, console, run_output_dir):
     """Evaluate a pretrained model on locally available subjects."""
     console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
@@ -905,7 +932,12 @@ if __name__ == "__main__":
     logging.getLogger().addHandler(file_handler)
     log.info("Final Configuration:\n%s", OmegaConf.to_yaml(args))
 
-    if args.experiment_mode == "cross_subject_kfold":
+    if args.experiment_mode == "train_only":
+        run_train_only(args, device, console, run_output_dir)
+        console.print("\n[bold green]\u2705 Training Complete.[/bold green]")
+        log.info("Training finished successfully.")
+        sys.exit(0)
+    elif args.experiment_mode == "cross_subject_kfold":
         fold_results, trial_metrics = run_cross_subject_experiment(args, device, console, run_output_dir)
     elif args.experiment_mode == "single_subject_eval":
         fold_results, trial_metrics = run_single_subject_eval(args, device, console, run_output_dir)

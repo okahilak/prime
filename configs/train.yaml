@@ -1,0 +1,36 @@
+# Train a classifier on all (or selected) subjects — no cross-validation,
+# no calibration, no online finetuning. The pretrained model is saved to the
+# results directory.
+#
+# Usage:
+#   python train_transfer.py -c configs/train.yaml
+#   python train_transfer.py -c configs/train.yaml subjects='[21, 22, 24]'
+#
+subjects: null              # null = all available subjects; or specify e.g. [21, 22, 24]
+
+experiment_mode: "train_only"
+
+# Pretraining
+pretrain_epochs: 100
+batch_size_pretrain: 64
+lr_pretrain: 0.0003
+optimizer_type_pretrain: "AdamW"
+num_pretrain_subjects: "max"
+
+# 50 ms window ending 10 ms before TMS pulse
+tmin: -0.060
+tmax: -0.010
+
+# Euclidean alignment + back-rotation
+use_tta: true
+alignment_type: "euclidean"
+ea_backrotation: true
+alignment_ref_ema_beta: 0.99
+tta_cov_buffer_size: 50
+
+seed: 42
+device: "cuda"
+save_pretrained_model: true
+save_results: false
+save_predictions_and_labels: false
+save_checkpoints: false
