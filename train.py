@@ -169,7 +169,7 @@ def setup_experiment(cli_args=None):
 def run_cross_subject_experiment(args, device, console, run_output_dir):
     """Run the cross-subject k-fold experiment."""
     console.print("\n[bold magenta]===== Starting Cross-Subject K-Fold Experiment =====[/bold magenta]")
-    cv = CrossValidator(args, device, console, run_output_dir)
+    cv = CrossValidator(args, device, console, run_output_dir, is_cv=True)
     fold_results, trial_metrics = cv.run_kfold()
     return fold_results, trial_metrics
 
@@ -194,16 +194,16 @@ def run_train_only(args, device, console, run_output_dir):
     args.save_pretrained_model = True
 
     cv = CrossValidator(args, device, console, run_output_dir)
-    train_epochs, train_labels = cv._load_train_data(fold_idx=0, train_subject_ids=subjects_to_run)
+    train_epochs, train_labels = cv._load_train_data(train_subject_ids=subjects_to_run)
     assert train_epochs is not None and train_epochs.size > 0, "No training data loaded."
-    cv.train(train_epochs, train_labels, fold_idx=0)
+    cv.train(train_epochs, train_labels)
 
     console.print("[bold green]Training complete. Model saved to output directory.[/bold green]")
 
 
-def run_single_subject_eval(args, device, console, run_output_dir):
+def run_test_only(args, device, console, run_output_dir):
     """Evaluate a pretrained model on locally available subjects."""
-    console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
+    console.print("\n[bold magenta]===== Starting Test-Only Evaluation =====[/bold magenta]")
     assert args.pretrained_checkpoint_dir, \
         "--test mode requires a pretrained model in results/train/."
 
@@ -242,7 +242,7 @@ def run_single_subject_eval(args, device, console, run_output_dir):
         subject_results, subject_trial_metrics = cv.test(
             epochs=test_epochs, labels=test_labels,
             metadata=test_metadata,
-            subject_id=test_subject_id, fold_idx=0,
+            subject_id=test_subject_id,
         )
 
         fold_results[0][test_subject_id] = subject_results
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     elif args.experiment_mode == "cross_subject_kfold":
         fold_results, trial_metrics = run_cross_subject_experiment(args, device, console, run_output_dir)
     elif args.experiment_mode == "single_subject_eval":
-        fold_results, trial_metrics = run_single_subject_eval(args, device, console, run_output_dir)
+        fold_results, trial_metrics = run_test_only(args, device, console, run_output_dir)
 
     if fold_results:
         aggregate_and_report_results(fold_results, args, console, run_output_dir)

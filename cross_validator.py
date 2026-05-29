@@ -121,7 +121,10 @@ def _run_online_finetuning(predictor, test_subj_epochs,
                            run_output_dir, subject_id, fold_idx):
     """Run an online finetuning simulation using an already-constructed OnlinePredictor."""
     n_trials = test_subj_epochs.shape[0]
-    log_prefix = f"Fold_{fold_idx}_Subj_{subject_id}_PRIME"
+    if fold_idx is not None:
+        log_prefix = f"Fold_{fold_idx}_Subj_{subject_id}_PRIME"
+    else:
+        log_prefix = f"Subj_{subject_id}_PRIME"
     log.info(f"Starting online simulation for {log_prefix} ({n_trials} trials)")
 
     metrics_tracker = RegressionMetricsTracker(window_size=args.window_size)
@@ -182,17 +185,23 @@ class CrossValidator:
     """Manages cross-validation with clearly separated train and test stages.
 
     Usage:
-        cv = CrossValidator(args, device, console, run_output_dir)
+        cv = CrossValidator(args, device, console, run_output_dir, is_cv=True)
         cv.train(train_epochs, train_labels, fold_idx=0)
         results = cv.test(test_epochs, test_labels, metadata, subject_id=101, fold_idx=0)
+
+        # Non-CV usage:
+        cv = CrossValidator(args, device, console, run_output_dir)
+        cv.train(train_epochs, train_labels)
+        results = cv.test(test_epochs, test_labels, metadata, subject_id=101)
     """
 
     def __init__(self, args: OmegaConf, device: torch.device,
-                 console: Console, run_output_dir: Path):
+                 console: Console, run_output_dir: Path, is_cv: bool = False):
         self.args = args
         self.device = device
         self.console = console
         self.run_output_dir = run_output_dir
+        self.is_cv = is_cv
         self.model_state_dict: Optional[dict] = None
         self.n_channels: int = -1
         self.n_timepoints: int = -1
@@ -203,15 +212,17 @@ class CrossValidator:
     # ------------------------------------------------------------------
 
     def train(self, epochs: np.ndarray, labels: np.ndarray,
-              fold_idx: int = 0) -> None:
+              fold_idx: Optional[int] = None) -> None:
         """Train the PRIME model on the provided data.
 
         Args:
             epochs: Training EEG data with shape (n_trials, n_channels, n_times).
             labels: Training labels with shape (n_trials,).
-            fold_idx: Fold index for logging and checkpoint saving.
+            fold_idx: Fold index (required when is_cv=True).
         """
-        log_memory_usage(f"start_training_fold_{fold_idx+1}", log)
+        if self.is_cv:
+            assert fold_idx is not None, "fold_idx is required in CV mode."
+        log_memory_usage(f"start_training_fold_{fold_idx}" if fold_idx is not None else "start_training", log)
         self.console.print(f"  Training on {len(epochs)} trials...")
 
         self.n_channels = epochs.shape[1]
@@ -256,25 +267,36 @@ class CrossValidator:
         model = pretrain_model(
             model=model, train_loader=train_loader, optimizer=optimizer,
             n_epochs=self.args.pretrain_epochs, device=self.device,
-            run_name_suffix=f"Fold_{fold_idx+1}_PRIME",
+            run_name_suffix=f"Fold_{fold_idx+1}_PRIME" if fold_idx is not None else "PRIME",
         )
 
         self.model_state_dict = copy.deepcopy(model.state_dict())
 
         if self.args.get("save_pretrained_model", False):
-            suffix = "_all" if self.args.get("train_all", False) else ""
+            if self.is_cv:
+                suffix = f"_fold_{fold_idx+1}"
+            elif self.args.get("train_all", False):
+                suffix = "_all"
+            else:
+                suffix = ""
             save_path = self.run_output_dir / f"pretrained{suffix}.pt"
             save_checkpoint({"model_state_dict": model.state_dict()}, save_path)
             self.console.print(f"      [green]Saved pretrained model to {save_path.name}[/green]")
 
         if self.args.save_checkpoints:
             checkpoint_dir = get_checkpoint_dir(self.run_output_dir)
-            save_path = checkpoint_dir / f"model_PRIME_fold_{fold_idx+1}_pretrained.pt"
+            label = f"model_PRIME_fold_{fold_idx+1}_pretrained.pt" if fold_idx is not None else "model_PRIME_pretrained.pt"
+            save_path = checkpoint_dir / label
             save_checkpoint({"model_state_dict": self.model_state_dict}, save_path)
 
         # Save global back-rotation matrix if produced
         if self.global_backrot_matrix is not None:
-            suffix = "_all" if self.args.get("train_all", False) else ""
+            if self.is_cv:
+                suffix = f"_fold_{fold_idx+1}"
+            elif self.args.get("train_all", False):
+                suffix = "_all"
+            else:
+                suffix = ""
             backrot_path = self.run_output_dir / f"global_backrotation_matrix{suffix}.npy"
             np.save(backrot_path, self.global_backrot_matrix)
             self.console.print(f"    [green]Saved global back-rotation matrix to {backrot_path.name}[/green]")
@@ -284,17 +306,22 @@ class CrossValidator:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        self.console.print(f"    [green]Training complete for fold {fold_idx+1}.[/green]")
+        self.console.print(f"    [green]Training complete{f' for fold {fold_idx+1}' if fold_idx is not None else ''}.[/green]")
 
-    def load_pretrained(self, checkpoint_dir: Path, fold_idx: int = 0) -> None:
+    def load_pretrained(self, checkpoint_dir: Path, fold_idx: Optional[int] = None) -> None:
         """Load pretrained model weights from a checkpoint directory.
 
         Args:
-            checkpoint_dir: Directory containing pretrained.pt.
-            fold_idx: Unused, kept for API compatibility.
+            checkpoint_dir: Directory containing pretrained checkpoint.
+            fold_idx: Fold index (required when is_cv=True).
         """
+        if self.is_cv:
+            assert fold_idx is not None, "fold_idx is required in CV mode."
         checkpoint_dir = Path(checkpoint_dir)
-        chkpt_path = checkpoint_dir / "pretrained.pt"
+        if self.is_cv:
+            chkpt_path = checkpoint_dir / f"pretrained_fold_{fold_idx+1}.pt"
+        else:
+            chkpt_path = checkpoint_dir / "pretrained.pt"
         assert chkpt_path.is_file(), f"Checkpoint not found: {chkpt_path}"
 
         self.model_state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
@@ -302,10 +329,13 @@ class CrossValidator:
 
         # Load back-rotation matrix if available
         if getattr(self.args, "ea_backrotation", False):
-            backrot_path = checkpoint_dir / "global_backrotation_matrix.npy"
-            if backrot_path.exists():
-                self.global_backrot_matrix = np.load(backrot_path)
-                self.console.print(f"  [green]Loaded global back-rotation matrix.[/green]")
+            if self.is_cv:
+                backrot_path = checkpoint_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            else:
+                backrot_path = checkpoint_dir / "global_backrotation_matrix.npy"
+            assert backrot_path.exists(), f"Back-rotation matrix not found: {backrot_path}"
+            self.global_backrot_matrix = np.load(backrot_path)
+            self.console.print(f"  [green]Loaded global back-rotation matrix from {backrot_path.name}.[/green]")
 
     # ------------------------------------------------------------------
     # PUBLIC INTERFACE: TEST
@@ -313,7 +343,7 @@ class CrossValidator:
 
     def test(self, epochs: np.ndarray, labels: np.ndarray,
              metadata: Optional[pd.DataFrame] = None,
-             subject_id: int = 0, fold_idx: int = 0) -> Tuple[dict, list]:
+             subject_id: int = 0, fold_idx: Optional[int] = None) -> Tuple[dict, list]:
         """Test the trained model on the provided data.
 
         Runs pre-calibration evaluation, optional calibration, and online
@@ -324,12 +354,16 @@ class CrossValidator:
             labels: Test labels (soft/ground truth) with shape (n_trials,).
             metadata: DataFrame with 'period' column for calibration/intervention split.
             subject_id: Subject identifier for logging and file naming.
-            fold_idx: Fold index for logging and file naming.
+            fold_idx: Fold index (required when is_cv=True).
 
         Returns:
             Tuple of (stage_results, per_trial_metrics).
         """
-        self.console.print(f"  Testing Subject {subject_id} (Fold {fold_idx+1})...")
+        if self.is_cv:
+            assert fold_idx is not None, "fold_idx is required in CV mode."
+            self.console.print(f"  Testing Subject {subject_id} (Fold {fold_idx+1})...")
+        else:
+            self.console.print(f"  Testing Subject {subject_id}...")
         assert epochs is not None and epochs.size > 0, \
             f"No valid data for subject {subject_id}."
 
@@ -339,19 +373,18 @@ class CrossValidator:
 
         # Load back-rotation matrix if needed and not already loaded
         if getattr(self.args, "ea_backrotation", False) and self.global_backrot_matrix is None:
-            # Try pretrained checkpoint dir first, then run_output_dir
-            search_dirs = []
+            if self.is_cv:
+                filename = f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            else:
+                filename = "global_backrotation_matrix.npy"
+            # Determine search directory
             if getattr(self.args, "pretrained_checkpoint_dir", None):
-                search_dirs.append(Path(self.args.pretrained_checkpoint_dir))
-            search_dirs.append(self.run_output_dir)
-            backrot_matrix_path = None
-            for d in search_dirs:
-                candidate = d / "global_backrotation_matrix.npy"
-                if candidate.exists():
-                    backrot_matrix_path = candidate
-                    break
-            assert backrot_matrix_path is not None, \
-                f"Back-rotation is ON but matrix file was not found in {search_dirs}."
+                search_dir = Path(self.args.pretrained_checkpoint_dir)
+            else:
+                search_dir = self.run_output_dir
+            backrot_matrix_path = search_dir / filename
+            assert backrot_matrix_path.exists(), \
+                f"Back-rotation is ON but matrix file not found: {backrot_matrix_path}"
             self.global_backrot_matrix = np.load(backrot_matrix_path)
 
         # --- Label Preparation ---
@@ -448,7 +481,7 @@ class CrossValidator:
                 original_soft_labels=online_labels_for_eval,
                 args=self.args, device=self.device, console=self.console,
                 run_output_dir=self.run_output_dir,
-                subject_id=subject_id, fold_idx=fold_idx + 1,
+                subject_id=subject_id, fold_idx=fold_idx + 1 if fold_idx is not None else None,
             )
             stage_results["finetuned"] = final_finetuned_metrics
 
@@ -545,7 +578,7 @@ class CrossValidator:
             self.load_pretrained(Path(self.args.pretrained_checkpoint_dir), fold_idx)
 
         elif not self.args.no_pretrain:
-            train_epochs, train_labels = self._load_train_data(fold_idx, train_subject_ids)
+            train_epochs, train_labels = self._load_train_data(train_subject_ids)
             assert train_epochs is not None and train_epochs.size > 0, \
                 f"No training data loaded for fold {fold_idx+1}."
             self.train(train_epochs, train_labels, fold_idx=fold_idx)
@@ -567,8 +600,7 @@ class CrossValidator:
             "resample": self.args.resample,
         }
 
-    def _load_train_data(self, fold_idx: int,
-                         train_subject_ids: list) -> Tuple[np.ndarray, np.ndarray]:
+    def _load_train_data(self, train_subject_ids: list) -> Tuple[np.ndarray, np.ndarray]:
         """Load and return training data for the given subjects."""
         actual_subject_ids = list(train_subject_ids)
         self.console.print(f"  Loading pretraining data for {len(actual_subject_ids)} subjects...")
