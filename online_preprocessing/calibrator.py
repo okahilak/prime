@@ -454,7 +454,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
     calibration_params['ica'] = ica
-    return calibration_params, n_successful_trials
+    return calibration_params, n_successful_trials, epochs_pre, epochs_post
 
 
 # ==================== Single-trial processing ====================
@@ -627,7 +627,7 @@ class Calibrator:
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
 
-        calibration_params, n_successful_trials = preprocess_calibration(
+        calibration_params, n_successful_trials, pre_epochs, post_epochs = preprocess_calibration(
             self._epochs_pre.copy(),
             self._epochs_pre_ica.copy(),
             self._epochs_post.copy(),
@@ -636,6 +636,8 @@ class Calibrator:
             self._forward,
         )
         self._calibration_params = calibration_params
+        self.pre_epochs = pre_epochs
+        self.post_epochs = post_epochs
         return n_successful_trials
 
     @classmethod

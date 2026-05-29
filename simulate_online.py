@@ -125,32 +125,13 @@ def main():
 
     # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
-    t0 = time.time()
     n_successful_trials = calibrator.calibrate()
-    print(f"Calibration preprocessing done in {time.time() - t0:.2f}s, "
-          f"used {n_successful_trials} trials")
-
-    # --- Process calibration trials: pre + post together (offline requires both) ---
-    print("\nPreprocessing calibration trials (both pre & post)...")
-    cal_pre_list = []
-    cal_post_list = []
-    for trial_idx in range(N_CALIBRATION_TRIALS):
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        result_pre = calibrator.preprocess_pre(trial)
-        result_post = calibrator.preprocess_post(trial)
-        if result_pre is not False and result_post is not False:
-            cal_pre_list.append(result_pre)
-            cal_post_list.append(result_post)
-
-    print(f"  {len(cal_post_list)}/{N_CALIBRATION_TRIALS} calibration trials survived "
-          f"(both pre & post)")
-    cal_pre_epochs = mne.concatenate_epochs(cal_pre_list)
-    cal_post_epochs = mne.concatenate_epochs(cal_post_list)
+    print(f"Calibration preprocessing done, used {n_successful_trials}/{N_CALIBRATION_TRIALS} trials."
 
     # --- Calibrate dipole fitting parameters ---
     print("\nCalibrating dipole parameters...")
     dipole_fitter = DipoleFitter(forward_path)
-    dipole_fitter.fit(cal_post_epochs)
+    dipole_fitter.fit(calibrator.post_epochs)
     position_index = dipole_fitter.fitting_info['position_index']
     tmin_fit, tmax_fit = dipole_fitter.fitting_info['time_range']
     print(f"  Position index: {position_index}")
@@ -161,7 +142,7 @@ def main():
     cal_dipoles_free = None
     for orientation_label, orientation in [('fixed', 'use_fitted'), ('free', None)]:
         dipoles_for_trials, extraction_times = dipole_fitter.fit_trials(
-            cal_post_epochs, orientation=orientation)
+            calibrator.post_epochs, orientation=orientation)
         mean_time_ms = np.mean(extraction_times) * 1e3
         print(f"  {orientation_label} orientation: {len(dipoles_for_trials)} dipoles, "
               f"avg extraction time {mean_time_ms:.2f} ms")
@@ -174,8 +155,8 @@ def main():
     print(f"  Calibration params obtained: {list(calibrator.calibration_params.keys())}")
     print(f"  Dipole position index: {position_index}")
     print(f"  Dipole fit window: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
-    print(f"  Pre-stim epochs for classifier: {cal_pre_epochs.get_data(copy=False).shape}")
-    print(f"  Post-stim epochs (dipole-fitted): {cal_post_epochs.get_data(copy=False).shape}")
+    print(f"  Pre-stim epochs for classifier: {calibrator.pre_epochs.get_data(copy=False).shape}")
+    print(f"  Post-stim epochs (dipole-fitted): {calibrator.post_epochs.get_data(copy=False).shape}")
     print("=" * 70)
 
     # =========================================================================
@@ -288,7 +269,7 @@ def main():
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     # --- Prepare pre-stim EEG data (matching offline tmin/tmax crop) ---
-    cal_pre_data = cal_pre_epochs.copy().crop(
+    cal_pre_data = calibrator.pre_epochs.copy().crop(
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)
     n_channels = cal_pre_data.shape[1]
@@ -345,7 +326,7 @@ def main():
     n_online_trials = len(int_pre_data)
 
     # Restrict to first 150 trials
-#    n_online_trials = min(n_online_trials, 150)
+    n_online_trials = min(n_online_trials, 150)
 
     print(f"  Online trials: {n_online_trials}")
 
