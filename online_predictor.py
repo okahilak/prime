@@ -43,29 +43,21 @@ def score_predictions(
     Returns:
         Dict of metric name → value.
     """
-    from sklearn.metrics import balanced_accuracy_score, roc_auc_score
+    from sklearn.metrics import roc_auc_score
 
     metrics: dict = {}
 
     if predictions is None or len(predictions) == 0:
-        return {
-            "balanced_accuracy_all": np.nan, "roc_auc_all": np.nan,
-            "balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan,
-        }
+        return {"roc_auc_all": np.nan, "roc_auc_extreme": np.nan}
 
     # --- All trials ---
     true_hard = (np.asarray(labels) > 0.5).astype(int)
     if len(np.unique(true_hard)) > 1:
-        metrics["balanced_accuracy_all"] = balanced_accuracy_score(
-            true_hard, (predictions > 0.5)
-        )
         metrics["roc_auc_all"] = roc_auc_score(true_hard, predictions)
     else:
-        metrics["balanced_accuracy_all"] = np.nan
         metrics["roc_auc_all"] = np.nan
 
     # --- Extreme trials ---
-    metrics["balanced_accuracy_extreme"] = np.nan
     metrics["roc_auc_extreme"] = np.nan
 
     if is_extreme_mask is not None and np.any(is_extreme_mask):
@@ -79,9 +71,6 @@ def score_predictions(
             )
             ext_hard = (ext_labels > 0.5).astype(int)
             if len(np.unique(ext_hard)) > 1:
-                metrics["balanced_accuracy_extreme"] = balanced_accuracy_score(
-                    ext_hard, (ext_preds > 0.5)
-                )
                 metrics["roc_auc_extreme"] = roc_auc_score(ext_hard, ext_preds)
 
     return metrics

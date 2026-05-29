@@ -10,7 +10,7 @@ import os
 import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union
-from sklearn.metrics import r2_score, mean_squared_error, roc_auc_score, balanced_accuracy_score
+from sklearn.metrics import r2_score, mean_squared_error, roc_auc_score
 from collections import deque
 import numpy as np
 import torch
@@ -64,25 +64,11 @@ class RegressionMetricsTracker:
             return np.array([])
         return (np.array(history) > 0.5).astype(int)
 
-    def get_rolling_balanced_accuracy(self):
-        true_binary = self._get_true_binary(self.y_true_hist)
-        if len(true_binary) == 0 or len(np.unique(true_binary)) < 2:
-            return np.nan
-        pred_binary = (np.array(self.y_pred_hist) > 0.5).astype(int)
-        return balanced_accuracy_score(true_binary, pred_binary)
-
     def get_rolling_roc_auc(self):
         true_binary = self._get_true_binary(self.y_true_hist)
         if len(true_binary) < 2 or len(np.unique(true_binary)) < 2:
             return np.nan
         return roc_auc_score(true_binary, self.y_pred_hist)
-
-    def get_overall_balanced_accuracy(self):
-        true_binary = self._get_true_binary(self.all_y_true)
-        if len(true_binary) == 0 or len(np.unique(true_binary)) < 2:
-            return np.nan
-        pred_binary = (np.array(self.all_y_pred) > 0.5).astype(int)
-        return balanced_accuracy_score(true_binary, pred_binary)
 
     def get_overall_roc_auc(self):
         true_binary = self._get_true_binary(self.all_y_true)
@@ -102,8 +88,8 @@ def evaluate_zero_shot(model, test_epochs, test_labels, device, batch_size=64,
     # If there's no data, return a NaN-filled dictionary immediately.
     if test_epochs is None or test_epochs.size == 0:
         return {
-            "balanced_accuracy_all": np.nan, "roc_auc_all": np.nan, "r2_all": np.nan, "mse_all": np.nan,
-            "balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan, "r2_extreme": np.nan, "mse_extreme": np.nan
+            "roc_auc_all": np.nan, "r2_all": np.nan, "mse_all": np.nan,
+            "roc_auc_extreme": np.nan, "r2_extreme": np.nan, "mse_extreme": np.nan
         }
 
     all_preds_prob = []
@@ -130,10 +116,8 @@ def evaluate_zero_shot(model, test_epochs, test_labels, device, batch_size=64,
     all_true_hard = (all_true_labels > 0.5).astype(int)
 
     if len(np.unique(all_true_hard)) > 1:
-        metrics['balanced_accuracy_all'] = balanced_accuracy_score(all_true_hard, (all_preds_prob > 0.5))
         metrics['roc_auc_all'] = roc_auc_score(all_true_hard, all_preds_prob)
     else:
-        metrics['balanced_accuracy_all'] = np.nan
         metrics['roc_auc_all'] = np.nan
 
     # Always calculate regression metrics directly on the soft labels.
@@ -143,7 +127,7 @@ def evaluate_zero_shot(model, test_epochs, test_labels, device, batch_size=64,
     # --- 2. Calculate metrics for EXTREME trials ---
     # Initialize extreme metrics to NaN. They will be overwritten if calculable.
     metrics.update({
-        "balanced_accuracy_extreme": np.nan, "roc_auc_extreme": np.nan,
+        "roc_auc_extreme": np.nan,
         "r2_extreme": np.nan, "mse_extreme": np.nan
     })
 
@@ -160,7 +144,6 @@ def evaluate_zero_shot(model, test_epochs, test_labels, device, batch_size=64,
             extreme_true_hard = (extreme_true_soft > 0.5).astype(int)
 
             if len(np.unique(extreme_true_hard)) > 1:
-                metrics['balanced_accuracy_extreme'] = balanced_accuracy_score(extreme_true_hard, (extreme_preds_prob > 0.5))
                 metrics['roc_auc_extreme'] = roc_auc_score(extreme_true_hard, extreme_preds_prob)
 
             # Always calculate regression metrics for the extreme subset

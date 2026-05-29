@@ -635,20 +635,16 @@ def run_online_finetuning_simulation(predictor, test_subj_epochs,
                 trial_times.append(time.time() - trial_start_time)
 
                 online_iterator.set_postfix(
-                    b_acc=f"{metrics_tracker.get_rolling_balanced_accuracy():.3f}",
                     auc=f"{metrics_tracker.get_rolling_roc_auc():.3f}",
                 )
 
                 trial_metrics_log.append({
                     'trial_idx': trial_idx,
-                    'rolling_balanced_accuracy': metrics_tracker.get_rolling_balanced_accuracy(),
                     'rolling_roc_auc': metrics_tracker.get_rolling_roc_auc(),
-                    'overall_balanced_accuracy_at_trial': metrics_tracker.get_overall_balanced_accuracy(),
                     'overall_roc_auc_at_trial': metrics_tracker.get_overall_roc_auc(),
                     'finetune_loss': step_loss,
                 })
                 if wandb_run:
-                    wandb_run.log({f"online/{log_prefix}/rolling_b_acc": metrics_tracker.get_rolling_balanced_accuracy()}, step=trial_idx)
                     wandb_run.log({f"online/{log_prefix}/rolling_roc_auc": metrics_tracker.get_rolling_roc_auc()}, step=trial_idx)
             except Exception as e:
                 log.error(f"Error processing trial {trial_idx} for {log_prefix}: {e}", exc_info=True)
@@ -666,7 +662,7 @@ def run_online_finetuning_simulation(predictor, test_subj_epochs,
             original_soft_labels=original_soft_labels,
         )
 
-        log.info(f"Online sim finished. All (Bal Acc / ROC): {final_metrics.get('balanced_accuracy_all', np.nan):.4f} / {final_metrics.get('roc_auc_all', np.nan):.4f}.")
+        log.info(f"Online sim finished. ROC AUC (All): {final_metrics.get('roc_auc_all', np.nan):.4f}.")
 
         if args.get('save_predictions_and_labels', False):
             output_filename = run_output_dir / f"predictions_subj_{subject_id}_fold_{fold_idx}.npz"
@@ -798,7 +794,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                     original_soft_labels=all_test_subj_labels_for_eval,
                 )
                 subject_results[model_name]["pre_calib_zero_shot"] = pre_calib_metrics
-                console.print(f"          [bold]Pre-Calib Bal. Acc / ROC AUC: {pre_calib_metrics.get('balanced_accuracy_all', np.nan):.4f} / {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
+                console.print(f"          [bold]Pre-Calib ROC AUC: {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
 
                 # --- Split data for calibration and online phases ---
                 # Use 'period' metadata from the dataset
@@ -828,7 +824,7 @@ def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_
                         original_soft_labels=online_labels_for_eval,
                     )
                     subject_results[model_name]["post_calib_zero_shot"] = post_calib_metrics
-                    console.print(f"          [bold]Post-Calib Bal. Acc / ROC AUC: {post_calib_metrics.get('balanced_accuracy_all', np.nan):.4f} / {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
+                    console.print(f"          [bold]Post-Calib ROC AUC: {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
                     
                     console.print(f"        Starting online finetuning simulation on the remaining {len(online_epochs)} trials...")
                     final_finetuned_metrics, _, per_trial_metrics = run_online_finetuning_simulation(
@@ -1098,8 +1094,8 @@ def aggregate_and_report_results(results: dict, dataset_names: list, args: Omega
         "finetuned": "Online Fine-tuned"
     }
     METRICS = {
-        "balanced_accuracy_all": "Bal. Acc (All)", "roc_auc_all": "ROC AUC (All)",
-        "balanced_accuracy_extreme": "Bal. Acc (Extreme)", "roc_auc_extreme": "ROC AUC (Extreme)",
+        "roc_auc_all": "ROC AUC (All)",
+        "roc_auc_extreme": "ROC AUC (Extreme)",
     }
 
     # --- Data Aggregation ---
