@@ -11,7 +11,7 @@ what a true online system would do. Currently implements the calibration phase:
 5. Fit dipoles to the calibration post-stim epochs.
 
 Hard-coded settings:
-- Subject: sub-021
+- Subject: provided via command-line argument (integer, e.g. 21)
 - Number of calibration trials: 125
 """
 
@@ -49,14 +49,8 @@ from online_predictor import OnlinePredictor
 # =============================================================================
 # Hard-coded constants
 # =============================================================================
-SUBJECT_ID = "sub-021"
 N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
-
-# Offline results directory (for pretrained model & comparison)
-PREDICTIONS_PATH = (
-    "results/2026-05-28_22-15-02_eval_single_subject/predictions_subj_21_fold_1.npz"
-)
 
 PRETRAINED_MODEL_PATH = "pretrained_fold_1.pt"
 GLOBAL_BACKROT_PATH = "global_backrotation_matrix_fold_1.npy"
@@ -85,9 +79,19 @@ CONFIG = {
 
 
 def main():
+    if len(sys.argv) < 2:
+        print("Usage: python simulate_online.py <subject_id>")
+        sys.exit(1)
+    subject_id = int(sys.argv[1])
+    subject_id_str = f"sub-{subject_id:03d}"
+    predictions_path = (
+        f"results/2026-05-28_22-15-02_eval_single_subject/"
+        f"predictions_subj_{subject_id}_fold_1.npz"
+    )
+
     print("=" * 70)
     print("SIMULATE ONLINE PROCESSING (trial-by-trial)")
-    print(f"Subject: {SUBJECT_ID}")
+    print(f"Subject: {subject_id_str}")
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")
     print("=" * 70)
 
@@ -97,11 +101,11 @@ def main():
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
-    epochs = _load_subject_epochs(SUBJECT_ID, cfg)
+    epochs = _load_subject_epochs(subject_id_str, cfg)
     all_eeg_data = epochs.get_data(copy=False)
     all_events = epochs.events
     n_total_trials = all_eeg_data.shape[0]
-    print(f"Loaded {n_total_trials} total trials for {SUBJECT_ID}")
+    print(f"Loaded {n_total_trials} total trials for {subject_id_str}")
 
     # =========================================================================
     # CALIBRATION PHASE — feed trials one at a time
@@ -244,7 +248,7 @@ def main():
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE LABELS")
     print("=" * 70)
-    offline = np.load(PREDICTIONS_PATH)
+    offline = np.load(predictions_path)
     offline_labels = offline["actual_values"]
 
     n_compare = min(len(int_labels), len(offline_labels))
@@ -377,7 +381,7 @@ def main():
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE")
     print("=" * 70)
-    offline = np.load(PREDICTIONS_PATH)
+    offline = np.load(predictions_path)
     offline_preds = offline["predictions"]
     offline_labels = offline["actual_values"]
 
