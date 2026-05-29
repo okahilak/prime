@@ -4,7 +4,6 @@
 # Usage:
 #   python train_transfer.py -c configs/eval_single_subject.yaml
 #
-dataset_names: ["TMSEEGClassificationTEPfree"]
 subjects: [21, 22, 24, 38, 103, 114, 122]              # null = all available subjects; or specify e.g. [21]
 
 experiment_mode: "single_subject_eval"
@@ -12,9 +11,6 @@ experiment_mode: "single_subject_eval"
 # Load pretrained classifier (expects pretrained_fold_1.pt in this directory)
 pretrained_checkpoint_dir: "."
 run_only_fold: 1            # which fold checkpoint to load (pretrained_fold_N.pt)
-
-models_to_run:
-  - PRIME
 
 # Subject-specific calibration (first 100 trials)
 use_subject_specific_calibration: true

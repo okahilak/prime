@@ -52,10 +52,10 @@ try:
     # This assumes the project root is the parent directory of this script's location
     # and has been added to the Python path.
     from TMS_EEG_moabb import (
-        TMSEEGClassificationTEPfree,
-        TMSEEGDatasetTEPfree,
+        TEPParadigm,
+        TEPDataset,
     )
-    from datasets import PARADIGM_DATA, load_cached_pretrain_data
+    from datasets import PARADIGM_DATA, load_pretrain_data
     from utils import filter_args_for_model, get_model_class
     from models.builder import build_model
     from tta_wrapper import TTAWrapper
@@ -79,7 +79,7 @@ def get_config() -> DictConfig:
         # --- Models and Datasets to Run ---
         "models_to_run": ["PRIME"],
         "datasets_by_paradigm": {
-            "TMS": ["TMSEEGClassificationTEPfree"],
+            "TMS": ["TEP"],
         },
 
         # --- Data Loading Parameters ---
@@ -135,8 +135,8 @@ def get_subject_list(dataset_name: str) -> List[int]:
         return [1]
 
     try:
-        if dataset_name == "TMSEEGClassificationTEPfree":
-            dataset_instance = TMSEEGDatasetTEPfree()
+        if dataset_name == "TEP":
+            dataset_instance = TEPDataset()
             subjects = dataset_instance.subject_list
         else:
             print(f"  Warning: Subject list retrieval not implemented for '{dataset_name}'. Defaulting to subject [1].")
@@ -208,9 +208,9 @@ def load_latency_data(
         # --- Path 1: Custom TMS/EEG Datasets ---
         if "TMSEEG" in dataset_name:
             console.print("    [green]Using custom TMS paradigm loader.[/green]")
-            if dataset_name == "TMSEEGClassificationTEPfree":
-                dataset = TMSEEGDatasetTEPfree()
-                paradigm = TMSEEGClassificationTEPfree(tmin=cfg.tmin, tmax=cfg.tmax)
+            if dataset_name == "TEP":
+                dataset = TEPDataset()
+                paradigm = TEPParadigm(tmin=cfg.tmin, tmax=cfg.tmax)
             else:
                 raise NotImplementedError(f"Loading for TMS dataset '{dataset_name}' is not implemented.")
 
@@ -221,7 +221,7 @@ def load_latency_data(
         # --- Path 2: Generic MOABB Datasets ---
         else:
             console.print("    [blue]Using generic MOABB loader.[/blue]")
-            epochs_data, labels_data, n_ch, n_t, _, _ = load_cached_pretrain_data(
+            epochs_data, labels_data, n_ch, n_t, _, _ = load_pretrain_data(
                 dataset_names=[dataset_name],
                 subject_ids=[subject_id],
                 paradigm_kwargs={"fmin": cfg.fmin, "fmax": cfg.fmax, "resample": cfg.resample},

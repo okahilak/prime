@@ -1,14 +1,10 @@
 # Same as replicate_prime.yaml but terminates after the first test subject
 # in each fold. For fold 1, first test subject is 21.
-dataset_names: ["TMSEEGClassificationTEPfree"]
 subjects: null              # all 50 subjects
 n_splits: 2                 # 2-fold cross-subject CV
 run_only_fold: 1            # only run fold 1
 max_test_subjects_per_fold: 1  # stop after first test subject (= 21)
 num_pretrain_subjects: "max"
-
-models_to_run:
-  - PRIME
 
 # Phase 1: population pretraining
 pretrain_epochs: 100

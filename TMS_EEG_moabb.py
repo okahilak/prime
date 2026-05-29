@@ -293,6 +293,11 @@ class TMSEEGClassificationTEPfree(_BaseTMSEEGParadigm):
         return TEPNormalizer(target_col=self.target_metadata_col, scale_factor=1.0)
 
 
+# Short aliases
+TEPDataset = TMSEEGDatasetTEPfree
+TEPParadigm = TMSEEGClassificationTEPfree
+
+
 # %%
 def plot_tep_normalizer_diagnostics(subject_id, metadata, final_labels, target_col, scale_factor=1.0, ewma_span=25):
     """Generates a multi-panel plot to visualize the new normalization process."""

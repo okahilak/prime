@@ -54,7 +54,7 @@ from statsmodels.stats.multitest import fdrcorrection
 # Project-specific imports (ensure these are in your PYTHONPATH)
 from models.deep_tepnet import PRIME
 from tta_wrapper import TTAWrapper
-from TMS_EEG_moabb import TMSEEGClassificationTEPfree, TMSEEGDatasetTEPfree
+from TMS_EEG_moabb import TEPParadigm, TEPDataset
 from utils import run_timestamp
 
 
@@ -91,7 +91,7 @@ ANALYSIS_CONFIG = {
         'Theta (4-8 Hz)': (4, 8), 'Alpha (8-13 Hz)': (8, 13),
         'Beta (13-25 Hz)': (13, 25), 'Gamma (25-47 Hz)': (25, 47),
     },
-    "dataset_name": "TMSEEGClassificationTEPfree",
+    "dataset_name": "TEP",
     "model_args": {'n_chans': 60, 'n_outputs': 1, 'n_times': 50, 'filter_time_length': 10},
     "wrapper_args": argparse.Namespace(
         use_tta=False, alignment_type="none", finetune_mode="full", ea_backrotation=False,

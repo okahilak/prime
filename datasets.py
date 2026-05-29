@@ -4,9 +4,9 @@ Datasets Module for TMS-EEG Classification.
 
 Core Components:
 - `EEGDataset`: A PyTorch-compatible Dataset class.
-- `load_cached_pretrain_data`: Main function to load, preprocess, align, and
+- `load_pretrain_data`: Main function to load, preprocess, align, and
   concatenate data from multiple subjects.
-- `TMSEEGClassificationTEPfreeParadigm` handles the specifics of data
+- `TEPParadigmWithAblation` handles the specifics of data
   extraction for TMS-EEG data types.
 """
 
@@ -19,6 +19,8 @@ import pandas as pd
 from moabb.datasets.base import BaseDataset
 from torch.utils.data import Dataset
 from TMS_EEG_moabb import (
+    TEPDataset,
+    TEPParadigm,
     TMSEEGClassificationTEPfree,
     TMSEEGDataset,
     TMSEEGDatasetTEPfree,
@@ -44,13 +46,13 @@ log.addHandler(logging.NullHandler())
 PARADIGM_DATA = {
     "CUSTOM_CLS": {
         "datasets": [
-            "TMSEEGClassificationTEPfree",
+            "TEP",
         ],
         "class_map": {
-            "TMSEEGClassificationTEPfree": TMSEEGDatasetTEPfree,
+            "TEP": TEPDataset,
         },
         "specs": {
-            "TMSEEGClassificationTEPfree": dict(sr=1000, sec=0.995, n_cls=2),
+            "TEP": dict(sr=1000, sec=0.995, n_cls=2),
         },
     },
 }
@@ -92,42 +94,18 @@ class EEGDataset(Dataset):
 # %%
 # DATA LOADING AND MANAGEMENT FUNCTIONS
 
-def get_subject_list_for_datasets(
-    dataset_names: List[str], data_root: str
-) -> List[int]:
-    """
-    Retrieves a sorted list of subject IDs for a given TMS-EEG dataset.
-    Note: This function is designed to operate on a single dataset at a time.
-    """
-    # Configure MNE data paths to prevent race conditions in parallel environments
+def get_subject_list(data_root: str) -> List[int]:
+    """Retrieves a sorted list of subject IDs for the TEP dataset."""
     os.environ["MNE_DATA"] = data_root
     os.environ["MNE_DATASETS_MOABB_PATH"] = data_root
 
-    if not dataset_names or len(dataset_names) != 1:
-        log.error("This function requires a list with exactly one dataset name.")
-        return []
-
-    dataset_name = dataset_names[0]
-    paradigm_info = PARADIGM_DATA.get("CUSTOM_CLS")
-
-    if not paradigm_info or dataset_name not in paradigm_info["class_map"]:
-        log.error(f"Dataset '{dataset_name}' is not configured in PARADIGM_DATA.")
-        return []
-
-    dataset_class = paradigm_info["class_map"][dataset_name]
-
-    try:
-        dataset_instance = dataset_class(data_path=data_root)
-        subjects = sorted(dataset_instance.subject_list)
-        log.info(f"Found {len(subjects)} subjects in dataset '{dataset_name}'.")
-        return subjects
-    except Exception as e:
-        log.error(f"Failed to retrieve subjects for '{dataset_name}': {e}")
-        return []
+    dataset_instance = TEPDataset(data_path=data_root)
+    subjects = sorted(dataset_instance.subject_list)
+    log.info(f"Found {len(subjects)} subjects.")
+    return subjects
 
 
-def load_cached_pretrain_data(
-    dataset_names: List[str],
+def load_pretrain_data(
     subject_ids: List[int],
     paradigm_kwargs: Dict[str, Any],
     data_root: str,
@@ -136,61 +114,38 @@ def load_cached_pretrain_data(
 ) -> Tuple[
     Optional[np.ndarray],
     Optional[np.ndarray],
-    Optional[int],
-    Optional[int],
+    int,
+    int,
     Optional[List[str]],
     Optional[np.ndarray],
 ]:
-    """ 
-    Loads, processes, and optionally aligns EEG data for pre-training.
-    """
-    if not dataset_names or len(dataset_names) != 1:
-        log.error("Function requires a list with exactly one dataset name.")
-        return None, None, None, None, None, None
-
-    # --- Setup and Configuration ---
-    dataset_name = dataset_names[0]
+    """Loads, processes, and optionally aligns TEP EEG data for pre-training."""
     os.environ["MNE_DATA"] = data_root
     os.environ["MNE_DATASETS_MOABB_PATH"] = data_root
 
-    paradigm_class_map = {
-        "TMSEEGClassificationTEPfree": CachingTMSEEGClassificationTEPfree,
-    }
-    paradigm_class = paradigm_class_map.get(dataset_name)
-
-    if paradigm_class is None:
-        log.error(f"No caching paradigm found for dataset: {dataset_name}")
-        return None, None, None, None, None, None
-
-    # --- Data Loading ---
     effective_paradigm_kwargs = paradigm_kwargs.copy()
     if apply_trial_ablation and hasattr(args, "num_trials_per_subject"):
         num_trials = args.num_trials_per_subject
         effective_paradigm_kwargs["num_trials_per_subject"] = num_trials
         log.info(f"Applying trial ablation: {num_trials} trials per subject.")
 
-    try:
-        paradigm = paradigm_class(**effective_paradigm_kwargs)
-        dataset_class = PARADIGM_DATA["CUSTOM_CLS"]["class_map"][dataset_name]
-        dataset = dataset_class(data_path=data_root)
-    except Exception as e:
-        log.error(f"Failed to instantiate paradigm or dataset: {e}", exc_info=True)
-        return None, None, None, None, None, None
+    paradigm = TEPParadigmWithAblation(**effective_paradigm_kwargs)
+    dataset = TEPDataset(data_path=data_root)
 
     available_subjects = dataset.subject_list
     subjects_to_load = [s for s in subject_ids if s in available_subjects]
     if not subjects_to_load:
-        log.warning(f"No requested subjects found in dataset {dataset_name}.")
-        return None, None, None, None, None, None
+        log.warning("No requested subjects found in dataset.")
+        return None, None, 0, 0, None, None
 
-    log.info(f"Loading data for {len(subjects_to_load)} subjects from {dataset_name}.")
+    log.info(f"Loading data for {len(subjects_to_load)} subjects.")
     epochs_data, y_values, _ = paradigm.get_data(
         dataset=dataset, subjects=subjects_to_load
     )
 
     if epochs_data is None or epochs_data.size == 0:
-        log.warning(f"No data returned from paradigm for {dataset_name}.")
-        return None, None, None, None, None, None
+        log.warning("No data returned from paradigm.")
+        return None, None, 0, 0, None, None
 
     # --- Label and Data Shape Processing ---
     labels_numeric = np.array(y_values).astype(np.float64)
@@ -255,53 +210,40 @@ def load_cached_pretrain_data(
 
     # 2. Apply alignment to each subject's data block
     aligned_epochs_list = []
-    # Note: Currently, data is loaded as a single block. This loop supports
-    # future extensions where data might be loaded per-subject.
     for subject_epochs_np in all_epochs_list:
         if subject_epochs_np.size == 0:
             continue
-        try:
-            # Subject-level whitening: Σ_s^{-½}
-            source_trial_covs = _compute_trial_covariances_np(
-                subject_epochs_np, args.alignment_cov_epsilon
-            )
-            Sigma_s_np = _compute_reference_covariance_np(
-                source_trial_covs, alignment_type=args.alignment_type
-            )
-            R_s_neg_half = _compute_alignment_transform_np(
-                Sigma_s_np, args.alignment_transform_epsilon
-            )
+        source_trial_covs = _compute_trial_covariances_np(
+            subject_epochs_np, args.alignment_cov_epsilon
+        )
+        Sigma_s_np = _compute_reference_covariance_np(
+            source_trial_covs, alignment_type=args.alignment_type
+        )
+        R_s_neg_half = _compute_alignment_transform_np(
+            Sigma_s_np, args.alignment_transform_epsilon
+        )
+        aligned_subject_epochs = _apply_alignment_transform_np(
+            subject_epochs_np, R_s_neg_half
+        )
+
+        if do_backrot and global_backrot_np is not None:
             aligned_subject_epochs = _apply_alignment_transform_np(
-                subject_epochs_np, R_s_neg_half
+                aligned_subject_epochs, global_backrot_np
             )
-
-            # Optional back-rotation: Σ_global^{+½}
-            if do_backrot and global_backrot_np is not None:
-                aligned_subject_epochs = _apply_alignment_transform_np(
-                    aligned_subject_epochs, global_backrot_np
-                )
-            aligned_epochs_list.append(aligned_subject_epochs)
-
-        except Exception as e:
-            log.warning(f"Alignment failed; using original data. Error: {e}")
-            aligned_epochs_list.append(subject_epochs_np)
+        aligned_epochs_list.append(aligned_subject_epochs)
 
     log.info("Pretraining alignment complete.")
 
     # --- Final Concatenation ---
-    try:
-        concatenated_epochs = (
-            np.concatenate(aligned_epochs_list) if aligned_epochs_list else np.array([])
-        )
-        concatenated_labels = (
-            np.concatenate(all_labels_list) if all_labels_list else np.array([])
-        )
-        log.info(
-            f"Final Shapes: Epochs {concatenated_epochs.shape}, Labels {concatenated_labels.shape}"
-        )
-    except ValueError as e_concat:
-        log.error(f"Failed to concatenate aligned data: {e_concat}", exc_info=True)
-        return None, None, None, None, None, None
+    concatenated_epochs = (
+        np.concatenate(aligned_epochs_list) if aligned_epochs_list else np.array([])
+    )
+    concatenated_labels = (
+        np.concatenate(all_labels_list) if all_labels_list else np.array([])
+    )
+    log.info(
+        f"Final Shapes: Epochs {concatenated_epochs.shape}, Labels {concatenated_labels.shape}"
+    )
 
     return (
         concatenated_epochs,
@@ -316,8 +258,8 @@ def load_cached_pretrain_data(
 # %%
 # PARADIGM WRAPPER CLASSES
 
-class TMSEEGClassificationTEPfreeParadigm(TMSEEGClassificationTEPfree):
-    """Thin wrapper for TMSEEGClassificationTEPfree with optional trial ablation."""
+class TEPParadigmWithAblation(TEPParadigm):
+    """TEPParadigm with optional per-subject trial ablation."""
 
     def __init__(self, num_trials_per_subject: Optional[int] = None, **kwargs):
         super().__init__(**kwargs)
@@ -354,8 +296,9 @@ class TMSEEGClassificationTEPfreeParadigm(TMSEEGClassificationTEPfree):
         return final_X, final_y, final_meta
 
 
-# Keep old name as alias for compatibility
-CachingTMSEEGClassificationTEPfree = TMSEEGClassificationTEPfreeParadigm
+# Backward-compatible aliases
+CachingTMSEEGClassificationTEPfree = TEPParadigmWithAblation
+TMSEEGClassificationTEPfreeParadigm = TEPParadigmWithAblation
 
 
 # %%
@@ -363,10 +306,9 @@ CachingTMSEEGClassificationTEPfree = TMSEEGClassificationTEPfreeParadigm
 
 __all__ = [
     "EEGDataset",
-    "get_subject_list_for_datasets",
-    "load_cached_pretrain_data",
-    "CachingTMSEEGClassificationTEPfree",
-    "TMSEEGClassificationTEPfreeParadigm",
+    "get_subject_list",
+    "load_pretrain_data",
+    "TEPParadigmWithAblation",
     "PARADIGM_DATA",
 ]
 # %%
