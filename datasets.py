@@ -217,19 +217,10 @@ class TEPParadigm(BaseParadigm):
 # PARADIGM AND DATASET CONFIGURATION
 # ----------------------------------------------------------------------------
 
-PARADIGM_DATA = {
-    "CUSTOM_CLS": {
-        "datasets": [
-            "TEP",
-        ],
-        "class_map": {
-            "TEP": TEPDataset,
-        },
-        "specs": {
-            "TEP": dict(sr=1000, sec=0.995, n_cls=2),
-        },
-    },
-}
+# TEP dataset specs (sampling rate, duration, number of classes)
+TEP_SAMPLE_RATE = 1000
+TEP_DURATION_SEC = 0.995
+TEP_N_CLASSES = 2
 
 # %%
 class EEGDataset(Dataset):
@@ -480,6 +471,8 @@ __all__ = [
     "get_subject_list",
     "load_pretrain_data",
     "TEPParadigmWithAblation",
-    "PARADIGM_DATA",
+    "TEP_SAMPLE_RATE",
+    "TEP_DURATION_SEC",
+    "TEP_N_CLASSES",
 ]
 # %%

@@ -37,10 +37,6 @@ from datasets import *
 from cross_validator import CrossValidator, log_memory_usage
 from utils import get_output_dir, save_results_df
 
-# --- Constants ---
-DATASET_NAME = "TEP"
-MODEL_NAME = "PRIME"
-
 # --- Global Setup ---
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -328,7 +324,7 @@ def aggregate_and_report_results(fold_results: dict, args: OmegaConf,
             table.add_column("Mean", style="green", justify="right")
 
             scores = [final_metrics.get(sid, {}).get(stage_key, {}).get(metric_key, np.nan) for sid in all_subjects]
-            row = [MODEL_NAME] + [f"{s:.4f}" if not np.isnan(s) else "N/A" for s in scores]
+            row = ["PRIME"] + [f"{s:.4f}" if not np.isnan(s) else "N/A" for s in scores]
             row.append(f"[bold]{np.nanmean(scores):.4f}[/bold]")
             table.add_row(*row)
             console.print(table)
@@ -336,7 +332,7 @@ def aggregate_and_report_results(fold_results: dict, args: OmegaConf,
     # CSV export
     csv_rows = []
     for subject_id, subject_data in final_metrics.items():
-        row_data = {"model": MODEL_NAME, "subject_id": subject_id}
+        row_data = {"model": "PRIME", "subject_id": subject_id}
         for stage_key, stage_metrics in subject_data.items():
             for metric_key, val in stage_metrics.items():
                 row_data[f"{stage_key}_{metric_key}"] = val

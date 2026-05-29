@@ -22,8 +22,8 @@ from torch.utils.data import DataLoader, TensorDataset
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
-# Import model mappings
-from models.models import MODEL_CLASS_MAP, PREFIX_MAP
+# Import model class and prefix
+from models.models import MODEL_CLASS, MODEL_PREFIX
 
 
 def get_username():
@@ -184,19 +184,16 @@ def evaluate_single_trial(
     }
 
 def get_model_class(model_name: str) -> Type[nn.Module]:
-    """Get model class from model name using central map."""
-    model_class = MODEL_CLASS_MAP.get(model_name)
-    if model_class is None:
-        raise ValueError(
-            f"Unknown model name: {model_name}. Available models: {list(MODEL_CLASS_MAP.keys())}"
-        )
-    return model_class
+    """Get model class. Only PRIME is supported."""
+    if model_name != "PRIME":
+        raise ValueError(f"Unknown model name: {model_name}. Only 'PRIME' is supported.")
+    return MODEL_CLASS
 
 
 def filter_args_for_model(
     args_dict: Dict[str, Any], model_name: str, model_class: Type[nn.Module]
 ) -> Dict[str, Any]:
-    """Filter arguments to only include those relevant for specific model constructor."""
+    """Filter arguments to only include those relevant for the PRIME model constructor."""
     model_params = {}
 
     # Get expected parameters from model's __init__ signature
@@ -212,17 +209,15 @@ def filter_args_for_model(
         expected_params = set()
 
     # Prefix-based autodiscovery
-    prefix = PREFIX_MAP.get(model_name)
-    if prefix is not None:
-        prefix = prefix.lower()
-        for arg_key, arg_val in args_dict.items():
-            key_lower = arg_key.lower()
-            if key_lower.startswith(prefix):
-                stripped_param = arg_key[len(prefix):]
-                if not stripped_param:
-                    continue
-                if not expected_params or stripped_param in expected_params:
-                    model_params[stripped_param] = arg_val
+    prefix = MODEL_PREFIX
+    for arg_key, arg_val in args_dict.items():
+        key_lower = arg_key.lower()
+        if key_lower.startswith(prefix):
+            stripped_param = arg_key[len(prefix):]
+            if not stripped_param:
+                continue
+            if not expected_params or stripped_param in expected_params:
+                model_params[stripped_param] = arg_val
 
     # Direct match
     for arg_key, arg_val in args_dict.items():

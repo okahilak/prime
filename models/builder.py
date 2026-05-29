@@ -1,23 +1,23 @@
 #%%
-"""Centralized model builder for neural network models."""
+"""Centralized model builder for the PRIME neural network model."""
 
 import inspect
 import logging
 from typing import Any, Dict
 import torch
 import torch.nn as nn
-from models.models import MODEL_CLASS_MAP
+from models.models import MODEL_CLASS
 
 
 def build_model(model_name: str, n_channels: int, n_times: int, n_outputs: int,
                 device: torch.device, model_specific_args: Dict[str, Any],
                 target_type: str = "classification") -> Any:
-    """Build neural network model with specified parameters."""
+    """Build PRIME neural network model with specified parameters."""
     
-    if model_name not in MODEL_CLASS_MAP:
-        raise ValueError(f"Unknown model name: {model_name}. Available: {list(MODEL_CLASS_MAP.keys())}")
+    if model_name != "PRIME":
+        raise ValueError(f"Unknown model name: {model_name}. Only 'PRIME' is supported.")
     
-    ModelClass = MODEL_CLASS_MAP[model_name]
+    ModelClass = MODEL_CLASS
 
     if n_times is None or n_times <= 0:
         raise ValueError(f"Invalid n_times ({n_times}) for model building.")

@@ -24,7 +24,6 @@ from tqdm.auto import tqdm
 from datasets import (
     TEPDataset,
     TEPParadigm,
-    PARADIGM_DATA,
     get_subject_list,
     load_pretrain_data,
 )
@@ -40,10 +39,6 @@ from utils import (
 )
 
 log = logging.getLogger(__name__)
-
-# --- Constants ---
-DATASET_NAME = "TEP"
-MODEL_NAME = "PRIME"
 
 
 # --- Helper functions used by CrossValidator ---
@@ -126,7 +121,7 @@ def _run_online_finetuning(predictor, test_subj_epochs,
                            run_output_dir, subject_id, fold_idx):
     """Run an online finetuning simulation using an already-constructed OnlinePredictor."""
     n_trials = test_subj_epochs.shape[0]
-    log_prefix = f"Fold_{fold_idx}_Subj_{subject_id}_{MODEL_NAME}"
+    log_prefix = f"Fold_{fold_idx}_Subj_{subject_id}_PRIME"
     log.info(f"Starting online simulation for {log_prefix} ({n_trials} trials)")
 
     metrics_tracker = RegressionMetricsTracker(window_size=args.window_size)
@@ -231,13 +226,13 @@ class CrossValidator:
         assert train_loader is not None and len(train_loader) > 0, \
             "Could not create a valid dataloader from training data."
 
-        self.console.print(f"    Training model: [bold yellow]{MODEL_NAME}[/bold yellow]")
+        self.console.print(f"    Training model: [bold yellow]PRIME[/bold yellow]")
         base_args_dict = OmegaConf.to_container(self.args, resolve=True)
         model_specific_args = filter_args_for_model(
-            base_args_dict, MODEL_NAME, get_model_class(MODEL_NAME)
+            base_args_dict, "PRIME", get_model_class("PRIME")
         )
         model = build_model(
-            model_name=MODEL_NAME,
+            model_name="PRIME",
             n_channels=self.n_channels,
             n_times=self.n_timepoints,
             n_outputs=1,
@@ -261,7 +256,7 @@ class CrossValidator:
         model = pretrain_model(
             model=model, train_loader=train_loader, optimizer=optimizer,
             n_epochs=self.args.pretrain_epochs, device=self.device,
-            run_name_suffix=f"Fold_{fold_idx+1}_{MODEL_NAME}",
+            run_name_suffix=f"Fold_{fold_idx+1}_PRIME",
         )
 
         self.model_state_dict = copy.deepcopy(model.state_dict())
@@ -273,7 +268,7 @@ class CrossValidator:
 
         if self.args.save_checkpoints:
             checkpoint_dir = get_checkpoint_dir(self.run_output_dir)
-            save_path = checkpoint_dir / f"model_{MODEL_NAME}_fold_{fold_idx+1}_pretrained.pt"
+            save_path = checkpoint_dir / f"model_PRIME_fold_{fold_idx+1}_pretrained.pt"
             save_checkpoint({"model_state_dict": self.model_state_dict}, save_path)
 
         # Save global back-rotation matrix if produced
@@ -358,16 +353,16 @@ class CrossValidator:
         else:
             labels_for_eval = labels_ground_truth
 
-        sr_hz = PARADIGM_DATA["CUSTOM_CLS"]["specs"][DATASET_NAME].get("sr")
+        sr_hz = 1000
 
         # --- Build model and predictor ---
         base_args_dict = OmegaConf.to_container(self.args, resolve=True)
         model_eval = build_model(
-            model_name=MODEL_NAME, n_channels=self.n_channels,
+            model_name="PRIME", n_channels=self.n_channels,
             n_times=self.n_timepoints, n_outputs=1,
             device=self.device,
             model_specific_args=filter_args_for_model(
-                base_args_dict, MODEL_NAME, get_model_class(MODEL_NAME)
+                base_args_dict, "PRIME", get_model_class("PRIME")
             ),
         )
         model_eval_wrapped = TTAWrapper(

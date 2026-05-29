@@ -51,7 +51,7 @@ except ImportError:
 try:
     # This assumes the project root is the parent directory of this script's location
     # and has been added to the Python path.
-    from datasets import TEPParadigm, TEPDataset, PARADIGM_DATA, load_pretrain_data
+    from datasets import TEPParadigm, TEPDataset, TEP_SAMPLE_RATE, load_pretrain_data
     from utils import filter_args_for_model, get_model_class
     from models.builder import build_model
     from tta_wrapper import TTAWrapper
@@ -72,19 +72,13 @@ def get_config() -> DictConfig:
         "base_output_dir": "results_latency_merged",
         "seed": 42,
 
-        # --- Models and Datasets to Run ---
-        "models_to_run": ["PRIME"],
-        "datasets_by_paradigm": {
-            "TMS": ["TEP"],
-        },
-
         # --- Data Loading Parameters ---
         "data_root": "/mnt/lustre/home/macke/${oc.env:USER}/mne_data",
-        "tmin": -0.055,  # Relevant for TMS paradigms
-        "tmax": -0.005,   # Relevant for TMS paradigms
-        "fmin": None,     # Relevant for other paradigms (e.g., MI)
-        "fmax": None,     # Relevant for other paradigms (e.g., MI)
-        "resample": None, # Resampling frequency in Hz
+        "tmin": -0.055,
+        "tmax": -0.005,
+        "fmin": None,
+        "fmax": None,
+        "resample": None,
 
         # --- Latency Measurement Settings ---
         "n_repeats_inference": 100,      # Number of loops for inference latency
@@ -121,28 +115,23 @@ def is_cuda_available() -> bool:
             _cuda_available = False
     return _cuda_available
 
-def get_subject_list(dataset_name: str) -> List[int]:
+def get_subject_list() -> List[int]:
     """
-    Retrieves the list of available subject IDs for a given dataset.
+    Retrieves the list of available subject IDs for the TEP dataset.
     """
-    print(f"Fetching subject list for dataset: {dataset_name}")
+    print("Fetching subject list for TEP dataset")
     if not PROJECT_MODULES_AVAILABLE:
         print("  Warning: Project modules not found. Defaulting to subject [1].", file=sys.stderr)
         return [1]
 
     try:
-        if dataset_name == "TEP":
-            dataset_instance = TEPDataset()
-            subjects = dataset_instance.subject_list
-        else:
-            print(f"  Warning: Subject list retrieval not implemented for '{dataset_name}'. Defaulting to subject [1].")
-            return [1]
-
+        dataset_instance = TEPDataset()
+        subjects = dataset_instance.subject_list
         print(f"  Found {len(subjects)} subjects: {subjects}")
         return subjects
 
     except Exception as e:
-        print(f"  Error getting subject list for {dataset_name}: {e}. Defaulting to [1].", file=sys.stderr)
+        print(f"  Error getting subject list: {e}. Defaulting to [1].", file=sys.stderr)
         return [1]
 
 class DictDataset(Dataset):
@@ -185,76 +174,47 @@ def create_dataloader(
     )
 
 def load_latency_data(
-    dataset_name: str,
     subject_id: int,
     cfg: DictConfig,
     console: Console
 ) -> Tuple:
-    """Loads data for a specific dataset and subject for latency testing."""
-    effective_target_type = 'regression' if "TMSEEG" in dataset_name else 'classification'
-    console.print(f"  Loading data for {dataset_name} (Subject {subject_id}, Task: {effective_target_type})...")
+    """Loads TEP data for a specific subject for latency testing."""
+    console.print(f"  Loading TEP data (Subject {subject_id}, Task: classification)...")
 
     if not PROJECT_MODULES_AVAILABLE:
-        console.print(f"  [red]Error: Cannot load {dataset_name} because project modules are not available.[/red]")
+        console.print(f"  [red]Error: Cannot load data because project modules are not available.[/red]")
         return (None,) * 8
 
-    epochs_data, labels_data, n_ch, n_t, sr_hz, n_out = None, None, 0, 0, 250, 1
+    epochs_data, labels_data, n_ch, n_t, sr_hz, n_out = None, None, 0, 0, TEP_SAMPLE_RATE, 1
 
     try:
-        # --- Path 1: Custom TMS/EEG Datasets ---
-        if "TMSEEG" in dataset_name:
-            console.print("    [green]Using custom TMS paradigm loader.[/green]")
-            if dataset_name == "TEP":
-                dataset = TEPDataset()
-                paradigm = TEPParadigm(tmin=cfg.tmin, tmax=cfg.tmax)
-            else:
-                raise NotImplementedError(f"Loading for TMS dataset '{dataset_name}' is not implemented.")
-
-            epochs_data, labels_data, _ = paradigm.get_data(dataset=dataset, subjects=[subject_id])
-            if epochs_data.size > 0:
-                _, n_ch, n_t = epochs_data.shape
-
-        # --- Path 2: Generic MOABB Datasets ---
-        else:
-            console.print("    [blue]Using generic MOABB loader.[/blue]")
-            epochs_data, labels_data, n_ch, n_t, _, _ = load_pretrain_data(
-                dataset_names=[dataset_name],
-                subject_ids=[subject_id],
-                paradigm_kwargs={"fmin": cfg.fmin, "fmax": cfg.fmax, "resample": cfg.resample},
-                data_root=cfg.data_root, args=cfg,
-                verbose=False, target_type=effective_target_type, apply_trial_ablation=False
-            )
+        dataset = TEPDataset()
+        paradigm = TEPParadigm(tmin=cfg.tmin, tmax=cfg.tmax)
+        epochs_data, labels_data, _ = paradigm.get_data(dataset=dataset, subjects=[subject_id])
+        if epochs_data.size > 0:
+            _, n_ch, n_t = epochs_data.shape
 
         if epochs_data is None or epochs_data.size == 0:
             raise ValueError("Data loading returned no epochs.")
 
-        # --- Determine sampling rate and number of outputs ---
-        for p_data in PARADIGM_DATA.values():
-            if dataset_name in p_data.get("specs", {}):
-                spec = p_data["specs"][dataset_name]
-                sr_hz = spec.get("sr", sr_hz)
-                n_out = 1 if effective_target_type == 'regression' else spec.get("n_cls", len(np.unique(labels_data)))
-                break
         effective_sr_hz = cfg.resample if cfg.resample else sr_hz
 
         console.print(f"    Data Loaded: {epochs_data.shape[0]} trials, {n_ch}Ch, {n_t}T, SR={effective_sr_hz}Hz")
 
-        # --- Create DataLoader and a single input tensor for tests ---
         ft_dataloader = create_dataloader(epochs_data, labels_data, cfg.batch_size_finetune, cfg)
         single_input_tensor = torch.from_numpy(epochs_data[0:1]).float() if epochs_data.shape[0] > 0 else None
 
         return (
             ft_dataloader, single_input_tensor, n_ch, n_t, n_out,
-            effective_sr_hz, effective_target_type, None # No error message
+            effective_sr_hz, "classification", None
         )
 
     except Exception as e:
-        console.print(f"  [red]Error loading data for {dataset_name} (Subj {subject_id}): {e}[/red]")
-        logging.error(f"Data loading failed for {dataset_name}, Subj {subject_id}", exc_info=True)
+        console.print(f"  [red]Error loading data (Subj {subject_id}): {e}[/red]")
+        logging.error(f"Data loading failed for Subj {subject_id}", exc_info=True)
         return (None,) * 7 + (str(e),)
 
 def build_latency_model(
-    model_name: str,
     n_channels: int,
     n_timepoints: int,
     n_outputs: int,
@@ -263,21 +223,21 @@ def build_latency_model(
     cfg: DictConfig,
     target_type: str
 ) -> Tuple[Optional[TTAWrapper], int, int]:
-    """Builds the model and wraps it with TTAWrapper."""
-    logging.info(f"Building {model_name}: C={n_channels}, T={n_timepoints}, N_out={n_outputs}, SR={sr_hz}Hz, Task={target_type}")
+    """Builds the PRIME model and wraps it with TTAWrapper."""
+    logging.info(f"Building PRIME: C={n_channels}, T={n_timepoints}, N_out={n_outputs}, SR={sr_hz}Hz, Task={target_type}")
     if n_outputs == 0:
-        logging.warning(f"Correcting n_outputs from 0 to 1 for model {model_name}.")
+        logging.warning("Correcting n_outputs from 0 to 1.")
         n_outputs = 1
 
     if not PROJECT_MODULES_AVAILABLE:
         logging.error("Cannot build model: project modules are not available.")
         return None, 0, 0
 
-    ModelClass = get_model_class(model_name)
-    model_specific_args = filter_args_for_model(cfg, model_name, ModelClass)
+    ModelClass = get_model_class("PRIME")
+    model_specific_args = filter_args_for_model(cfg, "PRIME", ModelClass)
 
     base_model = build_model(
-        model_name=model_name, n_channels=n_channels, n_times=n_timepoints,
+        model_name="PRIME", n_channels=n_channels, n_times=n_timepoints,
         n_outputs=n_outputs, device=device,
         model_specific_args=model_specific_args,
         target_type=target_type
@@ -288,7 +248,7 @@ def build_latency_model(
 
     total_params = sum(p.numel() for p in wrapped_model.parameters())
     trainable_params = sum(p.numel() for p in wrapped_model.parameters() if p.requires_grad)
-    logging.info(f"  {model_name} (wrapped): Total={total_params:,}, Trainable={trainable_params:,}")
+    logging.info(f"  PRIME (wrapped): Total={total_params:,}, Trainable={trainable_params:,}")
 
     return wrapped_model, total_params, trainable_params
 
@@ -454,39 +414,33 @@ def main():
         torch.cuda.manual_seed_all(cfg.seed)
 
     # --- Build Experiment Combinations ---
-    all_datasets = sorted(list(set(ds for d_list in cfg.datasets_by_paradigm.values() for ds in d_list)))
     devices = ["cpu", "cuda"] if is_cuda_available() else ["cpu"]
-    all_jobs = []
-    for dataset in all_datasets:
-        subjects = get_subject_list(dataset)
-        combinations = list(itertools.product([dataset], subjects, cfg.models_to_run, devices))
-        all_jobs.extend(combinations)
+    subjects = get_subject_list()
+    all_jobs = list(itertools.product(subjects, devices))
 
-    logging.info(f"Target Models: {cfg.models_to_run}")
-    logging.info(f"Target Datasets: {all_datasets}")
     logging.info(f"Target Devices: {devices}")
     logging.info(f"Total jobs to run: {len(all_jobs)}")
 
     # --- Run Experiments ---
     all_results = []
     job_pbar = tqdm(all_jobs, desc="Overall Progress")
-    for i, (dataset_name, subject_id, model_name, device_str) in enumerate(job_pbar):
+    for i, (subject_id, device_str) in enumerate(job_pbar):
         job_num = i + 1
-        job_desc = f"Job {job_num}/{len(all_jobs)}: {dataset_name}-S{subject_id}-{model_name}-{device_str}"
+        job_desc = f"Job {job_num}/{len(all_jobs)}: TEP-S{subject_id}-PRIME-{device_str}"
         job_pbar.set_description(job_desc)
         console.print(f"\n--- Running {job_desc} ---", style="bold yellow")
 
         device = torch.device(device_str)
         model_wrapped, error_msg = None, np.nan
         job_result = {
-            "dataset": dataset_name, "subject_id": subject_id,
-            "model": model_name, "device": device_str, "error": error_msg
+            "dataset": "TEP", "subject_id": subject_id,
+            "model": "PRIME", "device": device_str, "error": error_msg
         }
 
         try:
             # 1. Load Data
             (ft_loader, single_tensor, n_ch, n_t, n_out, sr, target_type, err) = load_latency_data(
-                dataset_name, subject_id, cfg, console
+                subject_id, cfg, console
             )
             if err: raise RuntimeError(f"Data loading failed: {err}")
 
@@ -497,7 +451,7 @@ def main():
 
             # 2. Build Model
             model_wrapped, total_p, trainable_p = build_latency_model(
-                model_name, n_ch, n_t, n_out, sr, device, cfg, target_type
+                n_ch, n_t, n_out, sr, device, cfg, target_type
             )
             if model_wrapped is None: raise RuntimeError("Model building failed.")
             job_result.update({"total_params": total_p, "trainable_params": trainable_p})
