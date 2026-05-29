@@ -133,11 +133,15 @@ class TEPParadigm(BaseParadigm):
         self,
         tmin: float = -0.5,
         tmax: float = -0.020,
+        fmin: Optional[float] = None,
+        fmax: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(filters=[], **kwargs)
         self.tmin = tmin
         self.tmax = tmax
+        self.fmin = fmin
+        self.fmax = fmax
         self.target_metadata_col = "TEP_amplitude"
 
     @property
