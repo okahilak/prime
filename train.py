@@ -34,7 +34,7 @@ from rich.console import Console
 # Local project-specific modules
 from datasets import *
 from cross_validator import CrossValidator, log_memory_usage
-from utils import get_output_dir, save_results_df
+from utils import save_results_df
 
 # --- Global Setup ---
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -143,11 +143,7 @@ def setup_experiment(cli_args=None):
     elif parsed_args.test:
         run_output_dir = Path(config.base_output_dir) / "test"
     else:
-        config_name = Path(parsed_args.config[-1]).stem
-        run_output_dir = get_output_dir(
-            base_output_root=str(Path(config.base_output_dir) / "cv"),
-            config_name=config_name,
-        )
+        run_output_dir = Path(config.base_output_dir) / "cv"
     console = Console()
     console.print(f"[blue]Output directory: {run_output_dir}[/blue]")
 

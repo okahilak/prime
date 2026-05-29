@@ -10,7 +10,7 @@
 # --train-all writes to results/train/ (pretrained_all.pt + global_backrotation_all.npy)
 # --train     writes to results/train/ (pretrained.pt + global_backrotation.npy)
 # --test      reads from results/train/, writes to results/test/
-# --cv        writes to results/cv/[timestamp]_[config_name]/
+# --cv        writes to results/cv/
 #
 # Override any value via CLI: python train.py --cv -c configs/prime.yaml lr_pretrain=0.001
 
