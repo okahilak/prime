@@ -34,7 +34,7 @@ PRIME was evaluated using TMS-EEG data from the European Research Council-funded
 
 The core functionality is implemented across several key modules:
 
-- **`train_transfer.py`**: Main training functions for population-level pretraining and online adaptation
+- **`train.py`**: Main training functions for population-level pretraining and online adaptation
 - **`tta_wrapper.py`**: Test-time adaptation wrapper implementing the continual learning framework
 - **`models/`**: Neural network architectures including PRIME and benchmark models
 - **`preprocessing/`**: EEG/TMS data preprocessing pipelines and TEP extraction

@@ -1,6 +1,6 @@
 #%% utils.py
 """
-This file contains utility functions for train_transfer.py.
+This file contains utility functions for train.py.
 """
 
 import datetime

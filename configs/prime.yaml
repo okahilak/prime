@@ -2,17 +2,17 @@
 # Motor Evoked potentials.
 #
 # Usage:
-#   python train_transfer.py --cv -c configs/prime.yaml
-#   python train_transfer.py --train-all -c configs/prime.yaml
-#   python train_transfer.py --train 21 22 24 -c configs/prime.yaml
-#   python train_transfer.py --test 21 22 24 -c configs/prime.yaml
+#   python train.py --cv -c configs/prime.yaml
+#   python train.py --train-all -c configs/prime.yaml
+#   python train.py --train 21 22 24 -c configs/prime.yaml
+#   python train.py --test 21 22 24 -c configs/prime.yaml
 #
 # --train-all writes to results/train/ (pretrained_all.pt + global_backrotation_matrix_all.npy)
 # --train     writes to results/train/ (pretrained.pt + global_backrotation_matrix.npy)
 # --test      reads from results/train/, writes to results/test/
 # --cv        writes to results/cv/[timestamp]_[config_name]/
 #
-# Override any value via CLI: python train_transfer.py --cv -c configs/prime.yaml lr_pretrain=0.001
+# Override any value via CLI: python train.py --cv -c configs/prime.yaml lr_pretrain=0.001
 
 # --- Data ---
 data_root: "~/prime-data/processed"
