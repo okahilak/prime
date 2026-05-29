@@ -55,7 +55,7 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 PRETRAINED_MODEL_PATH = "pretrained_fold_1.pt"
 GLOBAL_BACKROT_PATH = "global_backrotation_matrix_fold_1.npy"
 
-# Config matching replicate_prime.yaml
+# Config matching configs/prime.yaml
 CONFIG = {
     "tmin": -0.060,
     "tmax": -0.010,

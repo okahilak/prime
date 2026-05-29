@@ -559,14 +559,6 @@ class CrossValidator:
                          train_subject_ids: list) -> Tuple[np.ndarray, np.ndarray]:
         """Load and return training data for the given subjects."""
         actual_subject_ids = list(train_subject_ids)
-        num_pretrain = getattr(self.args, "num_pretrain_subjects", "max")
-        if isinstance(num_pretrain, int) and num_pretrain < len(train_subject_ids):
-            if num_pretrain > 0:
-                rng = np.random.RandomState(self.args.seed + fold_idx)
-                actual_subject_ids = rng.choice(
-                    train_subject_ids, size=num_pretrain, replace=False
-                ).tolist()
-                self.console.print(f"  Sub-sampling: {len(actual_subject_ids)} subjects")
         self.console.print(f"  Loading pretraining data for {len(actual_subject_ids)} subjects...")
 
         paradigm_kwargs = self._paradigm_kwargs()

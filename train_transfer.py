@@ -26,7 +26,6 @@ import numpy as np
 import pandas as pd
 import torch
 from omegaconf import OmegaConf
-from omegaconf import ListConfig
 from rich.table import Table
 
 # Visualization and utility libraries
@@ -62,10 +61,33 @@ def setup_experiment(cli_args=None):
     logging.getLogger("moabb.paradigms").setLevel(logging.ERROR)
     logging.getLogger("moabb.datasets").setLevel(logging.ERROR)
 
-    parser = argparse.ArgumentParser(description="K-Fold Transfer with YAML Config")
-    parser.add_argument("-c", "--config", action="append", help="Path to YAML config file(s)", required=True)
+    parser = argparse.ArgumentParser(description="PRIME transfer learning")
+
+    # Mode (mutually exclusive, required)
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--train", action="store_true",
+                            help="Train only (no CV or testing)")
+    mode_group.add_argument("--test", action="store_true",
+                            help="Test only using a pretrained checkpoint")
+    mode_group.add_argument("--cv", action="store_true",
+                            help="Full cross-subject k-fold cross-validation")
+
+    parser.add_argument("-c", "--config", action="append",
+                        help="Path to YAML config file(s)", required=True)
+    parser.add_argument("--subjects", type=int, nargs="+", default=None,
+                        help="Subject IDs to use (default: all available)")
+    parser.add_argument("--n-splits", type=int, default=None,
+                        help="Number of CV splits (default: 2)")
+    parser.add_argument("--pretrained-checkpoint-dir", type=str, default=None,
+                        help="Directory with pretrained_fold_N.pt (required for --test)")
+    parser.add_argument("--fold", type=int, default=None,
+                        help="Run only this fold (1-based; for --test or --cv)")
 
     parsed_args, remaining_argv = parser.parse_known_args(args=cli_args)
+
+    # Validate mode-specific requirements
+    if parsed_args.test and not parsed_args.pretrained_checkpoint_dir:
+        parser.error("--test requires --pretrained-checkpoint-dir")
 
     config = OmegaConf.load(parsed_args.config[0])
     print(f"Loaded config from: {parsed_args.config[0]}")
@@ -80,6 +102,23 @@ def setup_experiment(cli_args=None):
             config = OmegaConf.merge(config, cli_conf)
 
     OmegaConf.resolve(config)
+
+    # Apply CLI overrides for mode, subjects, n_splits
+    if parsed_args.train:
+        config.experiment_mode = "train_only"
+    elif parsed_args.test:
+        config.experiment_mode = "single_subject_eval"
+        config.pretrained_checkpoint_dir = parsed_args.pretrained_checkpoint_dir
+    elif parsed_args.cv:
+        config.experiment_mode = "cross_subject_kfold"
+
+    config.subjects = parsed_args.subjects  # None means all
+    config.n_splits = parsed_args.n_splits if parsed_args.n_splits is not None else 2
+    config.num_pretrain_subjects = "max"
+
+    if parsed_args.fold is not None:
+        config.run_only_fold = parsed_args.fold
+
     config.data_root = str(Path(config.data_root).expanduser())
 
     # Set seed and enforce deterministic CUDA operations
@@ -110,13 +149,6 @@ def setup_experiment(cli_args=None):
         console.print("[yellow]CUDA not available. Switching to CPU.[/yellow]")
         device = torch.device("cpu")
         config.device = "cpu"
-
-    # Process subjects
-    if config.subjects is not None:
-        if isinstance(config.subjects, int):
-            config.subjects = [config.subjects]
-        elif isinstance(config.subjects, (list, ListConfig)):
-            config.subjects = [int(s) for s in config.subjects]
 
     return config, device, console, run_output_dir
 
@@ -162,7 +194,7 @@ def run_single_subject_eval(args, device, console, run_output_dir):
     """Evaluate a pretrained model on locally available subjects."""
     console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
     assert args.pretrained_checkpoint_dir, \
-        "single_subject_eval mode requires 'pretrained_checkpoint_dir' to be set."
+        "--test mode requires --pretrained-checkpoint-dir to be set."
 
     all_subjects = get_subject_list(args.data_root)
     subjects_to_run = [s for s in all_subjects if s in args.subjects] if args.subjects else all_subjects
@@ -303,8 +335,6 @@ if __name__ == "__main__":
         fold_results, trial_metrics = run_cross_subject_experiment(args, device, console, run_output_dir)
     elif args.experiment_mode == "single_subject_eval":
         fold_results, trial_metrics = run_single_subject_eval(args, device, console, run_output_dir)
-    else:
-        raise ValueError(f"Unknown experiment_mode: '{args.experiment_mode}'")
 
     if fold_results:
         aggregate_and_report_results(fold_results, args, console, run_output_dir)
