@@ -298,7 +298,7 @@ def load_pretrain_data(
     dataset = TEPDataset(data_path=data_root)
 
     available_subjects = dataset.subject_list
-    subjects_to_load = [s for s in subject_ids if s in available_subjects]
+    subjects_to_load = sorted(s for s in subject_ids if s in available_subjects)
     if not subjects_to_load:
         log.warning("No requested subjects found in dataset.")
         return None, None, 0, 0, None, None
