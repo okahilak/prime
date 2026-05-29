@@ -15,6 +15,7 @@ Hard-coded settings:
 - Number of calibration trials: 125
 """
 
+import os
 import sys
 import time
 import warnings
@@ -278,6 +279,12 @@ def main():
     np.random.seed(CONFIG["seed"])
     torch.manual_seed(CONFIG["seed"])
     torch.cuda.manual_seed_all(CONFIG["seed"])
+
+    # Deterministic settings for reproducibility
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
     # --- Prepare pre-stim EEG data (matching offline tmin/tmax crop) ---
     cal_pre_data = cal_pre_epochs.copy().crop(
