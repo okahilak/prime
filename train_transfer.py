@@ -78,16 +78,10 @@ def setup_experiment(cli_args=None):
                         help="Subject IDs to use (default: all available)")
     parser.add_argument("--n-splits", type=int, default=None,
                         help="Number of CV splits (default: 2)")
-    parser.add_argument("--pretrained-checkpoint-dir", type=str, default=None,
-                        help="Directory with pretrained_fold_N.pt (required for --test)")
     parser.add_argument("--fold", type=int, default=None,
-                        help="Run only this fold (1-based; for --test or --cv)")
+                        help="Run only this fold (1-based; for --cv)")
 
     parsed_args, remaining_argv = parser.parse_known_args(args=cli_args)
-
-    # Validate mode-specific requirements
-    if parsed_args.test and not parsed_args.pretrained_checkpoint_dir:
-        parser.error("--test requires --pretrained-checkpoint-dir")
 
     config = OmegaConf.load(parsed_args.config[0])
     print(f"Loaded config from: {parsed_args.config[0]}")
@@ -108,7 +102,7 @@ def setup_experiment(cli_args=None):
         config.experiment_mode = "train_only"
     elif parsed_args.test:
         config.experiment_mode = "single_subject_eval"
-        config.pretrained_checkpoint_dir = parsed_args.pretrained_checkpoint_dir
+        config.pretrained_checkpoint_dir = str(Path(config.base_output_dir) / "train")
     elif parsed_args.cv:
         config.experiment_mode = "cross_subject_kfold"
 
@@ -132,11 +126,16 @@ def setup_experiment(cli_args=None):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     # Create output directory
-    config_name = Path(parsed_args.config[-1]).stem
-    run_output_dir = get_output_dir(
-        base_output_root=config.base_output_dir,
-        config_name=config_name,
-    )
+    if parsed_args.train:
+        run_output_dir = Path(config.base_output_dir) / "train"
+    elif parsed_args.test:
+        run_output_dir = Path(config.base_output_dir) / "test"
+    else:
+        config_name = Path(parsed_args.config[-1]).stem
+        run_output_dir = get_output_dir(
+            base_output_root=config.base_output_dir,
+            config_name=config_name,
+        )
     console = Console()
     console.print(f"[blue]Output directory: {run_output_dir}[/blue]")
 
@@ -194,13 +193,11 @@ def run_single_subject_eval(args, device, console, run_output_dir):
     """Evaluate a pretrained model on locally available subjects."""
     console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
     assert args.pretrained_checkpoint_dir, \
-        "--test mode requires --pretrained-checkpoint-dir to be set."
+        "--test mode requires a pretrained model in results/train/."
 
     all_subjects = get_subject_list(args.data_root)
     subjects_to_run = [s for s in all_subjects if s in args.subjects] if args.subjects else all_subjects
     assert subjects_to_run, "No subjects available."
-
-    fold_idx = (getattr(args, "run_only_fold", 1) or 1) - 1
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -217,14 +214,13 @@ def run_single_subject_eval(args, device, console, run_output_dir):
         data_root=args.data_root, args=args,
     )
     cv.n_channels, cv.n_timepoints = n_ch, n_tp
-    cv.load_pretrained(Path(args.pretrained_checkpoint_dir), fold_idx)
+    cv.load_pretrained(Path(args.pretrained_checkpoint_dir))
 
     fold_results = {0: {}}
     all_trial_metrics = []
-    max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
     console.print(f"  Evaluating on {len(subjects_to_run)} subject(s): {subjects_to_run}")
 
-    for subj_count, test_subject_id in enumerate(subjects_to_run):
+    for test_subject_id in subjects_to_run:
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
         if torch.cuda.is_available():
@@ -234,17 +230,13 @@ def run_single_subject_eval(args, device, console, run_output_dir):
         subject_results, subject_trial_metrics = cv.test(
             epochs=test_epochs, labels=test_labels,
             metadata=test_metadata,
-            subject_id=test_subject_id, fold_idx=fold_idx,
+            subject_id=test_subject_id, fold_idx=0,
         )
 
         fold_results[0][test_subject_id] = subject_results
         for entry in subject_trial_metrics:
-            entry.update({"fold": 1, "subject_id": test_subject_id})
+            entry.update({"subject_id": test_subject_id})
             all_trial_metrics.append(entry)
-
-        if max_test_subjs is not None and (subj_count + 1) >= max_test_subjs:
-            console.print(f"  [bold yellow]Reached max_test_subjects_per_fold={max_test_subjs}. Stopping.[/bold yellow]")
-            break
 
     return fold_results, all_trial_metrics
 

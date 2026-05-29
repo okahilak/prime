@@ -1,0 +1,68 @@
+# PRIME: Population-level model for Real-time Individualized prediction of
+# Motor Evoked potentials.
+#
+# Usage:
+#   python train_transfer.py --cv -c configs/prime.yaml
+#   python train_transfer.py --train -c configs/prime.yaml --subjects 21 22 24
+#   python train_transfer.py --test -c configs/prime.yaml --subjects 21 22 24
+#
+# --train writes to results/train/ (pretrained.pt + global_backrotation_matrix.npy)
+# --test  reads from results/train/, writes to results/test/
+#
+# Override any value via CLI: python train_transfer.py --cv -c configs/prime.yaml lr_pretrain=0.001
+
+# --- Data ---
+data_root: "~/prime-data/processed"
+base_output_dir: "results"
+
+# --- Phase 1: population pretraining ---
+pretrain_epochs: 100
+batch_size_pretrain: 64
+lr_pretrain: 0.0003
+optimizer_type_pretrain: "AdamW"
+weight_decay_pretrain: 0.0
+
+# --- Phase 2: subject-specific calibration (first 100 trials) ---
+use_subject_specific_calibration: true
+num_calibration_trials: 100
+calibration_epochs: 50
+lr_calibration: 0.0001
+
+# --- Phase 3: online continual full finetuning ---
+finetune_mode: "full"
+finetune_epochs: 1
+finetune_warmup_trials: 50
+batch_size_finetune: 50
+lr_finetune: 0.0001
+optimizer_type_finetune: "AdamW"
+weight_decay_finetune: 0.0
+
+# --- EEG window: 50 ms ending 10 ms before TMS pulse ---
+tmin: -0.060
+tmax: -0.010
+fmin: null
+fmax: null
+resample: null
+
+# --- Euclidean alignment + back-rotation ---
+use_tta: true
+alignment_type: "euclidean"
+ea_backrotation: true
+alignment_ref_ema_beta: 0.99
+tta_cov_buffer_size: 50
+alignment_cov_epsilon: 1.0e-06
+alignment_transform_epsilon: 1.0e-07
+use_adabn: false
+
+# --- General ---
+window_size: 100
+seed: 42
+device: "cuda"
+no_pretrain: false
+
+# --- Output ---
+save_results: true
+save_predictions_and_labels: true
+save_checkpoints: false
+save_pretrained_model: true
+save_finetuned_model: true

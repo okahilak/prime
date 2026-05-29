@@ -163,7 +163,7 @@ def _run_online_finetuning(predictor, test_subj_epochs,
     log.info(f"Online sim finished. ROC AUC (All): {final_metrics.get('roc_auc_all', np.nan):.4f}.")
 
     if args.get('save_predictions_and_labels', False):
-        output_filename = run_output_dir / f"predictions_subj_{subject_id}_fold_{fold_idx}.npz"
+        output_filename = run_output_dir / f"predictions_subj_{subject_id}.npz"
         np.savez_compressed(output_filename, predictions=y_pred_all, actual_values=y_true_all)
         log.info(f"Saved predictions for Subj {subject_id} to {output_filename}")
 
@@ -262,7 +262,7 @@ class CrossValidator:
         self.model_state_dict = copy.deepcopy(model.state_dict())
 
         if self.args.get("save_pretrained_model", False):
-            save_path = self.run_output_dir / f"pretrained_fold_{fold_idx+1}.pt"
+            save_path = self.run_output_dir / "pretrained.pt"
             save_checkpoint({"model_state_dict": model.state_dict()}, save_path)
             self.console.print(f"      [green]Saved pretrained model to {save_path.name}[/green]")
 
@@ -273,7 +273,7 @@ class CrossValidator:
 
         # Save global back-rotation matrix if produced
         if self.global_backrot_matrix is not None:
-            backrot_path = self.run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            backrot_path = self.run_output_dir / "global_backrotation_matrix.npy"
             np.save(backrot_path, self.global_backrot_matrix)
             self.console.print(f"    [green]Saved global back-rotation matrix to {backrot_path.name}[/green]")
 
@@ -288,11 +288,11 @@ class CrossValidator:
         """Load pretrained model weights from a checkpoint directory.
 
         Args:
-            checkpoint_dir: Directory containing pretrained_fold_N.pt files.
-            fold_idx: Fold index to load (0-based).
+            checkpoint_dir: Directory containing pretrained.pt.
+            fold_idx: Unused, kept for API compatibility.
         """
         checkpoint_dir = Path(checkpoint_dir)
-        chkpt_path = checkpoint_dir / f"pretrained_fold_{fold_idx+1}.pt"
+        chkpt_path = checkpoint_dir / "pretrained.pt"
         assert chkpt_path.is_file(), f"Checkpoint not found: {chkpt_path}"
 
         self.model_state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
@@ -300,7 +300,7 @@ class CrossValidator:
 
         # Load back-rotation matrix if available
         if getattr(self.args, "ea_backrotation", False):
-            backrot_path = checkpoint_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            backrot_path = checkpoint_dir / "global_backrotation_matrix.npy"
             if backrot_path.exists():
                 self.global_backrot_matrix = np.load(backrot_path)
                 self.console.print(f"  [green]Loaded global back-rotation matrix.[/green]")
@@ -337,9 +337,19 @@ class CrossValidator:
 
         # Load back-rotation matrix if needed and not already loaded
         if getattr(self.args, "ea_backrotation", False) and self.global_backrot_matrix is None:
-            backrot_matrix_path = self.run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
-            assert backrot_matrix_path.exists(), \
-                f"Back-rotation is ON but matrix file was not found at {backrot_matrix_path}."
+            # Try pretrained checkpoint dir first, then run_output_dir
+            search_dirs = []
+            if getattr(self.args, "pretrained_checkpoint_dir", None):
+                search_dirs.append(Path(self.args.pretrained_checkpoint_dir))
+            search_dirs.append(self.run_output_dir)
+            backrot_matrix_path = None
+            for d in search_dirs:
+                candidate = d / "global_backrotation_matrix.npy"
+                if candidate.exists():
+                    backrot_matrix_path = candidate
+                    break
+            assert backrot_matrix_path is not None, \
+                f"Back-rotation is ON but matrix file was not found in {search_dirs}."
             self.global_backrot_matrix = np.load(backrot_matrix_path)
 
         # --- Label Preparation ---
@@ -441,7 +451,7 @@ class CrossValidator:
             stage_results["finetuned"] = final_finetuned_metrics
 
             if self.args.get('save_finetuned_model', False):
-                save_path = self.run_output_dir / f"finetuned_subj_{subject_id}_fold_{fold_idx+1}.pt"
+                save_path = self.run_output_dir / f"finetuned_subj_{subject_id}.pt"
                 save_checkpoint({'model_state_dict': model_eval_wrapped.state_dict()}, save_path)
                 self.console.print(f"      [green]Saved fine-tuned model to {save_path.name}[/green]")
         else:
