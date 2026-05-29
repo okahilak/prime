@@ -393,6 +393,9 @@ def main():
     # --- Predictions comparison ---
     n_compare_pred = min(len(all_predictions), len(offline_preds))
     pred_diffs = np.abs(all_predictions[:n_compare_pred] - offline_preds[:n_compare_pred])
+    preds_all_close = np.allclose(
+        all_predictions[:n_compare_pred], offline_preds[:n_compare_pred], atol=1e-4
+    )
     print(f"\n  PREDICTIONS ({n_compare_pred} trials):")
     print(f"    Max diff:       {np.max(pred_diffs):.6f}")
     print(f"    Mean diff:      {np.mean(pred_diffs):.6f}")
@@ -400,8 +403,20 @@ def main():
     print(f"    Num < 1e-6:     {np.sum(pred_diffs < 1e-6)}")
     print(f"    Num < 1e-4:     {np.sum(pred_diffs < 1e-4)}")
     print(f"    Num < 0.001:    {np.sum(pred_diffs < 0.001)}")
-    print(f"    All close (1e-4): {np.allclose(all_predictions[:n_compare_pred], offline_preds[:n_compare_pred], atol=1e-4)}")
+    print(f"    All close (1e-4): {preds_all_close}")
     print("=" * 70)
+
+    labels_match = np.array_equal(int_labels[:n_compare], offline_labels[:n_compare])
+    if not labels_match:
+        print("\nRESULT: FAIL — Labels do not match.")
+        sys.exit(1)
+
+    if not preds_all_close:
+        print("\nRESULT: FAIL — Predictions do not match within tolerance.")
+        sys.exit(1)
+
+    print("\nRESULT: PASS — all results match.")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
