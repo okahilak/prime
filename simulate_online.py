@@ -52,8 +52,8 @@ from online_predictor import OnlinePredictor
 N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
-PRETRAINED_MODEL_PATH = "pretrained_fold_1.pt"
-GLOBAL_BACKROT_PATH = "global_backrotation_matrix_fold_1.npy"
+PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
+GLOBAL_BACKROTATION_PATH = "results/train/global_backrotationation_matrix.npy"
 
 # Config matching configs/prime.yaml
 CONFIG = {
@@ -61,7 +61,7 @@ CONFIG = {
     "tmax": -0.010,
     "use_tta": True,
     "alignment_type": "euclidean",
-    "ea_backrotation": True,
+    "ea_backrotationation": True,
     "alignment_ref_ema_beta": 0.99,
     "alignment_cov_epsilon": 1e-6,
     "alignment_transform_epsilon": 1e-7,
@@ -84,10 +84,7 @@ def main():
         sys.exit(1)
     subject_id = int(sys.argv[1])
     subject_id_str = f"sub-{subject_id:03d}"
-    predictions_path = (
-        f"results/2026-05-28_22-15-02_eval_single_subject/"
-        f"predictions_subj_{subject_id}_fold_1.npz"
-    )
+    predictions_path = f"results/test/predictions_subj_{subject_id}.npz"
 
     print("=" * 70)
     print("SIMULATE ONLINE PROCESSING (trial-by-trial)")
@@ -313,11 +310,11 @@ def main():
     )
 
     # Load global back-rotation matrix
-    global_backrot_matrix_np = np.load(GLOBAL_BACKROT_PATH)
+    global_backrotation_matrix_np = np.load(GLOBAL_BACKROTATION_PATH)
 
     # Wrap model with TTA
     model_wrapped = TTAWrapper(
-        model, args, sr_hz=1000.0, global_backrot_matrix_np=global_backrot_matrix_np
+        model, args, sr_hz=1000.0, global_backrotation_matrix_np=global_backrotation_matrix_np
     ).to(device)
 
     # Load pretrained weights
@@ -328,7 +325,7 @@ def main():
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
     predictor = OnlinePredictor(
         model=model_wrapped, args=args, device=device,
-        global_backrot_matrix_np=global_backrot_matrix_np,
+        global_backrotation_matrix_np=global_backrotation_matrix_np,
     )
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---
