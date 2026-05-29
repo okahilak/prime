@@ -29,7 +29,6 @@ from datasets import (
 )
 from models.builder import build_model
 from online_predictor import OnlinePredictor, score_predictions
-from tta_wrapper import TTAWrapper
 from utils import (
     RegressionMetricsTracker,
     filter_args_for_model,
@@ -398,31 +397,12 @@ class CrossValidator:
         else:
             labels_for_eval = labels_ground_truth
 
-        sr_hz = 1000
-
-        # --- Build model and predictor ---
-        base_args_dict = OmegaConf.to_container(self.args, resolve=True)
-        model_eval = build_model(
-            model_name="PRIME", n_channels=self.n_channels,
-            n_times=self.n_timepoints, n_outputs=1,
-            device=self.device,
-            model_specific_args=filter_args_for_model(
-                base_args_dict, "PRIME", get_model_class("PRIME")
-            ),
-        )
-        model_eval_wrapped = TTAWrapper(
-            model_eval, self.args, sr_hz=sr_hz,
-            global_backrotation=self.global_backrotation,
-        ).to(self.device)
-
-        if self.model_state_dict is not None:
-            model_eval_wrapped.wrapped_model.load_state_dict(self.model_state_dict)
-            self.console.print("        Loaded pre-trained state.")
-
+        # --- Build predictor ---
         predictor = OnlinePredictor(
-            model=model_eval_wrapped, args=self.args, device=self.device,
-            global_backrotation=self.global_backrotation,
+            self.global_backrotation, model_state_dict=self.model_state_dict,
         )
+        if self.model_state_dict is not None:
+            self.console.print("        Loaded pre-trained state.")
 
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 

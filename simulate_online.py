@@ -41,8 +41,6 @@ from online_preprocessing.preprocess import (
     _single_trial_epochs_from_arrays,
 )
 from tep_normalizer import TEPNormalizer
-from models.builder import build_model
-from tta_wrapper import TTAWrapper
 from online_predictor import OnlinePredictor
 
 # =============================================================================
@@ -223,6 +221,7 @@ def main():
     print("CLASSIFIER — Pretrained model + Calibration + Online finetuning")
     print("=" * 70)
 
+    # Torch and NumPy setup
     device = torch.device("cuda")
     np.random.seed(CONFIG["seed"])
     torch.manual_seed(CONFIG["seed"])
@@ -239,42 +238,14 @@ def main():
     cal_pre_data = cal_pre_epochs.copy().crop(
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)
-    n_channels = cal_pre_data.shape[1]
-    n_timepoints = cal_pre_data.shape[2]
-    print(f"\n  Pre-stim EEG shape: ({n_channels} ch, {n_timepoints} timepoints)")
+    print(f"\n  Pre-stim EEG shape: ({cal_pre_data.shape[1]} ch, {cal_pre_data.shape[2]} timepoints)")
     print(f"  Calibration trials for classifier: {cal_pre_data.shape[0]}")
 
-    # --- Build model and load pretrained weights ---
-    from omegaconf import OmegaConf
-    args = OmegaConf.create(CONFIG)
-
-    model = build_model(
-        model_name="PRIME",
-        n_channels=n_channels,
-        n_times=n_timepoints,
-        n_outputs=1,
-        device=device,
-        model_specific_args={},
-    )
-
-    # Load global back-rotation matrix
-    global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
-
-    # Wrap model with TTA
-    model_wrapped = TTAWrapper(
-        model, args, sr_hz=1000.0, global_backrotation=global_backrotation
-    ).to(device)
-
-    # Load pretrained weights
-    checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=device, weights_only=False)
-    model_wrapped.wrapped_model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
-
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
-    predictor = OnlinePredictor(
-        model=model_wrapped, args=args, device=device,
-        global_backrotation=global_backrotation,
-    )
+    global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
+    checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=device, weights_only=False)
+    predictor = OnlinePredictor(global_backrotation, model_state_dict=checkpoint["model_state_dict"])
+    print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---
     print("\n  --- Calibration (using OnlinePredictor.calibrate) ---")

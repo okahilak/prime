@@ -16,9 +16,38 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from models.builder import build_model
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
+
+# Hard-coded model/data constants (matching configs/prime.yaml + preprocessing)
+_N_CHANNELS = 60          # len(COMMON_CHANNELS) after preprocessing
+_SR_HZ = 1000.0           # target_sfreq after Calibrator resampling (raw is 5000 Hz)
+_TMIN = -0.060
+_TMAX = -0.010
+_N_TIMEPOINTS = 51        # round((_TMAX - _TMIN) * _SR_HZ) + 1, with include_tmax
+
+_DEFAULT_ARGS = OmegaConf.create({
+    "tmin": _TMIN,
+    "tmax": _TMAX,
+    "use_tta": True,
+    "alignment_type": "euclidean",
+    "use_backrotation": True,
+    "alignment_ref_ema_beta": 0.99,
+    "alignment_cov_epsilon": 1e-6,
+    "alignment_transform_epsilon": 1e-7,
+    "tta_cov_buffer_size": 50,
+    "finetune_mode": "full",
+    "finetune_epochs": 1,
+    "batch_size_finetune": 50,
+    "lr_finetune": 0.0001,
+    "weight_decay_finetune": 0.0,
+    "lr_calibration": 0.0001,
+    "calibration_epochs": 50,
+    "window_size": 100,
+    "seed": 42,
+})
 
 
 def score_predictions(
@@ -94,7 +123,7 @@ class OnlinePredictor:
         to ensure deterministic dropout etc. across paths.
 
     Usage:
-        predictor = OnlinePredictor(model_wrapped, args, device)
+        predictor = OnlinePredictor(global_backrotation, model_state_dict=state_dict)
         predictor.calibrate(calibration_epochs, calibration_labels)
 
         torch.manual_seed(seed)  # caller's responsibility
@@ -105,15 +134,29 @@ class OnlinePredictor:
 
     def __init__(
         self,
-        model: TTAWrapper,
-        args: OmegaConf,
-        device: torch.device,
-        global_backrotation: Optional[np.ndarray] = None,
+        global_backrotation: np.ndarray,
+        model_state_dict: Optional[dict] = None,
     ):
-        self.model = model
-        self.args = args
-        self.device = device
+        self.device = torch.device("cuda")
+        self.args = _DEFAULT_ARGS
         self.global_backrotation = global_backrotation
+
+        # Build model and wrap with TTA
+        base_model = build_model(
+            model_name="PRIME",
+            n_channels=_N_CHANNELS,
+            n_times=_N_TIMEPOINTS,
+            n_outputs=1,
+            device=self.device,
+            model_specific_args={},
+        )
+        self.model = TTAWrapper(
+            base_model, self.args, sr_hz=_SR_HZ,
+            global_backrotation=global_backrotation,
+        ).to(self.device)
+
+        if model_state_dict is not None:
+            self.model.wrapped_model.load_state_dict(model_state_dict)
 
         # Setup finetuning optimizer and history buffers
         self._optimizer: Optional[torch.optim.Optimizer] = None
@@ -122,7 +165,7 @@ class OnlinePredictor:
         self._trial_count = 0
 
         self._finetuning_enabled = (
-            args.finetune_mode != "none" and args.finetune_epochs > 0
+            self.args.finetune_mode != "none" and self.args.finetune_epochs > 0
         )
         if self._finetuning_enabled:
             self._init_optimizer_and_buffers()
