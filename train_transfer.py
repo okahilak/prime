@@ -1056,6 +1056,12 @@ def run_single_subject_eval(
         backrot_dir = Path(args.pretrained_checkpoint_dir)
 
         for subj_count, test_subject_id in enumerate(subjects_to_run):
+            # Reset RNG per subject so results are independent of which other subjects are in the list
+            np.random.seed(args.seed)
+            torch.manual_seed(args.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(args.seed)
+
             subject_results, subject_trial_metrics = run_subject_evaluation(
                 test_subject_id, fold_idx, fold_pretrained_models,
                 n_channels, n_timepoints, args, device, console, run_output_dir,
