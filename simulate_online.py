@@ -113,6 +113,7 @@ def main():
 
     # --- Trial-by-trial accumulation ---
     calibrator = Calibrator(cfg, forward_path)
+    dipole_fitter = DipoleFitter(forward_path)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
         # Simulate receiving a single trial
@@ -126,35 +127,21 @@ def main():
     # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
     n_successful_trials = calibrator.calibrate()
-    print(f"Calibration preprocessing done, used {n_successful_trials}/{N_CALIBRATION_TRIALS} trials."
+    print(f"Calibration preprocessing done, used {n_successful_trials}/{N_CALIBRATION_TRIALS} trials.")
 
     # --- Calibrate dipole fitting parameters ---
     print("\nCalibrating dipole parameters...")
-    dipole_fitter = DipoleFitter(forward_path)
     dipole_fitter.fit(calibrator.post_epochs)
-    position_index = dipole_fitter.fitting_info['position_index']
-    tmin_fit, tmax_fit = dipole_fitter.fitting_info['time_range']
-    print(f"  Position index: {position_index}")
-    print(f"  Time range: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
 
     # --- Fit dipoles to calibration post-stim trials ---
     print("\nFitting dipoles to calibration trials...")
-    cal_dipoles_free = None
-    for orientation_label, orientation in [('fixed', 'use_fitted'), ('free', None)]:
-        dipoles_for_trials, extraction_times = dipole_fitter.fit_trials(
-            calibrator.post_epochs, orientation=orientation)
-        mean_time_ms = np.mean(extraction_times) * 1e3
-        print(f"  {orientation_label} orientation: {len(dipoles_for_trials)} dipoles, "
-              f"avg extraction time {mean_time_ms:.2f} ms")
-        if orientation is None:
-            cal_dipoles_free = dipoles_for_trials
-
+    cal_dipoles_free = dipole_fitter.fit_trials(calibrator.post_epochs, orientation=None)
+    print(f"  {len(cal_dipoles_free)} dipoles")
+    
     # --- Summary ---
     print("\n" + "=" * 70)
     print("CALIBRATION COMPLETE")
     print(f"  Calibration params obtained: {list(calibrator.calibration_params.keys())}")
-    print(f"  Dipole position index: {position_index}")
-    print(f"  Dipole fit window: [{tmin_fit*1000:.1f}, {tmax_fit*1000:.1f}] ms")
     print(f"  Pre-stim epochs for classifier: {calibrator.pre_epochs.get_data(copy=False).shape}")
     print(f"  Post-stim epochs (dipole-fitted): {calibrator.post_epochs.get_data(copy=False).shape}")
     print("=" * 70)
@@ -189,10 +176,9 @@ def main():
     int_post_epochs = mne.concatenate_epochs(int_post_list)
 
     print("\nFitting free-orientation dipoles to intervention trials...")
-    int_dipoles_free, int_extraction_times = dipole_fitter.fit_trials(
+    int_dipoles_free = dipole_fitter.fit_trials(
         int_post_epochs, orientation=None)
-    print(f"  {len(int_dipoles_free)} dipoles fitted, "
-          f"avg time {np.mean(int_extraction_times)*1e3:.2f} ms")
+    print(f"  {len(int_dipoles_free)} dipoles fitted")
 
     # --- TEP normalization (matching offline path) ---
     cal_tep_amplitudes = np.array([d['amplitude'] for d in cal_dipoles_free]).flatten()

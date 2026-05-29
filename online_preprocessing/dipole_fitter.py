@@ -6,8 +6,8 @@ Usage
 -----
     fitter = DipoleFitter(forward_path)
     fitting_info = fitter.fit(epochs)       # also stored in fitter.fitting_info
-    dipoles, times = fitter.fit_trials(epochs)              # fixed orientation
-    dipoles, times = fitter.fit_trials(epochs, orientation=None)  # free orientation
+    dipoles = fitter.fit_trials(epochs)              # fixed orientation
+    dipoles = fitter.fit_trials(epochs, orientation=None)  # free orientation
 """
 import time
 
@@ -150,13 +150,10 @@ def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, t
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
-	extraction_times = [] #init list for saving extraction times
-
 	for trial_index in range(n_trials):
 		#simulate getting a single-trial epoch
 		epoch_now = epochs_cropped[trial_index]
 		trial_data = epoch_now.get_data(copy=True)[0,:,:] #data n_channels x n_times for the single trial data
-		start_time = time.perf_counter()
 		best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured = get_single_trial_dipole(trial_data, trial_index, epoch_now.times, orientation,
 																													 leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
 
@@ -171,9 +168,8 @@ def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, t
 			dipole_info['scalar_amplitude'] = best_amplitude
 
 		dipoles_for_trials.append(dipole_info) #add the information to the list
-		extraction_times.append(time.perf_counter() - start_time) #append the extraction (and saving) time
 
-	return dipoles_for_trials, extraction_times
+	return dipoles_for_trials
 
 
 def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):

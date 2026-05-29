@@ -68,9 +68,7 @@ def run_fitting(subject, subjects_directory_eeg, fitter):
 
         fitted_dipoles = {}
         for orientation_label, orientation in [('fixed_ori', 'use_fitted'), ('free_ori', None)]:
-            dipoles_for_trials, extraction_times = fitter.fit_trials(epochs, orientation=orientation)
-            fitted_dipoles[f'trial_dipoles_{orientation_label}'] = dipoles_for_trials
-            print(f"[{group_label}] Average {orientation_label} dipole extraction time: {np.mean(extraction_times)*1e3:.2f} ms")
+            fitted_dipoles[f'trial_dipoles_{orientation_label}'] = fitter.fit_trials(epochs, orientation=orientation)
 
         os.makedirs(subject_directory, exist_ok=True)
         output_path = os.path.join(subject_directory, f'{subject}_{group_label}_dipoles.npz')
