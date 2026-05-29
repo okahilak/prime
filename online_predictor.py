@@ -108,12 +108,12 @@ class OnlinePredictor:
         model: TTAWrapper,
         args: OmegaConf,
         device: torch.device,
-        global_backrot_matrix_np: Optional[np.ndarray] = None,
+        global_backrotation: Optional[np.ndarray] = None,
     ):
         self.model = model
         self.args = args
         self.device = device
-        self.global_backrot_matrix_np = global_backrot_matrix_np
+        self.global_backrotation = global_backrotation
 
         # Setup finetuning optimizer and history buffers
         self._optimizer: Optional[torch.optim.Optimizer] = None
@@ -285,9 +285,9 @@ class OnlinePredictor:
             epochs_for_training = _apply_alignment_transform_np(
                 epochs_np, transform_np
             )
-            if self.global_backrot_matrix_np is not None:
+            if self.global_backrotation is not None:
                 epochs_for_training = _apply_alignment_transform_np(
-                    epochs_for_training, self.global_backrot_matrix_np
+                    epochs_for_training, self.global_backrotation
                 )
 
         # Temporarily enable full model update if in decision_only mode
@@ -333,9 +333,9 @@ class OnlinePredictor:
         if self.args.use_tta and self.args.alignment_type not in ("none", None):
             transform = self.model.alignment_transform_torch.cpu().numpy()
             epochs_np = _apply_alignment_transform_np(epochs_np, transform)
-            if self.global_backrot_matrix_np is not None:
+            if self.global_backrotation is not None:
                 epochs_np = _apply_alignment_transform_np(
-                    epochs_np, self.global_backrot_matrix_np
+                    epochs_np, self.global_backrotation
                 )
 
         batch_size = min(self.args.batch_size_finetune, len(epochs_np))

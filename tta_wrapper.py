@@ -81,7 +81,7 @@ def _set_adabn_status(model: nn.Module, enabled: bool) -> None:
 class TTAWrapper(nn.Module):
     """Parameter‑free test‑time adaptation via Euclidean Alignment."""
 
-    def __init__(self, model: nn.Module, args: Any, *, sr_hz: Optional[float] = None, global_backrot_matrix_np: Optional[np.ndarray] = None):
+    def __init__(self, model: nn.Module, args: Any, *, sr_hz: Optional[float] = None, global_backrotation: Optional[np.ndarray] = None):
         super().__init__()
         self.wrapped_model = model
         self.args = args
@@ -102,11 +102,11 @@ class TTAWrapper(nn.Module):
 
 
         # ---  Store the global back-rotation matrix as a torch tensor ---
-        self.global_backrot_torch: Optional[torch.Tensor] = None
+        self.global_backrotation_torch: Optional[torch.Tensor] = None
         # Check the flag in args to ensure back-rotation is actually enabled for this run
-        if global_backrot_matrix_np is not None and getattr(args, "ea_backrotation", False):
-            self.global_backrot_torch = (
-                torch.from_numpy(global_backrot_matrix_np)
+        if global_backrotation is not None and getattr(args, "use_backrotation", False):
+            self.global_backrotation_torch = (
+                torch.from_numpy(global_backrotation)
                     .float()
                     .to(self.device, non_blocking=True)
             )
@@ -193,9 +193,9 @@ class TTAWrapper(nn.Module):
             x_whitened = torch.einsum("jk,bkm->bjm", self.alignment_transform_torch, x)
 
             # Step 2: Apply global back-rotation if available
-            if self.global_backrot_torch is not None:
+            if self.global_backrotation_torch is not None:
                 # This applies Σ_global^{+1/2} to the whitened data
-                return torch.einsum("jk,bkm->bjm", self.global_backrot_torch, x_whitened)
+                return torch.einsum("jk,bkm->bjm", self.global_backrotation_torch, x_whitened)
             
             return x_whitened # Return whitened data if no back-rotation
         return x

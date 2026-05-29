@@ -205,7 +205,7 @@ class CrossValidator:
         self.model_state_dict: Optional[dict] = None
         self.n_channels: int = -1
         self.n_timepoints: int = -1
-        self.global_backrot_matrix: Optional[np.ndarray] = None
+        self.global_backrotation: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------
     # PUBLIC INTERFACE: TRAIN
@@ -290,16 +290,16 @@ class CrossValidator:
             save_checkpoint({"model_state_dict": self.model_state_dict}, save_path)
 
         # Save global back-rotation matrix if produced
-        if self.global_backrot_matrix is not None:
+        if self.global_backrotation is not None:
             if self.is_cv:
                 suffix = f"_fold_{fold_idx+1}"
             elif self.args.get("train_all", False):
                 suffix = "_all"
             else:
                 suffix = ""
-            backrot_path = self.run_output_dir / f"global_backrotation_matrix{suffix}.npy"
-            np.save(backrot_path, self.global_backrot_matrix)
-            self.console.print(f"    [green]Saved global back-rotation matrix to {backrot_path.name}[/green]")
+            backrotation_path = self.run_output_dir / f"global_backrotation{suffix}.npy"
+            np.save(backrotation_path, self.global_backrotation)
+            self.console.print(f"    [green]Saved global back-rotation matrix to {backrotation_path.name}[/green]")
 
         del model, optimizer
         gc.collect()
@@ -328,14 +328,14 @@ class CrossValidator:
         self.console.print(f"  Loaded checkpoint: {chkpt_path}")
 
         # Load back-rotation matrix if available
-        if getattr(self.args, "ea_backrotation", False):
+        if getattr(self.args, "use_backrotation", False):
             if self.is_cv:
-                backrot_path = checkpoint_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+                backrotation_path = checkpoint_dir / f"global_backrotation_fold_{fold_idx+1}.npy"
             else:
-                backrot_path = checkpoint_dir / "global_backrotation_matrix.npy"
-            assert backrot_path.exists(), f"Back-rotation matrix not found: {backrot_path}"
-            self.global_backrot_matrix = np.load(backrot_path)
-            self.console.print(f"  [green]Loaded global back-rotation matrix from {backrot_path.name}.[/green]")
+                backrotation_path = checkpoint_dir / "global_backrotation.npy"
+            assert backrotation_path.exists(), f"Back-rotation matrix not found: {backrotation_path}"
+            self.global_backrotation = np.load(backrotation_path)
+            self.console.print(f"  [green]Loaded global back-rotation matrix from {backrotation_path.name}.[/green]")
 
     # ------------------------------------------------------------------
     # PUBLIC INTERFACE: TEST
@@ -372,20 +372,20 @@ class CrossValidator:
             self.n_timepoints = epochs.shape[2]
 
         # Load back-rotation matrix if needed and not already loaded
-        if getattr(self.args, "ea_backrotation", False) and self.global_backrot_matrix is None:
+        if getattr(self.args, "use_backrotation", False) and self.global_backrotation is None:
             if self.is_cv:
-                filename = f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+                filename = f"global_backrotation_fold_{fold_idx+1}.npy"
             else:
-                filename = "global_backrotation_matrix.npy"
+                filename = "global_backrotation.npy"
             # Determine search directory
             if getattr(self.args, "pretrained_checkpoint_dir", None):
                 search_dir = Path(self.args.pretrained_checkpoint_dir)
             else:
                 search_dir = self.run_output_dir
-            backrot_matrix_path = search_dir / filename
-            assert backrot_matrix_path.exists(), \
-                f"Back-rotation is ON but matrix file not found: {backrot_matrix_path}"
-            self.global_backrot_matrix = np.load(backrot_matrix_path)
+            backrotation_path = search_dir / filename
+            assert backrotation_path.exists(), \
+                f"Back-rotation is ON but file not found: {backrotation_path}"
+            self.global_backrotation = np.load(backrotation_path)
 
         # --- Label Preparation ---
         is_extreme_mask = (labels <= 0.25) | (labels >= 0.75)
@@ -412,7 +412,7 @@ class CrossValidator:
         )
         model_eval_wrapped = TTAWrapper(
             model_eval, self.args, sr_hz=sr_hz,
-            global_backrot_matrix_np=self.global_backrot_matrix,
+            global_backrotation=self.global_backrotation,
         ).to(self.device)
 
         if self.model_state_dict is not None:
@@ -421,7 +421,7 @@ class CrossValidator:
 
         predictor = OnlinePredictor(
             model=model_eval_wrapped, args=self.args, device=self.device,
-            global_backrot_matrix_np=self.global_backrot_matrix,
+            global_backrotation=self.global_backrotation,
         )
 
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
@@ -609,7 +609,7 @@ class CrossValidator:
         if hasattr(self.args, "channel_subset") and self.args.channel_subset:
             paradigm_kwargs["channels"] = self.args.channel_subset
 
-        epochs_data, labels_data, _, _, _, global_backrot = load_pretrain_data(
+        epochs_data, labels_data, _, _, _, global_backrotation = load_pretrain_data(
             subject_ids=actual_subject_ids,
             paradigm_kwargs=paradigm_kwargs,
             data_root=self.args.data_root,
@@ -617,8 +617,8 @@ class CrossValidator:
             apply_trial_ablation=True,
         )
 
-        if global_backrot is not None:
-            self.global_backrot_matrix = global_backrot
+        if global_backrotation is not None:
+            self.global_backrotation = global_backrotation
 
         assert epochs_data is not None and epochs_data.size > 0, "No pretraining data loaded."
         self.console.print(f"    Total pretrain trials: {len(epochs_data)}.")

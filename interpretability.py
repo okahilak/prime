@@ -94,7 +94,7 @@ ANALYSIS_CONFIG = {
     "dataset_name": "TEP",
     "model_args": {'n_chans': 60, 'n_outputs': 1, 'n_times': 50, 'filter_time_length': 10},
     "wrapper_args": argparse.Namespace(
-        use_tta=False, alignment_type="none", finetune_mode="full", ea_backrotation=False,
+        use_tta=False, alignment_type="none", finetune_mode="full", use_backrotation=False,
         use_adabn=False, alignment_cov_epsilon=1e-6, alignment_transform_epsilon=1e-7,
         tta_cov_buffer_size=50, alignment_ref_ema_beta=1.0
     )

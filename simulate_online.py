@@ -53,7 +53,7 @@ N_CALIBRATION_TRIALS = 125
 DATA_ROOT = Path("~/prime-data").expanduser()
 
 PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
-GLOBAL_BACKROTATION_PATH = "results/train/global_backrotationation_matrix.npy"
+GLOBAL_BACKROTATION_PATH = "results/train/global_backrotation.npy"
 
 # Config matching configs/prime.yaml
 CONFIG = {
@@ -61,7 +61,7 @@ CONFIG = {
     "tmax": -0.010,
     "use_tta": True,
     "alignment_type": "euclidean",
-    "ea_backrotationation": True,
+    "use_backrotation": True,
     "alignment_ref_ema_beta": 0.99,
     "alignment_cov_epsilon": 1e-6,
     "alignment_transform_epsilon": 1e-7,
@@ -310,11 +310,11 @@ def main():
     )
 
     # Load global back-rotation matrix
-    global_backrotation_matrix_np = np.load(GLOBAL_BACKROTATION_PATH)
+    global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
 
     # Wrap model with TTA
     model_wrapped = TTAWrapper(
-        model, args, sr_hz=1000.0, global_backrotation_matrix_np=global_backrotation_matrix_np
+        model, args, sr_hz=1000.0, global_backrotation=global_backrotation
     ).to(device)
 
     # Load pretrained weights
@@ -325,7 +325,7 @@ def main():
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
     predictor = OnlinePredictor(
         model=model_wrapped, args=args, device=device,
-        global_backrotation_matrix_np=global_backrotation_matrix_np,
+        global_backrotation=global_backrotation,
     )
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---

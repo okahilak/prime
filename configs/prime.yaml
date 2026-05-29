@@ -7,8 +7,8 @@
 #   python train.py --train 21 22 24 -c configs/prime.yaml
 #   python train.py --test 21 22 24 -c configs/prime.yaml
 #
-# --train-all writes to results/train/ (pretrained_all.pt + global_backrotation_matrix_all.npy)
-# --train     writes to results/train/ (pretrained.pt + global_backrotation_matrix.npy)
+# --train-all writes to results/train/ (pretrained_all.pt + global_backrotation_all.npy)
+# --train     writes to results/train/ (pretrained.pt + global_backrotation.npy)
 # --test      reads from results/train/, writes to results/test/
 # --cv        writes to results/cv/[timestamp]_[config_name]/
 #
@@ -50,7 +50,7 @@ resample: null
 # --- Euclidean alignment + back-rotation ---
 use_tta: true
 alignment_type: "euclidean"
-ea_backrotation: true
+use_backrotation: true
 alignment_ref_ema_beta: 0.99
 tta_cov_buffer_size: 50
 alignment_cov_epsilon: 1.0e-06

@@ -347,11 +347,11 @@ def load_pretrain_data(
         )
 
     log.info(f"Applying per-subject alignment (type: {args.alignment_type})")
-    global_backrot_np = None
-    do_backrot = getattr(args, "ea_backrotation", False)
+    global_backrotation = None
+    use_backrotation = getattr(args, "use_backrotation", False)
 
     # 1. Compute global back-rotation matrix if requested
-    if do_backrot:
+    if use_backrotation:
         all_trial_covs = [
             _compute_trial_covariances_np(_subj_epochs, args.alignment_cov_epsilon)
             for _subj_epochs in all_epochs_list
@@ -371,7 +371,7 @@ def load_pretrain_data(
             )
             Sigma_global_np += eps_glob * np.eye(Sigma_global_np.shape[0])
             eigvals, eigvecs = np.linalg.eigh(Sigma_global_np)
-            global_backrot_np = eigvecs @ np.diag(np.sqrt(eigvals)) @ eigvecs.T
+            global_backrotation = eigvecs @ np.diag(np.sqrt(eigvals)) @ eigvecs.T
 
     # 2. Apply alignment to each subject's data block
     aligned_epochs_list = []
@@ -391,9 +391,9 @@ def load_pretrain_data(
             subject_epochs_np, R_s_neg_half
         )
 
-        if do_backrot and global_backrot_np is not None:
+        if use_backrotation and global_backrotation is not None:
             aligned_subject_epochs = _apply_alignment_transform_np(
-                aligned_subject_epochs, global_backrot_np
+                aligned_subject_epochs, global_backrotation
             )
         aligned_epochs_list.append(aligned_subject_epochs)
 
@@ -416,7 +416,7 @@ def load_pretrain_data(
         n_channels,
         n_timepoints,
         channel_names,
-        global_backrot_np,
+        global_backrotation,
     )
 
 
