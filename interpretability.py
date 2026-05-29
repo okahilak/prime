@@ -54,7 +54,7 @@ from statsmodels.stats.multitest import fdrcorrection
 # Project-specific imports (ensure these are in your PYTHONPATH)
 from models.deep_tepnet import PRIME
 from tta_wrapper import TTAWrapper
-from TMS_EEG_moabb import TEPParadigm, TEPDataset
+from datasets import TEPParadigm, TEPDataset
 from utils import run_timestamp
 
 

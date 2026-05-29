@@ -3,6 +3,8 @@
 Datasets Module for TMS-EEG Classification.
 
 Core Components:
+- `TEPDataset`: MOABB-compatible dataset for free-orientation TEP data.
+- `TEPParadigm`: Paradigm that loads TEP data and generates soft labels.
 - `EEGDataset`: A PyTorch-compatible Dataset class.
 - `load_pretrain_data`: Main function to load, preprocess, align, and
   concatenate data from multiple subjects.
@@ -12,19 +14,19 @@ Core Components:
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import mne
 import numpy as np
 import pandas as pd
 from moabb.datasets.base import BaseDataset
+from moabb.paradigms.base import BaseParadigm
 from torch.utils.data import Dataset
-from TMS_EEG_moabb import (
-    TEPDataset,
-    TEPParadigm,
-    TMSEEGClassificationTEPfree,
-    TMSEEGDataset,
-    TMSEEGDatasetTEPfree,
-)
+from tqdm.auto import tqdm
+
+from tep_normalizer import TEPNormalizer
 from tta_wrapper import (
     PYRIEMANN_AVAILABLE,
     _apply_alignment_transform_np,
@@ -36,6 +38,174 @@ from tta_wrapper import (
 # --- Module-level Logger Setup ---
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
+
+DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
+
+
+# %%
+# ----------------------------------------------------------------------------
+# MOABB DATASET
+# ----------------------------------------------------------------------------
+
+class TEPDataset(BaseDataset):
+    """Dataset for free-orientation TEP data."""
+    def __init__(self, data_path: Union[str, Path, None] = None, subject_list: Union[List[int], None] = None):
+        self.data_path_root = Path(data_path) if data_path else DATA_ROOT_PATH
+        effective_subject_list = subject_list if subject_list is not None else self._discover_subjects()
+        super().__init__(
+            subjects=effective_subject_list, sessions_per_subject=1, events={"TMS_stim": 1},
+            code="TEPDataset", interval=[-0.505, -0.006], paradigm="generic_tms_eeg", doi=None
+        )
+
+    def _discover_subjects(self) -> List[int]:
+        subjects = set()
+        if not self.data_path_root.is_dir(): return []
+        for subject_dir in self.data_path_root.glob("sub-*"):
+            if subject_dir.is_dir():
+                match = re.search(r"sub-(\d+)", subject_dir.name)
+                if match: subjects.add(int(match.group(1)))
+        return sorted(list(subjects))
+
+    def _get_single_subject_data(self, subject: int) -> dict:
+        subject_id_str = f"{subject:03d}"
+        subj_dir = self.data_path_root / f"sub-{subject_id_str}"
+
+        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.fif"
+        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.fif"
+        tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_dipoles.npz"
+        tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_dipoles.npz"
+
+        required_files = [eeg_cal_file, eeg_int_file, tep_cal_file, tep_int_file]
+        if not all(f.exists() for f in required_files):
+            log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
+            return {}
+
+        epochs_cal = mne.read_epochs(eeg_cal_file, preload=True, verbose=False)
+        epochs_int = mne.read_epochs(eeg_int_file, preload=True, verbose=False)
+
+        try:
+            npz_cal = np.load(tep_cal_file, allow_pickle=True)
+            dipoles_cal = npz_cal['trial_dipoles_free_ori']
+            tep_cal = np.array([d['amplitude'] for d in dipoles_cal]).flatten()
+
+            npz_int = np.load(tep_int_file, allow_pickle=True)
+            dipoles_int = npz_int['trial_dipoles_free_ori']
+            tep_int = np.array([d['amplitude'] for d in dipoles_int]).flatten()
+        except Exception as e:
+            log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
+            return {}
+
+        n_cal = len(epochs_cal)
+        n_int = len(epochs_int)
+
+        if n_cal != len(tep_cal) or n_int != len(tep_int):
+            log.error(f"S{subject}: Mismatch in TEP data lengths. Skipping.")
+            return {}
+
+        epochs = mne.concatenate_epochs([epochs_cal, epochs_int])
+        tep_amplitudes = np.concatenate([tep_cal, tep_int])
+        period_labels = np.array(['calibration'] * n_cal + ['intervention'] * n_int)
+
+        epochs.metadata = pd.DataFrame({
+            "TEP_amplitude": tep_amplitudes,
+            "period": period_labels,
+        })
+        return {"0": {"0": epochs}}
+
+    def data_path(self, subject: int, **kwargs) -> List[str]:
+        subject_id_str = f"{subject:03d}"
+        paths = [
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_pre.fif",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_pre.fif",
+        ]
+        return [str(p) for p in paths if p.exists()]
+
+
+# %%
+# ----------------------------------------------------------------------------
+# MOABB PARADIGM
+# ----------------------------------------------------------------------------
+
+class TEPParadigm(BaseParadigm):
+    """Paradigm for free-orientation TEP classification with soft labels."""
+
+    def __init__(
+        self,
+        tmin: float = -0.5,
+        tmax: float = -0.020,
+        **kwargs,
+    ):
+        super().__init__(filters=[], **kwargs)
+        self.tmin = tmin
+        self.tmax = tmax
+        self.target_metadata_col = "TEP_amplitude"
+
+    @property
+    def scoring(self):
+        return "roc_auc"
+
+    @property
+    def datasets(self):
+        return [TEPDataset()]
+
+    def is_valid(self, dataset):
+        return "tms_eeg" in dataset.paradigm
+
+    def used_events(self, dataset):
+        return dict(dataset.event_id)
+
+    def get_data(self, dataset, subjects=None, return_epochs=False):
+        if not self.is_valid(dataset):
+            raise ValueError(f"Dataset {dataset.code} is not compatible.")
+
+        subject_list = subjects if subjects is not None else dataset.subject_list
+        raw_epochs_data = dataset.get_data(subject_list)
+
+        X_list, y_list, metadata_list = [], [], []
+
+        for subject in tqdm(subject_list, desc="Processing subjects"):
+            if subject not in raw_epochs_data:
+                continue
+
+            epochs = raw_epochs_data[subject]["0"]["0"]
+            epochs.crop(tmin=self.tmin, tmax=self.tmax, include_tmax=True)
+
+            full_metadata = epochs.metadata.copy()
+
+            cal_mask = full_metadata['period'] == 'calibration'
+            n_cal = cal_mask.sum()
+            if n_cal == 0:
+                log.warning(f"S{subject}: No calibration trials found in metadata. Skipping.")
+                continue
+            meta_calibration = full_metadata[cal_mask]
+
+            normalizer = TEPNormalizer(target_col=self.target_metadata_col, scale_factor=1.0)
+            normalizer.fit(meta_calibration)
+            y_run = normalizer.transform(full_metadata)
+
+            nan_mask = np.isnan(y_run)
+            if np.any(nan_mask):
+                log.warning(f"S{subject}: Found {np.sum(nan_mask)} NaN labels. Removing corresponding trials.")
+                epochs = epochs[~nan_mask]
+                y_run = y_run[~nan_mask]
+                full_metadata = full_metadata[~nan_mask]
+
+            if len(epochs) == 0:
+                continue
+
+            y_list.append(y_run)
+            metadata_list.append(full_metadata)
+            X_list.append(epochs.get_data(copy=False) if not return_epochs else epochs)
+
+        if not X_list:
+            return np.array([]), np.array([]), pd.DataFrame()
+
+        metadata_final = pd.concat(metadata_list, ignore_index=True)
+        y_final = np.concatenate(y_list)
+        X_final = np.concatenate(X_list, axis=0) if not return_epochs else mne.concatenate_epochs(X_list)
+
+        log.info(f"Final data shapes - X: {X_final.shape}, y: {y_final.shape}")
+        return X_final, y_final, metadata_final
 
 
 # %%
@@ -296,15 +466,12 @@ class TEPParadigmWithAblation(TEPParadigm):
         return final_X, final_y, final_meta
 
 
-# Backward-compatible aliases
-CachingTMSEEGClassificationTEPfree = TEPParadigmWithAblation
-TMSEEGClassificationTEPfreeParadigm = TEPParadigmWithAblation
-
-
 # %%
 # MODULE EXPORTS
 
 __all__ = [
+    "TEPDataset",
+    "TEPParadigm",
     "EEGDataset",
     "get_subject_list",
     "load_pretrain_data",

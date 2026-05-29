@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 # Point PRIME at your data BEFORE importing it
-import TMS_EEG_moabb as m
+import datasets as m
 m.DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
 
 # Instantiate the TEP dataset + paradigm

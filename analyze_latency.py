@@ -51,11 +51,7 @@ except ImportError:
 try:
     # This assumes the project root is the parent directory of this script's location
     # and has been added to the Python path.
-    from TMS_EEG_moabb import (
-        TEPParadigm,
-        TEPDataset,
-    )
-    from datasets import PARADIGM_DATA, load_pretrain_data
+    from datasets import TEPParadigm, TEPDataset, PARADIGM_DATA, load_pretrain_data
     from utils import filter_args_for_model, get_model_class
     from models.builder import build_model
     from tta_wrapper import TTAWrapper

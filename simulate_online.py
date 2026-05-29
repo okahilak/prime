@@ -41,7 +41,7 @@ from online_preprocessing.preprocess import (
     _load_subject_epochs,
     _single_trial_epochs_from_arrays,
 )
-from TMS_EEG_moabb import TEPNormalizer
+from tep_normalizer import TEPNormalizer
 from models.builder import build_model
 from tta_wrapper import TTAWrapper
 from online_predictor import OnlinePredictor

@@ -43,7 +43,6 @@ from torchinfo import summary
 
 # Local project-specific modules
 from datasets import *
-from TMS_EEG_moabb import TEPDataset, TEPParadigm
 from models.builder import build_model
 from tta_wrapper import TTAWrapper
 from online_predictor import OnlinePredictor, score_predictions
