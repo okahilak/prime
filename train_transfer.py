@@ -356,227 +356,622 @@ max_test_subjects_per_fold: null
     
     return config, device, console, run_output_dir
 
-def run_fold_pretraining(
-    dataset_name: str,
-    fold_idx: int,
-    train_subject_ids: list,
-    args: OmegaConf,
-    device: torch.device,
-    console: Console,
-    run_output_dir: Path,
-):
+class CrossValidator:
+    """Manages cross-validation with clearly separated train and test stages.
+
+    Usage:
+        cv = CrossValidator(args, device, console, run_output_dir)
+
+        # Train with data
+        cv.train(train_epochs, train_labels, fold_idx=0)
+
+        # Or load pretrained weights instead of training
+        cv.load_pretrained(checkpoint_dir, fold_idx=0)
+
+        # Test with data
+        results = cv.test(test_epochs, test_labels, metadata, subject_id=101, fold_idx=0)
+
+        # Or run full k-fold pipeline
+        all_results = cv.run_kfold(dataset_name)
     """
-    Load data and pretrain models for one fold using either soft or hard labels.
-    """
-    pretrained_models_fold = {}
-    n_channels, n_timepoints = -1, -1
-    n_outputs_model = 1  # Set to 1 for single-output regression/classification
-    log_memory_usage(f"start_pretraining_fold_{fold_idx+1}", log)
 
-    # --- Data Loading ---
-    actual_pretrain_subject_ids = list(train_subject_ids)
-    num_subjects_to_pretrain_on = getattr(args, "num_pretrain_subjects", "max")
-    if isinstance(
-        num_subjects_to_pretrain_on, int
-    ) and num_subjects_to_pretrain_on < len(train_subject_ids):
-        if num_subjects_to_pretrain_on > 0:
-            rng = np.random.RandomState(args.seed + fold_idx)
-            actual_pretrain_subject_ids = rng.choice(
-                train_subject_ids, size=num_subjects_to_pretrain_on, replace=False
-            ).tolist()
-            console.print(
-                f"  Sub-sampling: Using {len(actual_pretrain_subject_ids)} subjects for pretraining"
-            )
-    console.print(
-        f"  Loading pretraining data for {len(actual_pretrain_subject_ids)} subjects..."
-    )
+    def __init__(self, args: OmegaConf, device: torch.device, console: Console, run_output_dir: Path):
+        self.args = args
+        self.device = device
+        self.console = console
+        self.run_output_dir = run_output_dir
+        self.trained_models: Dict[str, dict] = {}  # model_name -> state_dict
+        self.n_channels: int = -1
+        self.n_timepoints: int = -1
+        self.global_backrot_matrix: Optional[np.ndarray] = None
 
-    try:
-        pretrain_epochs_data, pretrain_labels_data, global_backrot_matrix_np = None, None, None
+    # ------------------------------------------------------------------
+    # PUBLIC INTERFACE: TRAIN
+    # ------------------------------------------------------------------
 
-        # The conditional logic has been removed. The following code now runs for ALL datasets.
-        console.print(
-            f"  [bold blue]Using generic data loader for '{dataset_name}'.[/bold blue]"
-        )
-        paradigm_kwargs = {
-            "fmin": args.fmin,
-            "fmax": args.fmax,
-            "tmin": args.tmin,
-            "tmax": args.tmax,
-            "resample": args.resample,
-        }
-        if hasattr(args, "channel_subset") and args.channel_subset:
-            paradigm_kwargs["channels"] = args.channel_subset
-        
-        # This call will now be used for TMSEEGClassificationTEPfree, etc., as well.
-        pretrain_epochs_data, pretrain_labels_data, n_channels, n_timepoints, _, global_backrot_matrix_np = load_cached_pretrain_data(
-            dataset_names=[dataset_name],
-            subject_ids=actual_pretrain_subject_ids,
-            paradigm_kwargs=paradigm_kwargs,
-            data_root=args.data_root,
-            args=args,
-            apply_trial_ablation=True,
-        )
+    def train(self, epochs: np.ndarray, labels: np.ndarray, fold_idx: int = 0,
+              dataset_name: str = "") -> bool:
+        """Train all configured models on the provided data.
 
-        if pretrain_epochs_data is None or pretrain_epochs_data.size == 0:
-            console.print(
-                f"[yellow]No pretraining data loaded for fold {fold_idx+1}. Skipping.[/yellow]"
-            )
-            return {}, -1, -1, False
+        Args:
+            epochs: Training EEG data with shape (n_trials, n_channels, n_times).
+            labels: Training labels with shape (n_trials,).
+            fold_idx: Fold index for logging and checkpoint saving.
+            dataset_name: Name of the dataset (used for logging).
 
-        X_train = pretrain_epochs_data
-        y_train = pretrain_labels_data # Use a generic name now
+        Returns:
+            True if at least one model was trained successfully.
+        """
+        log_memory_usage(f"start_training_fold_{fold_idx+1}", log)
+        self.console.print(f"  Training on {len(epochs)} trials...")
 
-        console.print(f"    Total pretrain trials: {len(X_train)}.")
-        del pretrain_epochs_data, pretrain_labels_data
-        gc.collect()
+        self.n_channels = epochs.shape[1]
+        self.n_timepoints = epochs.shape[2]
+        self.trained_models = {}
 
         # --- Create DataLoader ---
-        # Pass the flag to ensure labels are formatted correctly by the dataloader
         pretrain_gen = torch.Generator()
-        pretrain_gen.manual_seed(args.seed)
-        pretrain_loader = create_dataloader(
-            X_train, y_train, args.batch_size_pretrain, 
+        pretrain_gen.manual_seed(self.args.seed)
+        train_loader = create_dataloader(
+            epochs, labels, self.args.batch_size_pretrain,
             shuffle_data=True, generator=pretrain_gen)
-        
-        if pretrain_loader is None or len(pretrain_loader) == 0:
-            console.print(
-                f"[yellow]Could not create a valid dataloader from the data. Skipping.[/yellow]"
-            )
-            return {}, -1, -1, False
 
-        # --- Model Training Loop ---
-        console.print(f"    Training models: {args.models_to_run}")
-        base_args_dict = OmegaConf.to_container(args, resolve=True)
+        if train_loader is None or len(train_loader) == 0:
+            self.console.print("[yellow]Could not create a valid dataloader. Training aborted.[/yellow]")
+            return False
+
+        # --- Train each model ---
+        self.console.print(f"    Training models: {self.args.models_to_run}")
+        base_args_dict = OmegaConf.to_container(self.args, resolve=True)
         printed_summaries = set()
 
-        for model_idx, model_name in enumerate(args.models_to_run):
-            console.print(
-                f"      Model {model_idx+1}/{len(args.models_to_run)}: [bold yellow]{model_name}[/bold yellow]"
+        for model_idx, model_name in enumerate(self.args.models_to_run):
+            self.console.print(
+                f"      Model {model_idx+1}/{len(self.args.models_to_run)}: [bold yellow]{model_name}[/bold yellow]"
             )
             try:
                 model_specific_args = filter_args_for_model(
                     base_args_dict, model_name, get_model_class(model_name)
                 )
-                model_pretrain = build_model(
+                model_obj = build_model(
                     model_name=model_name,
-                    n_channels=n_channels,
-                    n_times=n_timepoints,
-                    n_outputs=n_outputs_model,
-                    device=device,
+                    n_channels=self.n_channels,
+                    n_times=self.n_timepoints,
+                    n_outputs=1,
+                    device=self.device,
                     model_specific_args=model_specific_args,
                     target_type="classification",
                 )
 
                 optimizer_params = {
-                    "lr": args.lr_pretrain,
-                    "weight_decay": args.weight_decay_pretrain,
+                    "lr": self.args.lr_pretrain,
+                    "weight_decay": self.args.weight_decay_pretrain,
                 }
-                if args.optimizer_type_pretrain.lower() == "adamw":
-                    optimizer_pretrain = torch.optim.AdamW(
-                        model_pretrain.parameters(), **optimizer_params
-                    )
+                if self.args.optimizer_type_pretrain.lower() == "adamw":
+                    optimizer = torch.optim.AdamW(model_obj.parameters(), **optimizer_params)
                 else:
-                    optimizer_pretrain = torch.optim.Adam(
-                        model_pretrain.parameters(), **optimizer_params
-                    )
+                    optimizer = torch.optim.Adam(model_obj.parameters(), **optimizer_params)
 
                 if (
                     (dataset_name, model_name) not in printed_summaries
-                    and n_channels > 0
-                    and n_timepoints > 0
+                    and self.n_channels > 0
+                    and self.n_timepoints > 0
                 ):
                     try:
                         summary_str = summary(
-                            model_pretrain,
-                            input_size=(1, n_channels, n_timepoints),
+                            model_obj,
+                            input_size=(1, self.n_channels, self.n_timepoints),
                             verbose=0,
                         )
-                        console.print(str(summary_str))
+                        self.console.print(str(summary_str))
                         printed_summaries.add((dataset_name, model_name))
                     except Exception:
-                        pass  # Fail silently if summary fails
+                        pass
 
-                # The `pretrain_model` function will handle the loss logic internally
-                model_pretrain = pretrain_model(
-                    model=model_pretrain,
-                    train_loader=pretrain_loader,
-                    optimizer=optimizer_pretrain,
-                    n_epochs=args.pretrain_epochs,
-                    device=device,
-                    args=args,
+                model_obj = pretrain_model(
+                    model=model_obj,
+                    train_loader=train_loader,
+                    optimizer=optimizer,
+                    n_epochs=self.args.pretrain_epochs,
+                    device=self.device,
+                    args=self.args,
                     run_name_suffix=f"{dataset_name}_Fold_{fold_idx+1}_{model_name}",
                 )
 
+                self.trained_models[model_name] = copy.deepcopy(model_obj.state_dict())
 
-                pretrained_models_fold[model_name] = copy.deepcopy(
-                    model_pretrain.state_dict()
-                )
-
-                # Save the final pretrained model (output classifier) to the run results directory
-                if args.get("save_pretrained_model", False):
-                    save_path = run_output_dir / f"pretrained_fold_{fold_idx+1}.pt"
+                # Save pretrained model checkpoint
+                if self.args.get("save_pretrained_model", False):
+                    save_path = self.run_output_dir / f"pretrained_fold_{fold_idx+1}.pt"
                     save_checkpoint(
-                        {"model_state_dict": model_pretrain.state_dict()}, save_path
+                        {"model_state_dict": model_obj.state_dict()}, save_path
                     )
-                    console.print(
+                    self.console.print(
                         f"      [green]Saved pretrained model to {save_path.name}[/green]"
                     )
 
-                # This is for saving intermediate checkpoints if needed by another flag
-                if args.save_checkpoints:
-                    checkpoint_dir = get_checkpoint_dir(run_output_dir)
+                if self.args.save_checkpoints:
+                    checkpoint_dir = get_checkpoint_dir(self.run_output_dir)
                     save_path = (
                         checkpoint_dir
                         / f"model_{model_name}_ds_{dataset_name}_fold_{fold_idx+1}_pretrained.pt"
                     )
                     save_checkpoint(
-                        {"model_state_dict": pretrained_models_fold[model_name]},
+                        {"model_state_dict": self.trained_models[model_name]},
                         save_path,
                     )
 
             except Exception as e:
-                log.error(
-                    f"Error training {model_name} in fold {fold_idx+1}: {e}",
-                    exc_info=True,
-                )
-                console.print(f"      [red]Failed to train {model_name}: {e}[/red]")
+                log.error(f"Error training {model_name} in fold {fold_idx+1}: {e}", exc_info=True)
+                self.console.print(f"      [red]Failed to train {model_name}: {e}[/red]")
             finally:
-                if "model_pretrain" in locals():
-                    del model_pretrain
-                if "optimizer_pretrain" in locals():
-                    del optimizer_pretrain
+                if "model_obj" in locals():
+                    del model_obj
+                if "optimizer" in locals():
+                    del optimizer
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-        if 'global_backrot_matrix_np' in locals() and global_backrot_matrix_np is not None:
-            backrot_matrix_path = run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+        # Save global back-rotation matrix if produced
+        if self.global_backrot_matrix is not None:
+            backrot_matrix_path = self.run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
             try:
-                np.save(backrot_matrix_path, global_backrot_matrix_np)
-                console.print(f"    [green]Saved global back-rotation matrix to {backrot_matrix_path.name}[/green]")
+                np.save(backrot_matrix_path, self.global_backrot_matrix)
+                self.console.print(f"    [green]Saved global back-rotation matrix to {backrot_matrix_path.name}[/green]")
             except Exception as e:
-                console.print(f"    [red]Failed to save back-rotation matrix: {e}[/red]")
+                self.console.print(f"    [red]Failed to save back-rotation matrix: {e}[/red]")
 
-        if not pretrained_models_fold:
-            console.print(
-                f"[red]No models were successfully pretrained in fold {fold_idx+1}.[/red]"
-            )
-            return {}, -1, -1, False
+        if not self.trained_models:
+            self.console.print(f"[red]No models were successfully trained in fold {fold_idx+1}.[/red]")
+            return False
 
-        console.print(
-            f"    [green]Successfully pretrained {len(pretrained_models_fold)} models for fold {fold_idx+1}.[/green]"
+        self.console.print(
+            f"    [green]Successfully trained {len(self.trained_models)} models for fold {fold_idx+1}.[/green]"
         )
-        return pretrained_models_fold, n_channels, n_timepoints, True
+        return True
 
-    except Exception as e:
-        log.error(f"Critical error in pretraining for fold {fold_idx+1}: {e}", exc_info=True)
-        console.print(f"[red]Critical error in pretraining: {e}[/red]")
-        return {}, -1, -1, False
-    finally:
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    def load_pretrained(self, checkpoint_dir: Path, fold_idx: int = 0) -> bool:
+        """Load pretrained model weights from a checkpoint directory.
+
+        Args:
+            checkpoint_dir: Directory containing pretrained_fold_N.pt files.
+            fold_idx: Fold index to load (0-based).
+
+        Returns:
+            True if at least one model was loaded successfully.
+        """
+        checkpoint_dir = Path(checkpoint_dir)
+        self.trained_models = {}
+
+        for model_name in self.args.models_to_run:
+            chkpt_path = checkpoint_dir / f"pretrained_fold_{fold_idx+1}.pt"
+            if chkpt_path.is_file():
+                state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
+                self.trained_models[model_name] = state_dict
+                self.console.print(f"  Loaded checkpoint: {chkpt_path}")
+            else:
+                log.error(f"Checkpoint not found: {chkpt_path}")
+
+        # Load back-rotation matrix if available
+        if getattr(self.args, "ea_backrotation", False):
+            backrot_path = checkpoint_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            if backrot_path.exists():
+                self.global_backrot_matrix = np.load(backrot_path)
+                self.console.print(f"  [green]Loaded global back-rotation matrix from {checkpoint_dir}.[/green]")
+
+        return bool(self.trained_models)
+
+    # ------------------------------------------------------------------
+    # PUBLIC INTERFACE: TEST
+    # ------------------------------------------------------------------
+
+    def test(self, epochs: np.ndarray, labels: np.ndarray,
+             metadata: Optional[pd.DataFrame] = None,
+             subject_id: int = 0, fold_idx: int = 0,
+             dataset_name: str = "") -> Tuple[Dict[str, dict], Dict[str, list]]:
+        """Test trained models on the provided data.
+
+        Runs pre-calibration evaluation, optional calibration, and online
+        fine-tuning simulation on the provided epochs/labels.
+
+        Args:
+            epochs: Test EEG data with shape (n_trials, n_channels, n_times).
+            labels: Test labels (soft/ground truth) with shape (n_trials,).
+            metadata: DataFrame with 'period' column for calibration/intervention split.
+                      If None, all data is treated as intervention (online phase).
+            subject_id: Subject identifier for logging and file naming.
+            fold_idx: Fold index for logging and file naming.
+            dataset_name: Name of the dataset (used for logging).
+
+        Returns:
+            Tuple of (subject_results, trial_metrics_per_model).
+            subject_results: {model_name: {stage: metrics_dict}}
+            trial_metrics_per_model: {model_name: [per_trial_dicts]}
+        """
+        subject_results = {model_name: {} for model_name in self.args.models_to_run}
+        all_models_trial_metrics = {}
+        self.console.print(f"  Testing Subject {subject_id} (Dataset: {dataset_name}, Fold {fold_idx+1})...")
+
+        if epochs is None or epochs.size == 0:
+            self.console.print(f"    [yellow]No valid data for subject {subject_id}. Skipping.[/yellow]")
+            return subject_results, all_models_trial_metrics
+
+        # Update dimensions from test data if not already set
+        if self.n_channels == -1 or self.n_timepoints == -1:
+            self.n_channels = epochs.shape[1]
+            self.n_timepoints = epochs.shape[2]
+
+        # Load back-rotation matrix if needed and not already loaded
+        if getattr(self.args, "ea_backrotation", False) and self.global_backrot_matrix is None:
+            backrot_matrix_path = self.run_output_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
+            if backrot_matrix_path.exists():
+                self.global_backrot_matrix = np.load(backrot_matrix_path)
+            else:
+                raise FileNotFoundError(
+                    f"Back-rotation is ON but matrix file was not found at {backrot_matrix_path}."
+                )
+
+        # --- Label Preparation ---
+        is_extreme_mask = (labels <= 0.25) | (labels >= 0.75)
+        labels_ground_truth = labels
+
+        if getattr(self.args, "shuffle_test_labels", False):
+            self.console.print("[bold red]WARNING: SHUFFLING TEST SUBJECT LABELS FOR CONTROL ANALYSIS.[/bold red]")
+            from sklearn.utils import shuffle
+            labels_for_eval = shuffle(
+                labels_ground_truth.copy(),
+                random_state=self.args.seed + subject_id
+            )
+        else:
+            labels_for_eval = labels_ground_truth
+
+        sr_hz_eval = next(
+            (p_data["specs"][dataset_name].get("sr")
+             for p_name, p_data in PARADIGM_DATA.items()
+             if dataset_name in p_data.get("specs", {})),
+            None
+        )
+
+        try:
+            for model_name in self.args.models_to_run:
+                self.console.print(f"      Evaluating Model: [bold yellow]{model_name}[/bold yellow]")
+                try:
+                    subject_results[model_name] = {
+                        "pre_calib_zero_shot": {},
+                        "post_calib_zero_shot": {},
+                        "finetuned": {},
+                    }
+
+                    model_eval = build_model(
+                        model_name=model_name, n_channels=self.n_channels,
+                        n_times=self.n_timepoints, n_outputs=1,
+                        device=self.device,
+                        model_specific_args=filter_args_for_model(
+                            OmegaConf.to_container(self.args, resolve=True),
+                            model_name, get_model_class(model_name)
+                        )
+                    )
+                    model_eval_wrapped = TTAWrapper(
+                        model_eval, self.args, sr_hz=sr_hz_eval,
+                        global_backrot_matrix_np=self.global_backrot_matrix
+                    ).to(self.device)
+
+                    if model_name in self.trained_models:
+                        model_eval_wrapped.wrapped_model.load_state_dict(self.trained_models[model_name])
+                        self.console.print("        Loaded pre-trained state.")
+
+                    predictor = OnlinePredictor(
+                        model=model_eval_wrapped, args=self.args, device=self.device,
+                        global_backrot_matrix_np=self.global_backrot_matrix,
+                    )
+
+                    # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
+                    self.console.print(
+                        f"          Evaluating Pre-Calibration Zero-Shot Performance on all {len(epochs)} trials..."
+                    )
+                    pre_calib_preds = predictor.predict_batch(epochs, batch_size=self.args.batch_size_finetune)
+                    pre_calib_metrics = score_predictions(
+                        predictions=pre_calib_preds,
+                        labels=labels_for_eval,
+                        is_extreme_mask=is_extreme_mask,
+                        original_soft_labels=labels_for_eval,
+                    )
+                    subject_results[model_name]["pre_calib_zero_shot"] = pre_calib_metrics
+                    self.console.print(
+                        f"          [bold]Pre-Calib ROC AUC: {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]"
+                    )
+
+                    # --- Split data for calibration and online phases ---
+                    if metadata is not None and 'period' in metadata.columns:
+                        cal_mask = (metadata['period'] == 'calibration').values
+                        int_mask = (metadata['period'] == 'intervention').values
+                        calibration_epochs = epochs[cal_mask]
+                        online_epochs = epochs[int_mask]
+                        calibration_labels_for_training = labels_ground_truth[cal_mask]
+                        online_labels_for_finetuning = labels_ground_truth[int_mask]
+                        online_labels_for_eval = labels_for_eval[int_mask]
+                        online_is_extreme_mask = is_extreme_mask[int_mask]
+                    else:
+                        # No metadata: treat all data as online phase (no calibration)
+                        calibration_epochs = None
+                        online_epochs = epochs
+                        online_labels_for_finetuning = labels_ground_truth
+                        online_labels_for_eval = labels_for_eval
+                        online_is_extreme_mask = is_extreme_mask
+
+                    # --- STAGE 2: CALIBRATION ---
+                    if calibration_epochs is not None and len(calibration_epochs) > 0:
+                        self.console.print(
+                            f"        Starting subject-specific calibration for {self.args.calibration_epochs} epochs..."
+                        )
+                        predictor.calibrate(calibration_epochs, calibration_labels_for_training)
+                        self.console.print("        [green]Calibration complete.[/green]")
+
+                    # --- STAGE 3: ONLINE EVALUATION ---
+                    if online_epochs is not None and len(online_epochs) > 0:
+                        self.console.print(
+                            f"          Evaluating Post-Calibration Zero-Shot Performance on {len(online_epochs)} trials..."
+                        )
+                        post_calib_preds = predictor.predict_batch(
+                            online_epochs, batch_size=self.args.batch_size_finetune
+                        )
+                        post_calib_metrics = score_predictions(
+                            predictions=post_calib_preds,
+                            labels=online_labels_for_eval,
+                            is_extreme_mask=online_is_extreme_mask,
+                            original_soft_labels=online_labels_for_eval,
+                        )
+                        subject_results[model_name]["post_calib_zero_shot"] = post_calib_metrics
+                        self.console.print(
+                            f"          [bold]Post-Calib ROC AUC: {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]"
+                        )
+
+                        self.console.print(
+                            f"        Starting online finetuning simulation on {len(online_epochs)} trials..."
+                        )
+                        final_finetuned_metrics, _, per_trial_metrics = run_online_finetuning_simulation(
+                            predictor=predictor,
+                            test_subj_epochs=online_epochs,
+                            labels_for_finetuning=online_labels_for_finetuning,
+                            labels_for_evaluation=online_labels_for_eval,
+                            is_extreme_mask=online_is_extreme_mask,
+                            original_soft_labels=online_labels_for_eval,
+                            args=self.args, device=self.device, console=self.console, wandb_run=None,
+                            run_output_dir=self.run_output_dir, model_name=model_name,
+                            dataset_name=dataset_name,
+                            subject_id=subject_id, fold_idx=fold_idx + 1,
+                        )
+                        subject_results[model_name]["finetuned"] = final_finetuned_metrics
+                        all_models_trial_metrics[model_name] = per_trial_metrics
+
+                        if self.args.get('save_finetuned_model', False):
+                            save_path = self.run_output_dir / f"finetuned_subj_{subject_id}_fold_{fold_idx+1}.pt"
+                            save_checkpoint(
+                                {'model_state_dict': model_eval_wrapped.state_dict()},
+                                save_path,
+                            )
+                            self.console.print(
+                                f"        [green]Saved fine-tuned model to {save_path.name}[/green]"
+                            )
+                    else:
+                        self.console.print(
+                            "        No data available for the online phase. Final results will be empty."
+                        )
+                except Exception as e:
+                    log.error(
+                        f"Error processing model {model_name} for subject {subject_id}: {e}",
+                        exc_info=True,
+                    )
+        except Exception as e:
+            log.error(f"Critical error testing subject {subject_id}: {e}", exc_info=True)
+
+        return subject_results, all_models_trial_metrics
+
+    # ------------------------------------------------------------------
+    # CONVENIENCE: FULL K-FOLD PIPELINE
+    # ------------------------------------------------------------------
+
+    def run_kfold(self, dataset_name: str) -> Tuple[dict, list]:
+        """Execute the full k-fold cross-validation pipeline for a dataset.
+
+        Handles subject splitting, data loading, training, and testing for
+        each fold.
+
+        Returns:
+            Tuple of (results_per_model_per_fold, all_trial_metrics).
+        """
+        all_subjects = get_subject_list_for_datasets([dataset_name], self.args.data_root)
+        subjects_to_run = (
+            [s for s in all_subjects if s in self.args.subjects]
+            if self.args.subjects else all_subjects
+        )
+
+        if len(subjects_to_run) < self.args.n_splits:
+            log.warning(
+                f"Insufficient subjects ({len(subjects_to_run)}) for {self.args.n_splits} splits. Skipping."
+            )
+            return {}, []
+
+        kf = KFold(n_splits=self.args.n_splits, shuffle=True, random_state=self.args.seed)
+        results_current_dataset = {m: {f: {} for f in range(self.args.n_splits)} for m in self.args.models_to_run}
+        all_trial_metrics = []
+
+        for fold_idx, (train_indices, test_indices) in enumerate(kf.split(subjects_to_run)):
+            train_subject_ids = [subjects_to_run[i] for i in train_indices]
+            test_subject_ids = [subjects_to_run[i] for i in test_indices]
+
+            run_only_fold = getattr(self.args, "run_only_fold", None)
+            if run_only_fold is not None and (fold_idx + 1) != run_only_fold:
+                continue
+
+            # Reset RNG per-fold
+            np.random.seed(self.args.seed)
+            torch.manual_seed(self.args.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.args.seed)
+
+            self.console.print(
+                f"\n  [bold blue]=> Fold {fold_idx+1}/{self.args.n_splits} "
+                f"| Train: {train_subject_ids} | Test: {test_subject_ids}[/bold blue]"
+            )
+
+            try:
+                # --- TRAINING STAGE ---
+                train_success = self._train_fold(dataset_name, fold_idx, train_subject_ids)
+                if not train_success:
+                    log.error(f"Could not prepare models for fold {fold_idx+1}. Skipping.")
+                    continue
+
+                # --- TESTING STAGE ---
+                max_test_subjs = getattr(self.args, "max_test_subjects_per_fold", None)
+                for subj_count, test_subject_id in enumerate(test_subject_ids):
+                    test_epochs, test_labels, test_metadata = self._load_test_subject_data(
+                        dataset_name, test_subject_id
+                    )
+                    subject_results, subject_trial_metrics = self.test(
+                        epochs=test_epochs,
+                        labels=test_labels,
+                        metadata=test_metadata,
+                        subject_id=test_subject_id,
+                        fold_idx=fold_idx,
+                        dataset_name=dataset_name,
+                    )
+
+                    for model_name, res_dict in subject_results.items():
+                        results_current_dataset[model_name][fold_idx][test_subject_id] = res_dict
+                    for model_name, trial_data in subject_trial_metrics.items():
+                        for entry in trial_data:
+                            entry.update({
+                                "dataset": dataset_name, "model": model_name,
+                                "fold": fold_idx + 1, "subject_id": test_subject_id
+                            })
+                            all_trial_metrics.append(entry)
+
+                    if max_test_subjs is not None and (subj_count + 1) >= max_test_subjs:
+                        self.console.print(
+                            f"  [bold yellow]Reached max_test_subjects_per_fold={max_test_subjs}. Stopping early.[/bold yellow]"
+                        )
+                        break
+
+            except Exception as e:
+                log.error(f"Error processing Fold {fold_idx+1}: {e}", exc_info=True)
+
+        return results_current_dataset, all_trial_metrics
+
+    # ------------------------------------------------------------------
+    # PRIVATE HELPERS
+    # ------------------------------------------------------------------
+
+    def _train_fold(self, dataset_name: str, fold_idx: int, train_subject_ids: list) -> bool:
+        """Load training data and run training for one fold."""
+        if self.args.pretrained_checkpoint_dir:
+            # Load from checkpoint
+            log.info(f"Loading pre-trained models from: {self.args.pretrained_checkpoint_dir}")
+            # Get data dimensions from a train subject
+            _, _, n_ch, n_tp, _, _ = load_cached_pretrain_data(
+                dataset_names=[dataset_name], subject_ids=[train_subject_ids[0]],
+                paradigm_kwargs={
+                    "fmin": self.args.fmin, "fmax": self.args.fmax,
+                    "tmin": self.args.tmin, "tmax": self.args.tmax,
+                    "resample": self.args.resample,
+                },
+                data_root=self.args.data_root, args=self.args
+            )
+            self.n_channels, self.n_timepoints = n_ch, n_tp
+            return self.load_pretrained(Path(self.args.pretrained_checkpoint_dir), fold_idx)
+
+        elif not self.args.no_pretrain:
+            # Train from scratch: load data, then call train()
+            train_epochs, train_labels = self._load_train_data(dataset_name, fold_idx, train_subject_ids)
+            if train_epochs is None or train_epochs.size == 0:
+                self.console.print(f"[yellow]No training data loaded for fold {fold_idx+1}. Skipping.[/yellow]")
+                return False
+            return self.train(train_epochs, train_labels, fold_idx=fold_idx, dataset_name=dataset_name)
+
+        else:
+            # No pretraining, just get dimensions
+            log.info("`no_pretrain` is True. Models will be randomly initialized.")
+            _, _, n_ch, n_tp, _, _ = load_cached_pretrain_data(
+                dataset_names=[dataset_name], subject_ids=[train_subject_ids[0]],
+                paradigm_kwargs={
+                    "fmin": self.args.fmin, "fmax": self.args.fmax,
+                    "tmin": self.args.tmin, "tmax": self.args.tmax,
+                    "resample": self.args.resample,
+                },
+                data_root=self.args.data_root, args=self.args
+            )
+            self.n_channels, self.n_timepoints = n_ch, n_tp
+            return n_ch > 0 and n_tp > 0
+
+    def _load_train_data(self, dataset_name: str, fold_idx: int,
+                         train_subject_ids: list) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Load and return training data for the given subjects."""
+        actual_pretrain_subject_ids = list(train_subject_ids)
+        num_subjects_to_pretrain_on = getattr(self.args, "num_pretrain_subjects", "max")
+        if isinstance(num_subjects_to_pretrain_on, int) and num_subjects_to_pretrain_on < len(train_subject_ids):
+            if num_subjects_to_pretrain_on > 0:
+                rng = np.random.RandomState(self.args.seed + fold_idx)
+                actual_pretrain_subject_ids = rng.choice(
+                    train_subject_ids, size=num_subjects_to_pretrain_on, replace=False
+                ).tolist()
+                self.console.print(
+                    f"  Sub-sampling: Using {len(actual_pretrain_subject_ids)} subjects for pretraining"
+                )
+        self.console.print(
+            f"  Loading pretraining data for {len(actual_pretrain_subject_ids)} subjects..."
+        )
+
+        paradigm_kwargs = {
+            "fmin": self.args.fmin,
+            "fmax": self.args.fmax,
+            "tmin": self.args.tmin,
+            "tmax": self.args.tmax,
+            "resample": self.args.resample,
+        }
+        if hasattr(self.args, "channel_subset") and self.args.channel_subset:
+            paradigm_kwargs["channels"] = self.args.channel_subset
+
+        epochs_data, labels_data, n_ch, n_tp, _, global_backrot = load_cached_pretrain_data(
+            dataset_names=[dataset_name],
+            subject_ids=actual_pretrain_subject_ids,
+            paradigm_kwargs=paradigm_kwargs,
+            data_root=self.args.data_root,
+            args=self.args,
+            apply_trial_ablation=True,
+        )
+
+        if global_backrot is not None:
+            self.global_backrot_matrix = global_backrot
+
+        if epochs_data is None or epochs_data.size == 0:
+            return None, None
+
+        self.console.print(f"    Total pretrain trials: {len(epochs_data)}.")
+        return epochs_data, labels_data
+
+    def _load_test_subject_data(self, dataset_name: str,
+                                test_subject_id: int) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame]]:
+        """Load test data for a single subject."""
+        test_metadata = None
+
+        if dataset_name == "TMSEEGClassificationTEPfree":
+            dataset = TMSEEGDatasetTEPfree(data_path=self.args.data_root)
+            paradigm = TMSEEGClassificationTEPfree(tmin=self.args.tmin, tmax=self.args.tmax)
+            test_epochs, test_labels, test_metadata = paradigm.get_data(
+                dataset=dataset, subjects=[test_subject_id]
+            )
+        else:
+            test_epochs, test_labels, _, _, _, _ = load_cached_pretrain_data(
+                dataset_names=[dataset_name], subject_ids=[test_subject_id],
+                paradigm_kwargs={
+                    "fmin": self.args.fmin, "fmax": self.args.fmax,
+                    "resample": self.args.resample,
+                },
+                data_root=self.args.data_root, args=self.args, apply_trial_ablation=False
+            )
+
+        return test_epochs, test_labels, test_metadata
 
 
 # %%
@@ -681,192 +1076,13 @@ def run_online_finetuning_simulation(predictor, test_subj_epochs,
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
-# %%
-def run_subject_evaluation(test_subject_id, fold_idx, pretrained_models_fold, n_channels, n_timepoints,
-                           args, device, console, run_output_dir, no_pretrain, dataset_name,
-                           backrot_matrix_dir: Optional[Path] = None):
-    """
-    Load data, run pre-calib eval, optional calibration, post-calib eval, and online finetuning.
-
-    Args:
-        backrot_matrix_dir: Directory to look for global_backrotation_matrix_fold_N.npy.
-                            If None, defaults to run_output_dir.
-    """
-    subject_results = {model_name: {} for model_name in args.models_to_run}
-    all_models_trial_metrics = {}
-    console.print(f"  Processing Test Subject {test_subject_id} (Dataset: {dataset_name}, Fold {fold_idx+1})...")
-
-    global_backrot_matrix_np = None
-    if getattr(args, "ea_backrotation", False):
-        search_dir = Path(backrot_matrix_dir) if backrot_matrix_dir else run_output_dir
-        backrot_matrix_path = search_dir / f"global_backrotation_matrix_fold_{fold_idx+1}.npy"
-        if backrot_matrix_path.exists():
-            global_backrot_matrix_np = np.load(backrot_matrix_path)
-            console.print(f"        [green]Loaded global back-rotation matrix from {search_dir}.[/green]")
-        else:
-            raise FileNotFoundError(f"Back-rotation is ON but matrix file was not found at {backrot_matrix_path}.")
-
-    try:
-        # --- Data Loading ---
-        all_test_subj_epochs, all_test_subj_labels_soft = None, None
-        test_metadata = None
-
-        # This logic correctly loads soft labels from all data sources
-        if dataset_name == "TMSEEGClassificationTEPfree":
-            console.print(f"    [bold green]Using Custom TMS/TEP Paradigm for test subject data.[/bold green]")
-            try:
-                dataset = TMSEEGDatasetTEPfree(data_path=args.data_root)
-                paradigm = TMSEEGClassificationTEPfree(tmin=args.tmin, tmax=args.tmax)
-
-                all_test_subj_epochs, all_test_subj_labels_soft, test_metadata = paradigm.get_data(
-                    dataset=dataset,
-                    subjects=[test_subject_id]
-                )
-                
-                if all_test_subj_epochs is not None and all_test_subj_epochs.size > 0:
-                    actual_n_trials, actual_n_channels, actual_n_timepoints = all_test_subj_epochs.shape
-                    if n_channels == -1 or n_timepoints == -1:
-                        n_channels, n_timepoints = actual_n_channels, actual_n_timepoints
-                    elif n_channels != actual_n_channels or n_timepoints != actual_n_timepoints:
-                        console.print(f"    [bold red]Warning: Dimension mismatch! Expected ({n_channels}, {n_timepoints}), got ({actual_n_channels}, {actual_n_timepoints}). Using loaded dimensions.[/bold red]")
-                        n_channels, n_timepoints = actual_n_channels, actual_n_timepoints
-                        
-            except Exception as e:
-                log.error(f"Error loading custom data for test subject {test_subject_id}: {e}", exc_info=True)
-        else:
-            console.print(f"    [bold blue]Using generic data loader for test subject {test_subject_id}.[/bold blue]")
-            all_test_subj_epochs, all_test_subj_labels_soft, n_channels_loaded, n_timepoints_loaded, _, _ = load_cached_pretrain_data(
-                dataset_names=[dataset_name], subject_ids=[test_subject_id], 
-                paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "resample": args.resample},
-                data_root=args.data_root, args=args, apply_trial_ablation=False
-            )
-            
-            if n_channels == -1 or n_timepoints == -1:
-                n_channels, n_timepoints = n_channels_loaded, n_timepoints_loaded
-        
-        if all_test_subj_epochs is None or all_test_subj_epochs.size == 0:
-            console.print(f"    [yellow]No valid data for subject {test_subject_id}. Skipping.[/yellow]")
-            return subject_results, all_models_trial_metrics
-
-        # --- Label Preparation ---
-        is_extreme_mask = (all_test_subj_labels_soft <= 0.25) | (all_test_subj_labels_soft >= 0.75)
-        all_test_subj_labels_ground_truth = all_test_subj_labels_soft
-        
-        if getattr(args, "shuffle_test_labels", False):
-            console.print("[bold red]WARNING: SHUFFLING TEST SUBJECT LABELS FOR CONTROL ANALYSIS.[/bold red]")
-            all_test_subj_labels_for_eval = shuffle(
-                all_test_subj_labels_ground_truth.copy(),
-                random_state=args.seed + test_subject_id
-            )
-        else:
-            all_test_subj_labels_for_eval = all_test_subj_labels_ground_truth
-
-        sr_hz_eval = next((p_data["specs"][dataset_name].get("sr") for p_name, p_data in PARADIGM_DATA.items() if dataset_name in p_data.get("specs", {})), None)
-        
-        for model_name in args.models_to_run:
-            console.print(f"      Evaluating Model: [bold yellow]{model_name}[/bold yellow]")
-            try:
-                subject_results[model_name] = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
-                
-                model_eval = build_model(
-                    model_name=model_name, n_channels=n_channels, n_times=n_timepoints, n_outputs=1,
-                    device=device, model_specific_args=filter_args_for_model(OmegaConf.to_container(args, resolve=True), model_name, get_model_class(model_name))
-                )
-                model_eval_wrapped = TTAWrapper(model_eval, args, sr_hz=sr_hz_eval, global_backrot_matrix_np=global_backrot_matrix_np).to(device)
-
-                if model_name in pretrained_models_fold:
-                    model_eval_wrapped.wrapped_model.load_state_dict(pretrained_models_fold[model_name])
-                    console.print("        Loaded generic pre-trained state.")
-
-                # --- Construct the single predictor for this (subject, model) ---
-                predictor = OnlinePredictor(
-                    model=model_eval_wrapped, args=args, device=device,
-                    global_backrot_matrix_np=global_backrot_matrix_np,
-                )
-
-                # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
-                console.print(f"          Evaluating Pre-Calibration Zero-Shot Performance on all {len(all_test_subj_epochs)} trials...")
-                pre_calib_preds = predictor.predict_batch(all_test_subj_epochs, batch_size=args.batch_size_finetune)
-                pre_calib_metrics = score_predictions(
-                    predictions=pre_calib_preds,
-                    labels=all_test_subj_labels_for_eval,
-                    is_extreme_mask=is_extreme_mask,
-                    original_soft_labels=all_test_subj_labels_for_eval,
-                )
-                subject_results[model_name]["pre_calib_zero_shot"] = pre_calib_metrics
-                console.print(f"          [bold]Pre-Calib ROC AUC: {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
-
-                # --- Split data for calibration and online phases ---
-                # Use 'period' metadata from the dataset
-                cal_mask = (test_metadata['period'] == 'calibration').values
-                int_mask = (test_metadata['period'] == 'intervention').values
-                calibration_epochs = all_test_subj_epochs[cal_mask]
-                online_epochs = all_test_subj_epochs[int_mask]
-                calibration_labels_for_training = all_test_subj_labels_ground_truth[cal_mask]
-                online_labels_for_finetuning = all_test_subj_labels_ground_truth[int_mask]
-                online_labels_for_eval = all_test_subj_labels_for_eval[int_mask]
-                online_is_extreme_mask = is_extreme_mask[int_mask]
-
-                # --- STAGE 2: CALIBRATION (FINE-TUNING) ---
-                if calibration_epochs is not None and len(calibration_epochs) > 0:
-                    console.print(f"        Starting subject-specific calibration for {args.calibration_epochs} epochs...")
-                    predictor.calibrate(calibration_epochs, calibration_labels_for_training)
-                    console.print("        [green]Calibration complete.[/green]")
-
-                # --- STAGE 3: ONLINE EVALUATION ---
-                if online_epochs is not None and len(online_epochs) > 0:
-                    console.print(f"          Evaluating Post-Calibration Zero-Shot Performance on {len(online_epochs)} trials...")
-                    post_calib_preds = predictor.predict_batch(online_epochs, batch_size=args.batch_size_finetune)
-                    post_calib_metrics = score_predictions(
-                        predictions=post_calib_preds,
-                        labels=online_labels_for_eval,
-                        is_extreme_mask=online_is_extreme_mask,
-                        original_soft_labels=online_labels_for_eval,
-                    )
-                    subject_results[model_name]["post_calib_zero_shot"] = post_calib_metrics
-                    console.print(f"          [bold]Post-Calib ROC AUC: {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
-                    
-                    console.print(f"        Starting online finetuning simulation on the remaining {len(online_epochs)} trials...")
-                    final_finetuned_metrics, _, per_trial_metrics = run_online_finetuning_simulation(
-                        predictor=predictor,
-                        test_subj_epochs=online_epochs, 
-                        labels_for_finetuning=online_labels_for_finetuning,
-                        labels_for_evaluation=online_labels_for_eval,
-                        is_extreme_mask=online_is_extreme_mask,
-                        original_soft_labels=online_labels_for_eval,
-                        args=args, device=device, console=console, wandb_run=None,
-                        run_output_dir=run_output_dir, model_name=model_name, dataset_name=dataset_name,
-                        subject_id=test_subject_id, fold_idx=fold_idx + 1,
-                    )
-                    subject_results[model_name]["finetuned"] = final_finetuned_metrics
-                    all_models_trial_metrics[model_name] = per_trial_metrics
-
-                    # Save the final fine-tuned model (output classifier) to the run results directory
-                    if args.get('save_finetuned_model', False):
-                        save_path = run_output_dir / f"finetuned_subj_{test_subject_id}_fold_{fold_idx+1}.pt"
-                        save_checkpoint(
-                            {'model_state_dict': model_eval_wrapped.state_dict()},
-                            save_path,
-                        )
-                        console.print(f"        [green]Saved fine-tuned model to {save_path.name}[/green]")
-
-                else:
-                    console.print("        No data available for the online phase. Final results will be empty.")
-            except Exception as e:
-                log.error(f"Error processing model {model_name} for subject {test_subject_id}: {e}", exc_info=True)
-    except Exception as e:
-        log.error(f"Critical error processing subject {test_subject_id}: {e}", exc_info=True)
-    
-    return subject_results, all_models_trial_metrics
-
 # %% --- Experiment Execution and Result Aggregation ---
 
 def run_cross_subject_experiment(
     args: OmegaConf, device: torch.device,
     console: Console, run_output_dir: Path
 ) -> Tuple[dict, list, list]:
-    """Manages the cross-subject k-fold cross-validation experiment.
-    """
+    """Manages the cross-subject k-fold cross-validation experiment using CrossValidator."""
     console.print("\n[bold magenta]===== Starting Cross-Subject K-Fold Experiment =====[/bold magenta]")
     all_datasets_results = {}
     processed_dataset_names = []
@@ -874,111 +1090,15 @@ def run_cross_subject_experiment(
 
     for dataset_name in args.dataset_names:
         console.print(f"\n[bold cyan]### Dataset: {dataset_name} ###[/bold cyan]")
-        
-        # --- Subject Selection and Splitting ---
-        all_subjects = get_subject_list_for_datasets([dataset_name], args.data_root)
-        subjects_to_run = [s for s in all_subjects if s in args.subjects] if args.subjects else all_subjects
 
-        if len(subjects_to_run) < args.n_splits:
-            log.warning(f"Insufficient subjects ({len(subjects_to_run)}) for {args.n_splits} splits. Skipping dataset.")
-            continue
-        
-        processed_dataset_names.append(dataset_name)
-        kf = KFold(n_splits=args.n_splits, shuffle=True, random_state=args.seed)
-        results_current_dataset = {m: {f: {} for f in range(args.n_splits)} for m in args.models_to_run}
-        
-        # --- K-Fold Cross-Validation Loop ---
-        for fold_idx, (train_indices, test_indices) in enumerate(kf.split(subjects_to_run)):
-            train_subject_ids = [subjects_to_run[i] for i in train_indices]
-            test_subject_ids = [subjects_to_run[i] for i in test_indices]
+        cv = CrossValidator(args, device, console, run_output_dir)
+        results_current_dataset, dataset_trial_metrics = cv.run_kfold(dataset_name)
 
-            # Skip folds not matching run_only_fold (1-indexed) if specified
-            run_only_fold = getattr(args, "run_only_fold", None)
-            if run_only_fold is not None and (fold_idx + 1) != run_only_fold:
-                continue
+        if results_current_dataset:
+            processed_dataset_names.append(dataset_name)
+            all_datasets_results[dataset_name] = results_current_dataset
+            all_trial_metrics.extend(dataset_trial_metrics)
 
-            # Reset RNG per-fold so each fold is deterministic regardless of which folds ran before
-            np.random.seed(args.seed)
-            torch.manual_seed(args.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(args.seed)
-
-            console.print(f"\n  [bold blue]=> Fold {fold_idx+1}/{args.n_splits} | Train: {train_subject_ids} | Test: {test_subject_ids}[/bold blue]")
-            
-            try:
-                # --- Model Preparation for the Fold ---
-                # This block decides whether to train models, load them, or just get data dimensions.
-                pretrain_success = False
-                fold_pretrained_models, n_channels, n_timepoints = {}, -1, -1
-
-                if args.pretrained_checkpoint_dir:
-                    # Option 1: Load pre-trained models from a specified directory.
-                    log.info(f"Loading pre-trained models from: {args.pretrained_checkpoint_dir}")
-                    # First, get data dimensions from a sample test subject.
-                    _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
-                        dataset_names=[dataset_name], subject_ids=[test_subject_ids[0]],
-                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
-                        data_root=args.data_root, args=args
-                    )
-                    for model_name in args.models_to_run:
-                        chkpt_path = Path(args.pretrained_checkpoint_dir) / f"pretrained_fold_{fold_idx+1}.pt"
-                        if chkpt_path.is_file():
-                            state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
-                            fold_pretrained_models[model_name] = state_dict
-                    pretrain_success = bool(fold_pretrained_models)
-
-                elif not args.no_pretrain:
-                    # Option 2: Run pre-training from scratch using the fold's training subjects.
-                    fold_pretrained_models, n_channels, n_timepoints, pretrain_success = run_fold_pretraining(
-                        dataset_name, fold_idx, train_subject_ids, args, device, console, run_output_dir
-                    )
-                else:
-                    # Option 3: No pre-training. Initialize models with random weights.
-                    # We still need to get data dimensions for model construction.
-                    log.info("`no_pretrain` is True. Models will be randomly initialized.")
-                    _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
-                        dataset_names=[dataset_name], subject_ids=[test_subject_ids[0]],
-                        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
-                        data_root=args.data_root, args=args
-                    )
-                    pretrain_success = n_channels > 0 and n_timepoints > 0
-
-                if not pretrain_success:
-                    log.error(f"Could not prepare models for fold {fold_idx+1}. Skipping.")
-                    continue
-                
-                # --- Evaluate on each test subject in the fold ---
-                max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
-                # Determine where to find the back-rotation matrix
-                if args.pretrained_checkpoint_dir:
-                    backrot_dir = Path(args.pretrained_checkpoint_dir)
-                else:
-                    backrot_dir = run_output_dir
-
-                for subj_count, test_subject_id in enumerate(test_subject_ids):
-                    subject_results, subject_trial_metrics = run_subject_evaluation(
-                        test_subject_id, fold_idx, fold_pretrained_models,
-                        n_channels, n_timepoints, args, device, console, run_output_dir, args.no_pretrain, dataset_name,
-                        backrot_matrix_dir=backrot_dir
-                    )
-
-                    # Store results and trial metrics
-                    for model_name, res_dict in subject_results.items():
-                        results_current_dataset[model_name][fold_idx][test_subject_id] = res_dict
-                    for model_name, trial_data in subject_trial_metrics.items():
-                        for entry in trial_data:
-                            entry.update({"dataset": dataset_name, "model": model_name, "fold": fold_idx + 1, "subject_id": test_subject_id})
-                            all_trial_metrics.append(entry)
-
-                    if max_test_subjs is not None and (subj_count + 1) >= max_test_subjs:
-                        console.print(f"  [bold yellow]Reached max_test_subjects_per_fold={max_test_subjs}. Stopping early.[/bold yellow]")
-                        break
-
-            except Exception as e:
-                log.error(f"Error processing Fold {fold_idx+1}: {e}", exc_info=True)
-        
-        all_datasets_results[dataset_name] = results_current_dataset
-        
     return all_datasets_results, processed_dataset_names, all_trial_metrics
 
 
@@ -986,12 +1106,7 @@ def run_single_subject_eval(
     args: OmegaConf, device: torch.device,
     console: Console, run_output_dir: Path
 ) -> Tuple[dict, list, list]:
-    """Evaluate a pretrained model on locally available subjects without cross-validation.
-
-    This mode is for the case where you have a pretrained checkpoint and one or
-    more local subjects to test on, without needing multiple subjects for k-fold
-    splits.
-    """
+    """Evaluate a pretrained model on locally available subjects without cross-validation."""
     console.print("\n[bold magenta]===== Starting Single-Subject Evaluation =====[/bold magenta]")
 
     if not args.pretrained_checkpoint_dir:
@@ -1014,7 +1129,6 @@ def run_single_subject_eval(
         processed_dataset_names.append(dataset_name)
         results_current_dataset = {m: {0: {}} for m in args.models_to_run}
 
-        # Use fold_idx=0 as the canonical fold for checkpoint loading
         fold_idx = (getattr(args, "run_only_fold", 1) or 1) - 1
 
         # Seed for reproducibility
@@ -1023,25 +1137,18 @@ def run_single_subject_eval(
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
 
-        # --- Load pretrained models ---
-        log.info(f"Loading pre-trained models from: {args.pretrained_checkpoint_dir}")
-        _, _, n_channels, n_timepoints, _, _ = load_cached_pretrain_data(
+        # Create CrossValidator and load pretrained weights
+        cv = CrossValidator(args, device, console, run_output_dir)
+
+        # Get data dimensions from a sample subject
+        _, _, n_ch, n_tp, _, _ = load_cached_pretrain_data(
             dataset_names=[dataset_name], subject_ids=[subjects_to_run[0]],
             paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin, "tmax": args.tmax, "resample": args.resample},
             data_root=args.data_root, args=args
         )
+        cv.n_channels, cv.n_timepoints = n_ch, n_tp
 
-        fold_pretrained_models = {}
-        for model_name in args.models_to_run:
-            chkpt_path = Path(args.pretrained_checkpoint_dir) / f"pretrained_fold_{fold_idx+1}.pt"
-            if chkpt_path.is_file():
-                state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
-                fold_pretrained_models[model_name] = state_dict
-                console.print(f"  Loaded checkpoint: {chkpt_path}")
-            else:
-                log.error(f"Checkpoint not found: {chkpt_path}")
-
-        if not fold_pretrained_models:
+        if not cv.load_pretrained(Path(args.pretrained_checkpoint_dir), fold_idx):
             log.error("No pretrained models could be loaded. Skipping dataset.")
             continue
 
@@ -1049,20 +1156,22 @@ def run_single_subject_eval(
         max_test_subjs = getattr(args, "max_test_subjects_per_fold", None)
         console.print(f"  Evaluating on {len(subjects_to_run)} subject(s): {subjects_to_run}")
 
-        backrot_dir = Path(args.pretrained_checkpoint_dir)
-
         for subj_count, test_subject_id in enumerate(subjects_to_run):
-            # Reset RNG per subject so results are independent of which other subjects are in the list
             np.random.seed(args.seed)
             torch.manual_seed(args.seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(args.seed)
 
-            subject_results, subject_trial_metrics = run_subject_evaluation(
-                test_subject_id, fold_idx, fold_pretrained_models,
-                n_channels, n_timepoints, args, device, console, run_output_dir,
-                args.no_pretrain, dataset_name,
-                backrot_matrix_dir=backrot_dir
+            test_epochs, test_labels, test_metadata = cv._load_test_subject_data(
+                dataset_name, test_subject_id
+            )
+            subject_results, subject_trial_metrics = cv.test(
+                epochs=test_epochs,
+                labels=test_labels,
+                metadata=test_metadata,
+                subject_id=test_subject_id,
+                fold_idx=fold_idx,
+                dataset_name=dataset_name,
             )
 
             for model_name, res_dict in subject_results.items():
