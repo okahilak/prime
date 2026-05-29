@@ -56,64 +56,6 @@ logging.basicConfig(
 def setup_experiment(cli_args=None):
     """Parse arguments, setup configuration, and initialize experiment."""
 
-    DEFAULT_YAML = """
-subjects: null
-data_root: "~/prime-data/processed"
-pretrained_checkpoint_dir: null
-fmin: null
-fmax: null
-tmin: -0.55
-tmax: -0.050
-resample: null
-n_splits: 2
-pretrain_epochs: 100
-lr_pretrain: 0.0003
-optimizer_type_pretrain: "AdamW"
-weight_decay_pretrain: 0.0
-batch_size_pretrain: 64
-window_size: 50
-finetune_epochs: 1
-finetune_warmup_trials: 0
-lr_finetune: 0.0001
-optimizer_type_finetune: "AdamW"
-weight_decay_finetune: 0.0
-batch_size_finetune: 50
-seed: 42
-device: "cuda"
-no_pretrain: false
-base_output_dir: "results"
-save_pretrained_model: false
-save_finetuned_model: false
-save_checkpoints: false
-save_results: true
-save_predictions_and_labels: true
-num_pretrain_subjects: "max"
-num_trials_per_subject: null
-
-# TTA Configuration
-use_tta: true
-ea_backrotation: true
-alignment_type: "euclidean"
-alignment_cov_epsilon: 1.0e-6
-alignment_transform_epsilon: 1.0e-7
-alignment_ref_ema_beta: 0.99
-tta_cov_buffer_size: 50
-use_adabn: false
-finetune_mode: "full"
-
-experiment_mode: "cross_subject_kfold"
-
-use_subject_specific_calibration: true
-num_calibration_trials: 100
-lr_calibration: 0.0001
-calibration_epochs: 50
-
-shuffle_test_labels: false
-max_test_subjects_per_fold: null
-"""
-
-    config = OmegaConf.create(DEFAULT_YAML)
-
     warnings.filterwarnings("ignore", category=UserWarning, module="moabb")
     warnings.filterwarnings("ignore", message="warnEpochs*")
     logging.getLogger("moabb").setLevel(logging.ERROR)
@@ -121,15 +63,16 @@ max_test_subjects_per_fold: null
     logging.getLogger("moabb.datasets").setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description="K-Fold Transfer with YAML Config")
-    parser.add_argument("-c", "--config", action="append", help="Path to YAML config file(s)", default=[])
+    parser.add_argument("-c", "--config", action="append", help="Path to YAML config file(s)", required=True)
 
     parsed_args, remaining_argv = parser.parse_known_args(args=cli_args)
 
-    if parsed_args.config:
-        for config_file in parsed_args.config:
-            user_config = OmegaConf.load(config_file)
-            config = OmegaConf.merge(config, user_config)
-            print(f"Loaded config from: {config_file}")
+    config = OmegaConf.load(parsed_args.config[0])
+    print(f"Loaded config from: {parsed_args.config[0]}")
+    for config_file in parsed_args.config[1:]:
+        user_config = OmegaConf.load(config_file)
+        config = OmegaConf.merge(config, user_config)
+        print(f"Loaded config from: {config_file}")
 
     if remaining_argv:
         cli_conf = OmegaConf.from_cli(remaining_argv)
@@ -150,9 +93,7 @@ max_test_subjects_per_fold: null
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     # Create output directory
-    config_name = ""
-    if parsed_args.config:
-        config_name = Path(parsed_args.config[-1]).stem
+    config_name = Path(parsed_args.config[-1]).stem
     run_output_dir = get_output_dir(
         base_output_root=config.base_output_dir,
         config_name=config_name,
