@@ -158,6 +158,12 @@ class TEPParadigm(BaseParadigm):
     def used_events(self, dataset):
         return dict(dataset.event_id)
 
+    def _extract_amplitudes(self, full_metadata, cal_mask):
+        """Extract calibration and full amplitude arrays from metadata."""
+        cal_amplitudes = full_metadata.loc[cal_mask, self.target_metadata_col].values.astype(float)
+        all_amplitudes = full_metadata[self.target_metadata_col].values.astype(float)
+        return cal_amplitudes, all_amplitudes
+
     def get_data(self, dataset, subjects=None, return_epochs=False):
         if not self.is_valid(dataset):
             raise ValueError(f"Dataset {dataset.code} is not compatible.")
@@ -181,11 +187,12 @@ class TEPParadigm(BaseParadigm):
             if n_cal == 0:
                 log.warning(f"S{subject}: No calibration trials found in metadata. Skipping.")
                 continue
-            meta_calibration = full_metadata[cal_mask]
 
-            normalizer = TEPNormalizer(target_col=self.target_metadata_col, scale_factor=1.0)
-            normalizer.fit(meta_calibration)
-            y_run = normalizer.transform(full_metadata)
+            cal_amplitudes, all_amplitudes = self._extract_amplitudes(
+                full_metadata, cal_mask)
+            normalizer = TEPNormalizer(scale_factor=1.0)
+            normalizer.fit(cal_amplitudes, [])
+            y_run = normalizer.transform(all_amplitudes)
 
             nan_mask = np.isnan(y_run)
             if np.any(nan_mask):

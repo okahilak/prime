@@ -114,7 +114,7 @@ def main():
     # --- Trial-by-trial accumulation ---
     calibrator = Calibrator(cfg, forward_path)
     dipole_fitter = DipoleFitter(forward_path)
-    normalizer = TEPNormalizer(target_col='TEP_amplitude', scale_factor=1.0)
+    normalizer = TEPNormalizer(scale_factor=1.0)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
         # Simulate receiving a single trial
@@ -172,26 +172,15 @@ def main():
           f"(both pre & post)")
 
     print("\nFitting free-orientation dipoles to intervention trials...")
-    int_dipoles_free = dipole_fitter.fit_trials(
-        intervention_trials, orientation=None)
+    int_dipoles_free = dipole_fitter.fit_trials(intervention_trials, orientation=None)
     print(f"  {len(int_dipoles_free)} dipoles fitted")
 
-    # --- TEP normalization (matching offline path) ---
+    # --- TEP normalization ---
     cal_tep_amplitudes = np.array([d['amplitude'] for d in cal_dipoles_free]).flatten()
     int_tep_amplitudes = np.array([d['amplitude'] for d in int_dipoles_free]).flatten()
-    all_tep_amplitudes = np.concatenate([cal_tep_amplitudes, int_tep_amplitudes])
-    period_labels = (['calibration'] * len(cal_tep_amplitudes) +
-                     ['intervention'] * len(int_tep_amplitudes))
 
-    full_metadata = pd.DataFrame({
-        'TEP_amplitude': all_tep_amplitudes,
-        'period': period_labels,
-    })
-    cal_metadata = full_metadata[full_metadata['period'] == 'calibration']
-
-    # Fit normalizer on calibration, transform full sequence
-    normalizer.fit(cal_metadata)
-    all_labels = normalizer.transform(full_metadata)
+    normalizer.fit(cal_tep_amplitudes, cal_dipoles_free)
+    all_labels = normalizer.transform(np.concatenate([cal_tep_amplitudes, int_tep_amplitudes]))
 
     # Extract intervention labels
     int_labels = all_labels[len(cal_tep_amplitudes):]
