@@ -23,7 +23,6 @@ from pathlib import Path
 
 import mne
 import numpy as np
-import pandas as pd
 import torch
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -136,8 +135,8 @@ def main():
 
     # --- Fit dipoles to calibration post-stim trials ---
     print("\nFitting dipoles to calibration trials...")
-    cal_dipoles_free = dipole_fitter.fit_trials(cal_trials, orientation=None)
-    print(f"  {len(cal_dipoles_free)} dipoles")
+    cal_amplitudes = dipole_fitter.fit_trials(cal_trials, orientation=None)
+    print(f"  {len(cal_amplitudes)} dipoles")
 
     # --- Summary ---
     print("\n" + "=" * 70)
@@ -172,22 +171,19 @@ def main():
           f"(both pre & post)")
 
     print("\nFitting free-orientation dipoles to intervention trials...")
-    int_dipoles_free = dipole_fitter.fit_trials(intervention_trials, orientation=None)
-    print(f"  {len(int_dipoles_free)} dipoles fitted")
+    int_amplitudes = dipole_fitter.fit_trials(intervention_trials, orientation=None)
+    print(f"  {len(int_amplitudes)} dipoles fitted")
 
     # --- TEP normalization ---
-    cal_tep_amplitudes = np.array([d['amplitude'] for d in cal_dipoles_free]).flatten()
-    int_tep_amplitudes = np.array([d['amplitude'] for d in int_dipoles_free]).flatten()
-
-    normalizer.fit(cal_tep_amplitudes, cal_dipoles_free)
-    all_labels = normalizer.transform(np.concatenate([cal_tep_amplitudes, int_tep_amplitudes]))
+    normalizer.fit(cal_amplitudes)
+    all_labels = normalizer.transform(np.concatenate([cal_amplitudes, int_amplitudes]))
 
     # Extract intervention labels
-    int_labels = all_labels[len(cal_tep_amplitudes):]
+    int_labels = all_labels[len(cal_amplitudes):]
     # Also compute calibration labels (needed for calibration fine-tuning)
-    cal_labels = all_labels[:len(cal_tep_amplitudes)]
-    print(f"\n  Calibration TEP amplitudes: {len(cal_tep_amplitudes)}")
-    print(f"  Intervention TEP amplitudes: {len(int_tep_amplitudes)}")
+    cal_labels = all_labels[:len(cal_amplitudes)]
+    print(f"\n  Calibration TEP amplitudes: {len(cal_amplitudes)}")
+    print(f"  Intervention TEP amplitudes: {len(int_amplitudes)}")
     print(f"  Intervention labels (first 5): {int_labels[:5]}")
 
     # =========================================================================

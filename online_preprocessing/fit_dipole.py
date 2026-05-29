@@ -3,8 +3,8 @@ Dipole calibration and single-trial fitting pipeline.
 
 Runs calibration then fits dipoles to all trials for one subject.
 Outputs: {subject}_dipole_fitting_info.npz
-         {subject}_calibration_dipoles.npz
-         {subject}_intervention_dipoles.npz
+         {subject}_calibration_amplitudes.npy
+         {subject}_intervention_amplitudes.npy
 """
 import mne
 import numpy as np
@@ -66,14 +66,12 @@ def run_fitting(subject, subjects_directory_eeg, fitter):
             print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
             continue
 
-        fitted_dipoles = {}
-        for orientation_label, orientation in [('fixed_ori', 'use_fitted'), ('free_ori', None)]:
-            fitted_dipoles[f'trial_dipoles_{orientation_label}'] = fitter.fit_trials(epochs, orientation=orientation)
+        amplitudes = fitter.fit_trials(epochs, orientation=None)
 
         os.makedirs(subject_directory, exist_ok=True)
-        output_path = os.path.join(subject_directory, f'{subject}_{group_label}_dipoles.npz')
-        np.savez(output_path, **fitted_dipoles)
-        print(f"Fitted dipoles saved to {output_path}")
+        output_path = os.path.join(subject_directory, f'{subject}_{group_label}_amplitudes.npy')
+        np.save(output_path, amplitudes)
+        print(f"Amplitudes saved to {output_path}")
 
     print(f"--- Fitting: finished for subject {subject} ---")
 

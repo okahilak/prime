@@ -139,37 +139,24 @@ def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, t
 	position_now = position_index*3
 	leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
 
-	dipoles_for_trials = [] #initialize a list for adding dipoles for each trial to
+	amplitudes = np.empty(n_trials)
 
 	if orientation is not None:
-		orientation_is_fixed = True
 		leadfield_in_ori = np.matmul(leadfield_at_pos, orientation) #project to orientation
 		leadfield_at_pos_pinv = None #no pinv needed
 	else:
-		orientation_is_fixed = False
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
 	for trial_index in range(n_trials):
-		#simulate getting a single-trial epoch
 		epoch_now = epochs_cropped[trial_index]
 		trial_data = epoch_now.get_data(copy=True)[0,:,:] #data n_channels x n_times for the single trial data
-		best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured = get_single_trial_dipole(trial_data, trial_index, epoch_now.times, orientation,
-																													 leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
+		_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, trial_index, epoch_now.times, orientation,
+																	 leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
 
-		true_amplitude = np.abs(best_amplitude) if orientation is not None else best_amplitude #save magnitude and scalar amplitude separately if needed
+		amplitudes[trial_index] = np.abs(best_amplitude) if orientation is not None else best_amplitude
 
-		dipole_info = {'amplitude':true_amplitude, 'dipole':best_dipole_moment, 'time': best_time, 'position': forward['source_rr'][position_index],
-				  'position_index': position_index, 'position_now': position_now, 'orientation': ori, 'r2': best_r2, 'orientation_is_fixed':orientation_is_fixed,
-					'y_predicted': best_y_predicted, 'y_measured': best_data_measured, 'trial_index':trial_index,
-					 'leadfield_at_pos':leadfield_at_pos, 'leadfield_at_pos_pinv':leadfield_at_pos_pinv, 'leadfield_in_ori':leadfield_in_ori}
-		
-		if orientation is not None: #then also save the scalar amplitude
-			dipole_info['scalar_amplitude'] = best_amplitude
-
-		dipoles_for_trials.append(dipole_info) #add the information to the list
-
-	return dipoles_for_trials
+	return amplitudes
 
 
 def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
@@ -177,7 +164,6 @@ def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfie
 	best_r2_default = best_r2
 
 	for time_index, time_now in enumerate(times):
-
 		data_measured = trial_data[:, time_index] #get the data at the current time point
 
 		if orientation is not None:
@@ -310,8 +296,8 @@ class DipoleFitter:
 
         Returns
         -------
-        dipoles_for_trials : list of dict
-        extraction_times : list of float
+        amplitudes : np.ndarray
+            1-D array of dipole amplitudes, one per trial.
         """
         epochs = self._epochs_from_trials(trials)
         if not epochs.info['ch_names'] == self._forward.ch_names:

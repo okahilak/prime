@@ -72,8 +72,8 @@ class TEPDataset(BaseDataset):
 
         eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.fif"
         eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.fif"
-        tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_dipoles.npz"
-        tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_dipoles.npz"
+        tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_amplitudes.npy"
+        tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_amplitudes.npy"
 
         required_files = [eeg_cal_file, eeg_int_file, tep_cal_file, tep_int_file]
         if not all(f.exists() for f in required_files):
@@ -84,13 +84,8 @@ class TEPDataset(BaseDataset):
         epochs_int = mne.read_epochs(eeg_int_file, preload=True, verbose=False)
 
         try:
-            npz_cal = np.load(tep_cal_file, allow_pickle=True)
-            dipoles_cal = npz_cal['trial_dipoles_free_ori']
-            tep_cal = np.array([d['amplitude'] for d in dipoles_cal]).flatten()
-
-            npz_int = np.load(tep_int_file, allow_pickle=True)
-            dipoles_int = npz_int['trial_dipoles_free_ori']
-            tep_int = np.array([d['amplitude'] for d in dipoles_int]).flatten()
+            tep_cal = np.load(tep_cal_file)
+            tep_int = np.load(tep_int_file)
         except Exception as e:
             log.error(f"S{subject}: Error loading TEP file: {e}", exc_info=True)
             return {}
@@ -191,7 +186,7 @@ class TEPParadigm(BaseParadigm):
             cal_amplitudes, all_amplitudes = self._extract_amplitudes(
                 full_metadata, cal_mask)
             normalizer = TEPNormalizer(scale_factor=1.0)
-            normalizer.fit(cal_amplitudes, [])
+            normalizer.fit(cal_amplitudes)
             y_run = normalizer.transform(all_amplitudes)
 
             nan_mask = np.isnan(y_run)

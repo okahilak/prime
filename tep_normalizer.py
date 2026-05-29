@@ -23,7 +23,7 @@ class TEPNormalizer:
         self.cal_std_ = 1
         self.cdf_function_ = None
 
-    def fit(self, cal_amplitudes: np.ndarray, cal_dipoles: list):
+    def fit(self, cal_amplitudes: np.ndarray):
         """
         Learns normalization stats and the ECDF from the calibration block,
         ignoring the initial EWMA warm-up period for stability.
@@ -32,9 +32,6 @@ class TEPNormalizer:
         ----------
         cal_amplitudes : array-like
             1-D array of calibration TEP amplitudes (one per trial).
-        cal_dipoles : list of dict
-            Corresponding dipole results for each calibration trial (reserved
-            for future use; amplitudes are taken from cal_amplitudes).
         """
         values = pd.Series(np.asarray(cal_amplitudes, dtype=float)) * self.scale_factor
 
