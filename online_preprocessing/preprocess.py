@@ -12,12 +12,14 @@ try:
     from .config import get_default_config
     from .calibrator import (
         Calibrator,
+        ProcessedTrial,
         _single_trial_epochs_from_arrays,
     )
 except ImportError:
     from config import get_default_config
     from calibrator import (
         Calibrator,
+        ProcessedTrial,
         _single_trial_epochs_from_arrays,
     )
 
@@ -30,13 +32,9 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(trial, calibrator):
-    """Process a single trial. Returns (success, epoch_pre, epoch_post)."""
-    result_pre = calibrator.preprocess_pre(trial)
-    result_post = calibrator.preprocess_post(trial)
-    if result_pre is False or result_post is False:
-        return False, None, None
-    return True, result_pre, result_post
+def process_single_trial(trial, calibrator) -> ProcessedTrial | None:
+    """Process a single trial. Returns ProcessedTrial or None if rejected."""
+    return calibrator.preprocess(trial)
 
 
 _online_trial_worker_state = {}
@@ -59,8 +57,8 @@ def _process_online_trial_worker(trial_idx):
     trial = mne.EpochsArray(
         s['batch_data'][trial_idx:trial_idx + 1], info=s['info'],
         events=s['events'][trial_idx:trial_idx + 1], tmin=s['tmin'], verbose=False)
-    success, result_pre, result_post = process_single_trial(trial, s['calibrator'])
-    return trial_idx, success, result_pre, result_post
+    processed = process_single_trial(trial, s['calibrator'])
+    return trial_idx, processed
 
 
 # ==================== Calibration persistence (two-step simulation) ====================
@@ -114,11 +112,11 @@ def _run_calibration_stage(epochs, cfg, forward_path, calibration_bundle_path):
     print("Calibrating...")
 
     start_time = time.time()
-    n_successful_trials = calibrator.calibrate()
+    cal_trials = calibrator.calibrate()
 
     _save_calibration_bundle(calibration_bundle_path, calibrator.calibration_params)
 
-    print(f"Used {n_successful_trials} trials for calibration")
+    print(f"Used {len(cal_trials)} trials for calibration")
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
@@ -141,10 +139,10 @@ def _process_and_save_trial_group(
     ) as executor:
         results = list(executor.map(_process_online_trial_worker, range(n_trials)))
 
-    for i, (_, success, result_pre, result_post) in enumerate(results):
-        if success:
-            pre_list.append(result_pre)
-            post_list.append(result_post)
+    for i, (_, processed) in enumerate(results):
+        if processed is not None:
+            pre_list.append(processed.epoch_pre)
+            post_list.append(processed.epoch_post)
         else:
             bad_trials.append(i)
 

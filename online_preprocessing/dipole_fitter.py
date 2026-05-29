@@ -5,9 +5,9 @@ data and fits dipoles to individual trials.
 Usage
 -----
     fitter = DipoleFitter(forward_path)
-    fitting_info = fitter.fit(epochs)       # also stored in fitter.fitting_info
-    dipoles = fitter.fit_trials(epochs)              # fixed orientation
-    dipoles = fitter.fit_trials(epochs, orientation=None)  # free orientation
+    fitting_info = fitter.fit(trials)       # also stored in fitter.fitting_info
+    dipoles = fitter.fit_trials(trials)              # fixed orientation
+    dipoles = fitter.fit_trials(trials, orientation=None)  # free orientation
 """
 import time
 
@@ -253,13 +253,19 @@ class DipoleFitter:
         self._window_size_exponent = window_size_exponent
         self._fitting_info = None
 
-    def fit(self, epochs):
-        """Compute dipole fitting parameters from calibration epochs.
+    def _epochs_from_trials(self, trials):
+        """Extract concatenated post-stim epochs from a list of ProcessedTrial or pass through mne.Epochs."""
+        if isinstance(trials, mne.BaseEpochs):
+            return trials
+        return mne.concatenate_epochs([t.epoch_post for t in trials])
+
+    def fit(self, trials):
+        """Compute dipole fitting parameters from calibration trials.
 
         Parameters
         ----------
-        epochs : mne.Epochs
-            Calibration epochs (post-stimulus).
+        trials : list of ProcessedTrial or mne.Epochs
+            Calibration trials (post-stimulus epochs are used).
 
         Returns
         -------
@@ -267,6 +273,7 @@ class DipoleFitter:
             Dictionary with keys ``position_index``, ``orientation``, and
             ``time_range``.  Also stored in ``self.fitting_info``.
         """
+        epochs = self._epochs_from_trials(trials)
         if not epochs.info['ch_names'] == self._forward.ch_names:
             raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
 
@@ -288,15 +295,15 @@ class DipoleFitter:
         }
         return self._fitting_info
 
-    def fit_trials(self, epochs, orientation='use_fitted'):
+    def fit_trials(self, trials, orientation='use_fitted'):
         """Fit dipoles to individual trials using stored fitting_info.
 
         Must be called after ``fit()`` or constructed via ``from_fitting_info()``.
 
         Parameters
         ----------
-        epochs : mne.Epochs
-            Epochs to fit (post-stimulus).
+        trials : list of ProcessedTrial or mne.Epochs
+            Trials to fit (post-stimulus epochs are used).
         orientation : np.ndarray, None, or 'use_fitted'
             Dipole orientation. ``'use_fitted'`` (default) uses the orientation
             stored in ``fitting_info``. ``None`` performs free-orientation fitting.
@@ -306,6 +313,7 @@ class DipoleFitter:
         dipoles_for_trials : list of dict
         extraction_times : list of float
         """
+        epochs = self._epochs_from_trials(trials)
         if not epochs.info['ch_names'] == self._forward.ch_names:
             raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
 

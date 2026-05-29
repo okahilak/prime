@@ -114,6 +114,7 @@ def main():
     # --- Trial-by-trial accumulation ---
     calibrator = Calibrator(cfg, forward_path)
     dipole_fitter = DipoleFitter(forward_path)
+    normalizer = TEPNormalizer(target_col='TEP_amplitude', scale_factor=1.0)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
         # Simulate receiving a single trial
@@ -126,24 +127,23 @@ def main():
 
     # --- We have enough trials: run calibration ---
     print("\nRunning calibration preprocessing...")
-    n_successful_trials = calibrator.calibrate()
-    print(f"Calibration preprocessing done, used {n_successful_trials}/{N_CALIBRATION_TRIALS} trials.")
+    cal_trials = calibrator.calibrate()
+    print(f"Calibration preprocessing done, used {len(cal_trials)}/{N_CALIBRATION_TRIALS} trials.")
 
     # --- Calibrate dipole fitting parameters ---
     print("\nCalibrating dipole parameters...")
-    dipole_fitter.fit(calibrator.post_epochs)
+    dipole_fitter.fit(cal_trials)
 
     # --- Fit dipoles to calibration post-stim trials ---
     print("\nFitting dipoles to calibration trials...")
-    cal_dipoles_free = dipole_fitter.fit_trials(calibrator.post_epochs, orientation=None)
+    cal_dipoles_free = dipole_fitter.fit_trials(cal_trials, orientation=None)
     print(f"  {len(cal_dipoles_free)} dipoles")
-    
+
     # --- Summary ---
     print("\n" + "=" * 70)
     print("CALIBRATION COMPLETE")
     print(f"  Calibration params obtained: {list(calibrator.calibration_params.keys())}")
-    print(f"  Pre-stim epochs for classifier: {calibrator.pre_epochs.get_data(copy=False).shape}")
-    print(f"  Post-stim epochs (dipole-fitted): {calibrator.post_epochs.get_data(copy=False).shape}")
+    print(f"  Calibration trials survived: {len(cal_trials)}")
     print("=" * 70)
 
     # =========================================================================
@@ -158,26 +158,22 @@ def main():
     print(f"Processing {n_intervention} intervention trials...")
 
     # --- Process intervention trials: require both pre & post to pass ---
-    int_post_list = []
-    int_pre_list = []
+    intervention_trials = []
     for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        result_pre = calibrator.preprocess_pre(trial)
-        result_post = calibrator.preprocess_post(trial)
-        if result_pre is not False and result_post is not False:
-            int_pre_list.append(result_pre)
-            int_post_list.append(result_post)
+        processed = calibrator.preprocess(trial)
+        if processed is not None:
+            intervention_trials.append(processed)
         if (trial_idx - N_CALIBRATION_TRIALS + 1) % 100 == 0:
             print(f"  Preprocessed {trial_idx - N_CALIBRATION_TRIALS + 1}/{n_intervention} "
                   f"intervention trials")
 
-    print(f"  {len(int_post_list)}/{n_intervention} intervention trials survived "
+    print(f"  {len(intervention_trials)}/{n_intervention} intervention trials survived "
           f"(both pre & post)")
-    int_post_epochs = mne.concatenate_epochs(int_post_list)
 
     print("\nFitting free-orientation dipoles to intervention trials...")
     int_dipoles_free = dipole_fitter.fit_trials(
-        int_post_epochs, orientation=None)
+        intervention_trials, orientation=None)
     print(f"  {len(int_dipoles_free)} dipoles fitted")
 
     # --- TEP normalization (matching offline path) ---
@@ -194,7 +190,6 @@ def main():
     cal_metadata = full_metadata[full_metadata['period'] == 'calibration']
 
     # Fit normalizer on calibration, transform full sequence
-    normalizer = TEPNormalizer(target_col='TEP_amplitude', scale_factor=1.0)
     normalizer.fit(cal_metadata)
     all_labels = normalizer.transform(full_metadata)
 
@@ -255,7 +250,8 @@ def main():
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     # --- Prepare pre-stim EEG data (matching offline tmin/tmax crop) ---
-    cal_pre_data = calibrator.pre_epochs.copy().crop(
+    cal_pre_epochs = mne.concatenate_epochs([t.epoch_pre for t in cal_trials])
+    cal_pre_data = cal_pre_epochs.copy().crop(
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)
     n_channels = cal_pre_data.shape[1]
@@ -305,7 +301,7 @@ def main():
     print("\n  --- Online fine-tuning simulation ---")
 
     # Prepare intervention pre-stim data
-    int_pre_epochs = mne.concatenate_epochs(int_pre_list)
+    int_pre_epochs = mne.concatenate_epochs([t.epoch_pre for t in intervention_trials])
     int_pre_data = int_pre_epochs.copy().crop(
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)

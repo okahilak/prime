@@ -8,19 +8,27 @@ Usage
     for trial in incoming_trials:
         calibrator.add_trial(trial)
 
-    n_ok = calibrator.calibrate()
+    cal_trials = calibrator.calibrate()  # list[ProcessedTrial]
 
-    result_pre  = calibrator.preprocess_pre(trial)   # False if rejected
-    result_post = calibrator.preprocess_post(trial)  # False if rejected
+    processed = calibrator.preprocess(trial)  # None if rejected
+    processed.epoch_pre, processed.epoch_post
 """
 
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
+
+
+@dataclass(frozen=True)
+class ProcessedTrial:
+    """Result of preprocessing a single trial (pre and post epochs)."""
+    epoch_pre: mne.EpochsArray
+    epoch_post: mne.EpochsArray
 
 try:
     from .utils.ica_calibrator import get_number_of_components, get_ica
@@ -616,13 +624,13 @@ class Calibrator:
     def calibrate(self):
         """Run calibration on the accumulated trials.
 
-        Stores the resulting parameters internally.  Call ``preprocess_pre`` /
-        ``preprocess_post`` on individual trials afterwards.
+        Stores the resulting parameters internally.  Call ``preprocess`` on
+        individual trials afterwards.
 
         Returns
         -------
-        n_successful_trials : int
-            Number of trials that survived artifact rejection.
+        list of ProcessedTrial
+            Calibration trials that survived artifact rejection.
         """
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
@@ -636,9 +644,22 @@ class Calibrator:
             self._forward,
         )
         self._calibration_params = calibration_params
-        self.pre_epochs = pre_epochs
-        self.post_epochs = post_epochs
-        return n_successful_trials
+
+        # Build list of ProcessedTrial from concatenated epochs
+        pre_data = pre_epochs.get_data(copy=False)
+        post_data = post_epochs.get_data(copy=False)
+        trials = []
+        for i in range(n_successful_trials):
+            ep_pre = mne.EpochsArray(
+                pre_data[i:i+1], info=pre_epochs.info,
+                events=pre_epochs.events[i:i+1], tmin=pre_epochs.tmin, verbose=False,
+            )
+            ep_post = mne.EpochsArray(
+                post_data[i:i+1], info=post_epochs.info,
+                events=post_epochs.events[i:i+1], tmin=post_epochs.tmin, verbose=False,
+            )
+            trials.append(ProcessedTrial(ep_pre, ep_post))
+        return trials
 
     @classmethod
     def from_bundle(cls, cfg, calibration_params, forward_path):
@@ -647,8 +668,8 @@ class Calibrator:
         instance._calibration_params = calibration_params
         return instance
 
-    def preprocess_pre(self, trial):
-        """Crop, resample, and preprocess a single pre-stim trial.
+    def preprocess(self, trial):
+        """Crop, resample, and preprocess a single trial (both pre and post).
 
         Must be called after ``calibrate()``.
 
@@ -659,35 +680,26 @@ class Calibrator:
 
         Returns
         -------
-        mne.EpochsArray or False
-            Preprocessed epoch, or ``False`` if the trial was rejected.
+        ProcessedTrial or None
+            Preprocessed trial with ``.epoch_pre`` and ``.epoch_post``,
+            or ``None`` if either segment was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
-        epoch = trial.copy().crop(self._cfg.pre_range[0], self._cfg.pre_range[1])
-        epoch.resample(self._cfg.target_sfreq, method='polyphase')
-        return preprocess_pre_trial(epoch, self._calibration_params, self._cfg)
 
-    def preprocess_post(self, trial):
-        """Crop, resample, and preprocess a single post-stim trial.
+        epoch_pre = trial.copy().crop(self._cfg.pre_range[0], self._cfg.pre_range[1])
+        epoch_pre.resample(self._cfg.target_sfreq, method='polyphase')
+        result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
+        if result_pre is False:
+            return None
 
-        Must be called after ``calibrate()``.
+        epoch_post = trial.copy().crop(self._cfg.post_range[0], self._cfg.post_range[1])
+        epoch_post.resample(self._cfg.target_sfreq, method='polyphase')
+        result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
+        if result_post is False:
+            return None
 
-        Parameters
-        ----------
-        trial : mne.EpochsArray
-            Full raw single-trial epoch.
-
-        Returns
-        -------
-        mne.EpochsArray or False
-            Preprocessed epoch, or ``False`` if the trial was rejected.
-        """
-        if self._calibration_params is None:
-            raise RuntimeError("calibrate() must be called before preprocessing trials.")
-        epoch = trial.copy().crop(self._cfg.post_range[0], self._cfg.post_range[1])
-        epoch.resample(self._cfg.target_sfreq, method='polyphase')
-        return preprocess_post_trial(epoch, self._calibration_params, self._cfg)
+        return ProcessedTrial(result_pre, result_post)
 
     # ------------------------------------------------------------------
     # Convenience helpers
