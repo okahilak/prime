@@ -245,7 +245,7 @@ class DipoleFitter:
             return trials
         return mne.concatenate_epochs([t.epoch_post for t in trials])
 
-    def fit(self, trials):
+    def calibrate(self, trials):
         """Compute dipole fitting parameters from calibration trials.
 
         Parameters

@@ -120,7 +120,7 @@ def main():
 
     # Run calibration
     calibration_trials = calibrator.calibrate()
-    dipole_fitter.fit(calibration_trials)
+    dipole_fitter.calibrate(calibration_trials)
     calibration_amplitudes = dipole_fitter.fit_trials(calibration_trials, orientation=None)
     calibration_labels = normalizer.calibrate(calibration_amplitudes)
 
