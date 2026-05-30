@@ -130,6 +130,9 @@ def main():
     intervention_labels = []
     online_predictions = []
     for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+        if trial_idx % 100 == 0:
+            print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
+
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
 
