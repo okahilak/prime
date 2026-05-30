@@ -123,7 +123,7 @@ def main():
     dipole_fitter.fit(calibration_trials)
     calibration_amplitudes = dipole_fitter.fit_trials(calibration_trials, orientation=None)
     normalizer.fit(calibration_amplitudes)
-    calibration_labels = normalizer.transform(calibration_amplitudes)
+    calibration_labels = np.array([normalizer.transform(a) for a in calibration_amplitudes])
 
     print_summary("CALIBRATION COMPLETE")
     print_summary("INTERVENTION PHASE")
@@ -139,8 +139,7 @@ def main():
         intervention_trials.append(processed)
 
     int_amplitudes = dipole_fitter.fit_trials(intervention_trials, orientation=None)
-    all_labels = normalizer.transform(np.concatenate([calibration_amplitudes, int_amplitudes]))
-    intervention_labels = all_labels[len(calibration_amplitudes):]
+    intervention_labels = np.array([normalizer.transform(a) for a in int_amplitudes])
 
     # =========================================================================
     # COMPARE WITH OFFLINE LABELS
