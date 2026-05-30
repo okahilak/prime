@@ -15,7 +15,6 @@ Hard-coded settings:
 - Number of calibration trials: 125
 """
 
-import os
 import sys
 import time
 import warnings
@@ -23,7 +22,6 @@ from pathlib import Path
 
 import mne
 import numpy as np
-import torch
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -112,6 +110,10 @@ def main():
     print_summary("CALIBRATION PHASE")
 
     # --- Trial-by-trial accumulation ---
+    global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
+
+    predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=CONFIG["seed"])
+
     calibrator = Calibrator(cfg, forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer(scale_factor=1.0)
@@ -143,21 +145,6 @@ def main():
 
     intervention_labels = np.array(intervention_labels)
 
-    # Torch and NumPy setup
-    device = torch.device("cuda")
-    torch.manual_seed(CONFIG["seed"])
-    np.random.seed(CONFIG["seed"])
-    torch.cuda.manual_seed_all(CONFIG["seed"])
-
-    # Deterministic settings for reproducibility
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-    torch.use_deterministic_algorithms(True, warn_only=True)
-
-    # --- Create the OnlinePredictor (single instance for calibration + online) ---
-    global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
-    predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH)
     predictor.calibrate(calibration_trials, calibration_labels)
 
     n_online_trials = len(intervention_trials)
@@ -166,9 +153,6 @@ def main():
     n_online_trials = min(n_online_trials, 150)
 
     print(f"  Online trials: {n_online_trials}")
-
-    # Reset RNG state for deterministic behavior during online simulation
-    predictor.prepare_for_stream(CONFIG["seed"])
 
     all_predictions = []
 

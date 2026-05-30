@@ -127,11 +127,7 @@ def setup_experiment(cli_args=None):
 
     config.data_root = str(Path(config.data_root).expanduser())
 
-    # Set seed and enforce deterministic CUDA operations
-    np.random.seed(config.seed)
-    torch.manual_seed(config.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(config.seed)
+    # Deterministic CUDA operations
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -181,11 +177,6 @@ def run_train_only(args, device, console, run_output_dir):
     )
     assert subjects_to_run, "No subjects available for training."
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-
     cv = CrossValidator(args, device, console, run_output_dir)
     train_epochs, train_labels = cv._load_train_data(train_subject_ids=subjects_to_run)
     assert train_epochs is not None and train_epochs.size > 0, "No training data loaded."
@@ -204,11 +195,6 @@ def run_test_only(args, device, console, run_output_dir):
     subjects_to_run = [s for s in all_subjects if s in args.subjects] if args.subjects else all_subjects
     assert subjects_to_run, "No subjects available."
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-
     cv = CrossValidator(args, device, console, run_output_dir)
 
     # Get data dimensions
@@ -226,11 +212,6 @@ def run_test_only(args, device, console, run_output_dir):
     console.print(f"  Evaluating on {len(subjects_to_run)} subject(s): {subjects_to_run}")
 
     for test_subject_id in subjects_to_run:
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
-
         test_epochs, test_labels, test_metadata = cv._load_test_subject_data(test_subject_id)
         subject_results, subject_trial_metrics = cv.test(
             epochs=test_epochs, labels=test_labels,

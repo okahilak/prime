@@ -7,6 +7,7 @@ and online finetuning for EEG classification models.
 from __future__ import annotations
 
 import logging
+import os
 from collections import deque
 from pathlib import Path
 from typing import List, Optional, Union
@@ -121,15 +122,12 @@ class OnlinePredictor:
         re-initialized by calibrate().
 
     RNG contract:
-        This class does NOT reset the global torch RNG. The caller is
-        responsible for calling torch.manual_seed() before the trial loop
-        to ensure deterministic dropout etc. across paths.
+        The constructor sets all global seeds and deterministic CUDA flags.
+        To reset the RNG, construct a new OnlinePredictor.
 
     Usage:
-        predictor = OnlinePredictor(global_backrotation, model_path="pretrained.pt")
+        predictor = OnlinePredictor(global_backrotation, model_path="pretrained.pt", seed=42)
         predictor.calibrate(cal_trials, cal_labels)
-
-        torch.manual_seed(seed)  # caller's responsibility
         for trial, label in zip(intervention_trials, int_labels):
             prob = predictor.predict(trial)
             loss = predictor.finetune(trial, label)
@@ -139,9 +137,19 @@ class OnlinePredictor:
         self,
         global_backrotation: np.ndarray,
         model_path: Optional[Union[str, Path]] = None,
+        seed: int = 42,
     ):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.use_deterministic_algorithms(True, warn_only=True)
+
         self.device = torch.device("cuda")
-        self.args = _DEFAULT_ARGS
+        self.args = OmegaConf.merge(_DEFAULT_ARGS, OmegaConf.create({"seed": seed}))
         self.global_backrotation = global_backrotation
 
         # Build model and wrap with TTA
@@ -267,19 +275,6 @@ class OnlinePredictor:
                 all_probs.append(probs.cpu().numpy().ravel())
         return np.concatenate(all_probs)
 
-    def prepare_for_stream(self, seed: int) -> None:
-        """
-        Prepare the predictor for a trial-by-trial stream.
-
-        Resets the global torch (CPU + CUDA) and numpy RNGs to ensure
-        deterministic behavior during online inference and finetuning.
-        Call this once, immediately before the trial loop.
-        """
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-
     def finetune(self, trial: ProcessedTrial, label: float) -> Optional[float]:
         """
         Adapt alignment (unsupervised) and perform buffered supervised
@@ -383,8 +378,11 @@ class OnlinePredictor:
             )
             criterion = nn.BCEWithLogitsLoss()
 
+            cal_gen = torch.Generator()
+            cal_gen.manual_seed(self.args.seed)
             loader = self._make_loader(
-                epochs_for_training, cal_labels, batch_size, shuffle=True
+                epochs_for_training, cal_labels, batch_size, shuffle=True,
+                generator=cal_gen,
             )
             if loader is None:
                 return

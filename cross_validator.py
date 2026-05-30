@@ -161,7 +161,6 @@ def _run_online_finetuning(predictor, test_trials,
     trial_times = []
     trial_metrics_log = []
 
-    predictor.prepare_for_stream(args.seed)
     online_iterator = tqdm(range(n_trials), desc=f"Online Sim ({log_prefix})", leave=False)
     for trial_idx in online_iterator:
         trial_start_time = time.time()
@@ -429,7 +428,7 @@ class CrossValidator:
 
         # --- Build predictor ---
         predictor = OnlinePredictor(
-            self.global_backrotation, model_path=self.model_path,
+            self.global_backrotation, model_path=self.model_path, seed=self.args.seed,
         )
         if self.model_path is not None:
             self.console.print("        Loaded pre-trained state.")
@@ -536,12 +535,6 @@ class CrossValidator:
             run_only_fold = getattr(self.args, "run_only_fold", None)
             if run_only_fold is not None and (fold_idx + 1) != run_only_fold:
                 continue
-
-            # Reset RNG per-fold
-            np.random.seed(self.args.seed)
-            torch.manual_seed(self.args.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(self.args.seed)
 
             self.console.print(
                 f"\n  [bold blue]=> Fold {fold_idx+1}/{self.args.n_splits} "
