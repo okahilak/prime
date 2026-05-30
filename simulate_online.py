@@ -125,7 +125,7 @@ def main():
 
     print_summary("INTERVENTION PHASE")
 
-    intervention_trials = []
+    intervention_labels = []
     for trial_idx in range(N_CALIBRATION_TRIALS, 300):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
@@ -133,10 +133,11 @@ def main():
         if processed is None:
             continue
 
-        intervention_trials.append(processed)
+        amplitude = dipole_fitter.fit_trial(processed, orientation=None)
+        label = normalizer.transform(amplitude)
+        intervention_labels.append(label)
 
-    int_amplitudes = np.array([dipole_fitter.fit_trial(t, orientation=None) for t in intervention_trials])
-    intervention_labels = np.array([normalizer.transform(a) for a in int_amplitudes])
+    intervention_labels = np.array(intervention_labels)
 
     # =========================================================================
     # COMPARE WITH OFFLINE LABELS
