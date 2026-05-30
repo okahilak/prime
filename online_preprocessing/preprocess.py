@@ -9,11 +9,9 @@ import mne
 import numpy as np
 
 try:
-    from .config import get_default_config
     from .calibrator import Calibrator, ProcessedTrial
     from .trial_loader import TrialLoader
 except ImportError:
-    from config import get_default_config
     from calibrator import Calibrator, ProcessedTrial
     from trial_loader import TrialLoader
 
@@ -65,11 +63,11 @@ def _load_calibration_bundle(path):
     return np.load(path, allow_pickle=True).item()
 
 
-def _run_calibration_stage(trial_loader, cfg, forward_path, calibration_bundle_path):
+def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     print("Appending calibration trials...")
 
-    calibrator = Calibrator(cfg, forward_path)
+    calibrator = Calibrator(forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
         calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
 
@@ -118,14 +116,14 @@ def _process_and_save_trial_group(
 
 
 def _run_online_processing_stage(
-    trial_loader, cfg, subject_output, subject_id, calibration_bundle_path,
+    trial_loader, subject_output, subject_id, calibration_bundle_path,
     forward_path,
 ):
-    """Online trial processing: only config, trial_loader, and calibration bundle from disk."""
+    """Online trial processing: only trial_loader and calibration bundle from disk."""
     start_time = time.time()
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
-    calibrator = Calibrator.from_bundle(cfg, calibration_params, forward_path)
+    calibrator = Calibrator.from_bundle(calibration_params, forward_path)
     epochs_data = trial_loader._eeg_data
     epochs = trial_loader._epochs
 
@@ -146,7 +144,6 @@ def _run_online_processing_stage(
 
 def run_subject_processing(subject_id: str):
     """Main preprocessing pipeline for a single subject."""
-    cfg = get_default_config()
     output_path = DATA_ROOT / "processed"
     subject_output = output_path / subject_id
     os.makedirs(subject_output, exist_ok=True)
@@ -155,11 +152,10 @@ def run_subject_processing(subject_id: str):
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
     trial_loader = TrialLoader(subject_id)
-    _run_calibration_stage(trial_loader, cfg, forward_path, calibration_bundle_path)
+    _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path)
 
-    cfg = get_default_config()
     _run_online_processing_stage(
-        trial_loader, cfg, subject_output, subject_id, calibration_bundle_path, forward_path)
+        trial_loader, subject_output, subject_id, calibration_bundle_path, forward_path)
 
     print("Done")
 

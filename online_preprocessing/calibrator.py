@@ -35,11 +35,13 @@ try:
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
     from .utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
+    from .config import get_default_config
 except ImportError:
     from utils.ica_calibrator import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
     from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
+    from config import get_default_config
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
@@ -570,15 +572,10 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg):
 # ==================== Calibrator class ====================
 
 class Calibrator:
-    """Accumulates raw trials and produces calibration parameters on demand.
+    """Accumulates raw trials and produces calibration parameters on demand."""
 
-    Parameters
-    ----------
-    cfg : config object
-        Result of ``get_default_config()``.
-    """
-
-    def __init__(self, cfg, forward_path):
+    def __init__(self, forward_path):
+        cfg = get_default_config()
         self._cfg = cfg
         self._opts = cfg.to_dicts()
         self._ica_time_range = self._opts['ica_opts']['pre_timerange']
@@ -649,9 +646,9 @@ class Calibrator:
         return trials
 
     @classmethod
-    def from_bundle(cls, cfg, calibration_params, forward_path):
+    def from_bundle(cls, calibration_params, forward_path):
         """Create a calibrated Calibrator from pre-computed params (e.g. loaded from disk)."""
-        instance = cls(cfg, forward_path)
+        instance = cls(forward_path)
         instance._calibration_params = calibration_params
         return instance
 

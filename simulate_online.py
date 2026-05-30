@@ -31,7 +31,6 @@ mne.set_log_level("ERROR")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
-from online_preprocessing.config import get_default_config
 from online_preprocessing.calibrator import Calibrator
 from online_preprocessing.dipole_fitter import DipoleFitter
 from tep_normalizer import TEPNormalizer
@@ -89,8 +88,6 @@ def main():
 
     # --- Setup ---
 
-    # Get default config
-    cfg = get_default_config()
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
@@ -104,7 +101,7 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=CONFIG["seed"])
 
-    calibrator = Calibrator(cfg, forward_path)
+    calibrator = Calibrator(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer(scale_factor=1.0)
 
