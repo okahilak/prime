@@ -7,12 +7,23 @@ import mne
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
+COMMON_CHANNELS = [
+    'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
+    'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz',
+    'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8',
+    'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6', 'FT7', 'FT8',
+    'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1', 'O2', 'Oz',
+    'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8',
+    'PO3', 'PO4', 'PO7', 'PO8', 'POz', 'Pz',
+    'T7', 'T8', 'TP7', 'TP8',
+]
+
 
 class TrialLoader:
     """Loads all epochs for a subject and provides raw trials by index."""
 
-    def __init__(self, subject_id_string, config):
-        epochs = self._load_subject_epochs(subject_id_string, config)
+    def __init__(self, subject_id_string):
+        epochs = self._load_subject_epochs(subject_id_string)
         self._eeg_data = epochs.get_data(copy=False)
         self._events = epochs.events
         self._epochs = epochs
@@ -32,7 +43,7 @@ class TrialLoader:
         )
 
     @staticmethod
-    def _load_subject_epochs(subject_id, config):
+    def _load_subject_epochs(subject_id):
         print("Loading data...")
 
         data_path = DATA_ROOT / "raw"
@@ -52,7 +63,7 @@ class TrialLoader:
         epochs = mne.read_epochs_eeglab(
             os.path.join(subject_path, f'{subject_id}_task-tep_all_eeg.set')
         )
-        epochs.pick(config.common_channels)
+        epochs.pick(COMMON_CHANNELS)
         epochs.reorder_channels(channel_order)
         epochs.set_montage(None)
         epochs.set_montage(montage)

@@ -154,7 +154,7 @@ def run_subject_processing(subject_id: str):
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
-    trial_loader = TrialLoader(subject_id, cfg)
+    trial_loader = TrialLoader(subject_id)
     _run_calibration_stage(trial_loader, cfg, forward_path, calibration_bundle_path)
 
     cfg = get_default_config()
