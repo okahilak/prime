@@ -21,7 +21,7 @@ CHANNEL_NAMES = [
 
 # Must match what was used to create the dataset
 TMIN = -1.3
-
+TMAX = 0.5998
 
 class TrialLoaderFromCsv:
     """Loads all epochs from a CSV+JSON simulator dataset and provides raw trials by index."""
@@ -61,12 +61,9 @@ class TrialLoaderFromCsv:
 
         # Epoch the continuous data
         start_offset = int(round(TMIN * sfreq))
-        # Calculate n_times from tmin and the epoch length used during creation
-        # We determine n_times from first two events or from the data
-        # Use a standard calculation: from tmin to tmax inclusive
-        # tmax can be inferred from inter-event spacing or we use a fixed value
-        # Since we know the original: 9500 samples = round((0.5998 - (-1.3)) * 5000) + 1
-        n_times = int(round((0.5998 - TMIN) * sfreq)) + 1
+
+        # Calculate n_times from tmin, tmax, and the epoch length used during creation
+        n_times = int(round((TMAX - TMIN) * sfreq)) + 1
 
         n_epochs = len(event_samples)
         epochs_data = np.zeros((n_epochs, n_eeg_channels, n_times))
