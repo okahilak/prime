@@ -6,8 +6,7 @@ Usage
 -----
     fitter = DipoleFitter(forward_path)
     fitting_info = fitter.calibrate(trials)       # also stored in fitter.fitting_info
-    amplitude = fitter.fit_trial(trial)              # fixed orientation, single trial
-    amplitudes = [fitter.fit_trial(t, orientation=None) for t in trials]  # free orientation
+    amplitudes = [fitter.fit_trial(t) for t in trials]  # free orientation
 """
 import time
 
@@ -276,10 +275,10 @@ class DipoleFitter:
             'orientation': orientation,
             'time_range': time_range,
         }
-        calibration_amplitudes = np.array([self.fit_trial(t, orientation=None) for t in trials])
+        calibration_amplitudes = np.array([self.fit_trial(t) for t in trials])
         return calibration_amplitudes
 
-    def fit_trial(self, trial, orientation='use_fitted'):
+    def fit_trial(self, trial, orientation=None):
         """Fit a dipole to a single trial using stored fitting_info.
 
         Must be called after ``calibrate()`` or constructed via ``from_fitting_info()``.

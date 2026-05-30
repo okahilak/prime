@@ -103,7 +103,7 @@ def main():
 
     calibrator = Calibrator(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
-    normalizer = TEPNormalizer(scale_factor=1.0)
+    normalizer = TEPNormalizer()
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
         calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
@@ -117,7 +117,7 @@ def main():
     print_summary("INTERVENTION PHASE")
 
     intervention_labels = []
-    online_predictions = []
+    predictions = []
     for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
@@ -127,16 +127,16 @@ def main():
         if trial is None:
             continue
 
-        amplitude = dipole_fitter.fit_trial(trial, orientation=None)
+        amplitude = dipole_fitter.fit_trial(trial)
         label = normalizer.transform(amplitude)
         probability = predictor.predict(trial)
         predictor.finetune(trial, label)
 
         intervention_labels.append(label)
-        online_predictions.append(probability)
+        predictions.append(probability)
 
     intervention_labels = np.array(intervention_labels)
-    online_predictions = np.array(online_predictions)
+    predictions = np.array(predictions)
 
     # Compare with offline results
     offline_data = np.load(predictions_path)
@@ -147,16 +147,16 @@ def main():
         raise RuntimeError(
             f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
         )
-    if len(online_predictions) != len(offline_predictions):
+    if len(predictions) != len(offline_predictions):
         raise RuntimeError(
-            f"Prediction count mismatch: online={len(online_predictions)}, offline={len(offline_predictions)}"
+            f"Prediction count mismatch: online={len(predictions)}, offline={len(offline_predictions)}"
         )
 
     label_differences = np.abs(intervention_labels - offline_labels)
-    prediction_differences = np.abs(online_predictions - offline_predictions)
+    prediction_differences = np.abs(predictions - offline_predictions)
 
     labels_match = np.allclose(intervention_labels, offline_labels, atol=1e-7)
-    predictions_all_close = np.allclose(online_predictions, offline_predictions, atol=1e-4)
+    predictions_all_close = np.allclose(predictions, offline_predictions, atol=1e-4)
 
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE")
@@ -165,7 +165,7 @@ def main():
     print(f"    Max diff:           {np.max(label_differences):.2e}")
     print(f"    Mean diff:          {np.mean(label_differences):.2e}")
     print(f"    All close (1e-7):   {labels_match}")
-    print(f"\n  PREDICTIONS ({len(online_predictions)} trials):")
+    print(f"\n  PREDICTIONS ({len(predictions)} trials):")
     print(f"    Max diff:           {np.max(prediction_differences):.6f}")
     print(f"    Mean diff:          {np.mean(prediction_differences):.6f}")
     print(f"    All close (1e-4):   {predictions_all_close}")

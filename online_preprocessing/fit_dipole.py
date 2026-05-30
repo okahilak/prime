@@ -66,7 +66,7 @@ def run_fitting(subject, subjects_directory_eeg, fitter):
             print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
             continue
 
-        amplitudes = np.array([fitter.fit_trial(epochs[i], orientation=None) for i in range(len(epochs))])
+        amplitudes = np.array([fitter.fit_trial(epochs[i]) for i in range(len(epochs))])
 
         os.makedirs(subject_directory, exist_ok=True)
         output_path = os.path.join(subject_directory, f'{subject}_{group_label}_amplitudes.npy')
