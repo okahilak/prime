@@ -96,8 +96,6 @@ def main():
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
     trial_loader = TrialLoader(subject_id_str)
-    n_total_trials = trial_loader.num_trials
-    print(f"Loaded {n_total_trials} total trials for {subject_id_str}")
 
     # Calibration phase
     print_summary("CALIBRATION PHASE")
