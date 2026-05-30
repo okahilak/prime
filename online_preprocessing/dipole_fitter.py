@@ -5,9 +5,9 @@ data and fits dipoles to individual trials.
 Usage
 -----
     fitter = DipoleFitter(forward_path)
-    fitting_info = fitter.fit(trials)       # also stored in fitter.fitting_info
-    dipoles = fitter.fit_trials(trials)              # fixed orientation
-    dipoles = fitter.fit_trials(trials, orientation=None)  # free orientation
+    fitting_info = fitter.calibrate(trials)       # also stored in fitter.fitting_info
+    amplitude = fitter.fit_trial(trial)              # fixed orientation, single trial
+    amplitudes = [fitter.fit_trial(t, orientation=None) for t in trials]  # free orientation
 """
 import time
 
@@ -131,15 +131,12 @@ def determine_optimal_ori_and_pos(dipoles, forward):
 
 # ==================== Single-trial fitting ====================
 
-def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, tmin, tmax):
-	epochs_cropped = epochs.copy().crop(tmin, tmax) #epochs in the time range of interest
-	epochs_data = epochs_cropped.get_data(copy=True) #epoched data in the time range of interest
-	n_trials = epochs_data.shape[0] #number of trials in the data
+def fit_dipole_to_single_trial(epoch, forward, position_index, orientation, tmin, tmax):
+	epoch_cropped = epoch.copy().crop(tmin, tmax) #epoch in the time range of interest
+	trial_data = epoch_cropped.get_data(copy=True)[0, :, :] #data n_channels x n_times
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	position_now = position_index*3
 	leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
-
-	amplitudes = np.empty(n_trials)
 
 	if orientation is not None:
 		leadfield_in_ori = np.matmul(leadfield_at_pos, orientation) #project to orientation
@@ -148,18 +145,13 @@ def fit_dipoles_to_single_trials(epochs, forward, position_index, orientation, t
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
-	for trial_index in range(n_trials):
-		epoch_now = epochs_cropped[trial_index]
-		trial_data = epoch_now.get_data(copy=True)[0,:,:] #data n_channels x n_times for the single trial data
-		_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, trial_index, epoch_now.times, orientation,
-																	 leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
+	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, epoch_cropped.times, orientation,
+																leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
 
-		amplitudes[trial_index] = np.abs(best_amplitude) if orientation is not None else best_amplitude
-
-	return amplitudes
+	return np.abs(best_amplitude) if orientation is not None else best_amplitude
 
 
-def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
+def get_single_trial_dipole(trial_data, times, orientation, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
 	best_r2 = -np.inf #initialize best r2 value
 	best_r2_default = best_r2
 
@@ -189,7 +181,7 @@ def get_single_trial_dipole(trial_data, trial_index, times, orientation, leadfie
 			best_data_measured = data_measured #update the respectively "measured data"
 
 	if best_r2 == best_r2_default:
-		raise ValueError(f"Did not find a sufficient R2 for trial {trial_index}")
+		raise ValueError("Did not find a sufficient R2 for trial")
 
 	return best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured
 
@@ -245,6 +237,12 @@ class DipoleFitter:
             return trials
         return mne.concatenate_epochs([t.epoch_post for t in trials])
 
+    def _epoch_from_trial(self, trial):
+        """Extract a single-trial epoch from a ProcessedTrial or pass through mne.Epochs."""
+        if isinstance(trial, mne.BaseEpochs):
+            return trial
+        return trial.epoch_post
+
     def calibrate(self, trials):
         """Compute dipole fitting parameters from calibration trials.
 
@@ -281,39 +279,39 @@ class DipoleFitter:
         }
         return self._fitting_info
 
-    def fit_trials(self, trials, orientation='use_fitted'):
-        """Fit dipoles to individual trials using stored fitting_info.
+    def fit_trial(self, trial, orientation='use_fitted'):
+        """Fit a dipole to a single trial using stored fitting_info.
 
-        Must be called after ``fit()`` or constructed via ``from_fitting_info()``.
+        Must be called after ``calibrate()`` or constructed via ``from_fitting_info()``.
 
         Parameters
         ----------
-        trials : list of ProcessedTrial or mne.Epochs
-            Trials to fit (post-stimulus epochs are used).
+        trial : ProcessedTrial or mne.Epochs (single-trial)
+            Trial to fit (post-stimulus epoch is used).
         orientation : np.ndarray, None, or 'use_fitted'
             Dipole orientation. ``'use_fitted'`` (default) uses the orientation
             stored in ``fitting_info``. ``None`` performs free-orientation fitting.
 
         Returns
         -------
-        amplitudes : np.ndarray
-            1-D array of dipole amplitudes, one per trial.
+        amplitude : float
+            Dipole amplitude for the trial.
         """
-        epochs = self._epochs_from_trials(trials)
-        if not epochs.info['ch_names'] == self._forward.ch_names:
-            raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
+        epoch = self._epoch_from_trial(trial)
+        if not epoch.info['ch_names'] == self._forward.ch_names:
+            raise ValueError(f"Channel mismatch for epoch and forward solution. Aborting.")
 
         if self._fitting_info is None:
             raise RuntimeError(
-                "fitting_info must be set before calling fit_trials(). "
-                "Call fit() or use from_fitting_info()."
+                "fitting_info must be set before calling fit_trial(). "
+                "Call calibrate() or use from_fitting_info()."
             )
         if orientation == 'use_fitted':
             orientation = self._fitting_info['orientation']
         position_index = self._fitting_info['position_index']
         tmin, tmax = self._fitting_info['time_range']
-        return fit_dipoles_to_single_trials(
-            epochs, self._forward, position_index, orientation, tmin, tmax
+        return fit_dipole_to_single_trial(
+            epoch, self._forward, position_index, orientation, tmin, tmax
         )
 
     @property

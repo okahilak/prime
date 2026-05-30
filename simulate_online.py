@@ -121,10 +121,9 @@ def main():
     # Run calibration
     calibration_trials = calibrator.calibrate()
     dipole_fitter.calibrate(calibration_trials)
-    calibration_amplitudes = dipole_fitter.fit_trials(calibration_trials, orientation=None)
+    calibration_amplitudes = np.array([dipole_fitter.fit_trial(t, orientation=None) for t in calibration_trials])
     calibration_labels = normalizer.calibrate(calibration_amplitudes)
 
-    print_summary("CALIBRATION COMPLETE")
     print_summary("INTERVENTION PHASE")
 
     intervention_trials = []
@@ -137,7 +136,7 @@ def main():
 
         intervention_trials.append(processed)
 
-    int_amplitudes = dipole_fitter.fit_trials(intervention_trials, orientation=None)
+    int_amplitudes = np.array([dipole_fitter.fit_trial(t, orientation=None) for t in intervention_trials])
     intervention_labels = np.array([normalizer.transform(a) for a in int_amplitudes])
 
     # =========================================================================
