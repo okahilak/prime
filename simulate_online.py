@@ -34,12 +34,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing")
 from online_preprocessing.config import get_default_config
 from online_preprocessing.calibrator import Calibrator
 from online_preprocessing.dipole_fitter import DipoleFitter
-from online_preprocessing.preprocess import (
-    _load_subject_epochs,
-    _single_trial_epochs_from_arrays,
-)
 from tep_normalizer import TEPNormalizer
 from online_predictor import OnlinePredictor
+from online_preprocessing.trial_loader import TrialLoader
 
 # =============================================================================
 # Hard-coded constants
@@ -98,10 +95,8 @@ def main():
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
-    epochs = _load_subject_epochs(subject_id_str, cfg)
-    all_eeg_data = epochs.get_data(copy=False)
-    all_events = epochs.events
-    n_total_trials = all_eeg_data.shape[0]
+    trial_loader = TrialLoader(subject_id_str, cfg)
+    n_total_trials = trial_loader.num_trials
     print(f"Loaded {n_total_trials} total trials for {subject_id_str}")
 
     # Calibration phase
@@ -116,13 +111,12 @@ def main():
     normalizer = TEPNormalizer(scale_factor=1.0)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        calibrator.add_trial(trial)
+        calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
 
-    calibration_trials = calibrator.calibrate()
-    calibration_amplitudes = dipole_fitter.calibrate(calibration_trials)
-    calibration_labels = normalizer.calibrate(calibration_amplitudes)
-    predictor.calibrate(calibration_trials, calibration_labels)
+    trials = calibrator.calibrate()
+    amplitudes = dipole_fitter.calibrate(trials)
+    labels = normalizer.calibrate(amplitudes)
+    predictor.calibrate(trials, labels)
 
     # Intervention phase
     print_summary("INTERVENTION PHASE")
@@ -133,16 +127,15 @@ def main():
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        processed = calibrator.preprocess(trial)
+        trial = calibrator.preprocess(trial_loader.get_trial(trial_idx))
 
-        if processed is None:
+        if trial is None:
             continue
 
-        amplitude = dipole_fitter.fit_trial(processed, orientation=None)
+        amplitude = dipole_fitter.fit_trial(trial, orientation=None)
         label = normalizer.transform(amplitude)
-        probability = predictor.predict(processed)
-        predictor.finetune(processed, label)
+        probability = predictor.predict(trial)
+        predictor.finetune(trial, label)
 
         intervention_labels.append(label)
         online_predictions.append(probability)

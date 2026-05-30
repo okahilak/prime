@@ -10,18 +10,12 @@ import numpy as np
 
 try:
     from .config import get_default_config
-    from .calibrator import (
-        Calibrator,
-        ProcessedTrial,
-        _single_trial_epochs_from_arrays,
-    )
+    from .calibrator import Calibrator, ProcessedTrial
+    from .trial_loader import TrialLoader
 except ImportError:
     from config import get_default_config
-    from calibrator import (
-        Calibrator,
-        ProcessedTrial,
-        _single_trial_epochs_from_arrays,
-    )
+    from calibrator import Calibrator, ProcessedTrial
+    from trial_loader import TrialLoader
 
 DATA_ROOT = Path("~/prime-data").expanduser()
 
@@ -71,43 +65,13 @@ def _load_calibration_bundle(path):
     return np.load(path, allow_pickle=True).item()
 
 
-def _load_subject_epochs(subject_id, cfg):
-    print("Loading data...")
-
-    data_path = DATA_ROOT / "raw"
-    subject_path = data_path / subject_id
-    if not subject_path.exists():
-        raise FileNotFoundError(f"Subject directory not found at {subject_path}")
-
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-    if not forward_path.exists():
-        raise FileNotFoundError(f"Forward solution not found at {forward_path}. Run: python {DATA_ROOT / 'build_fsaverage_forward.py'}")
-    channel_order = mne.read_forward_solution(forward_path).ch_names
-    montage = mne.channels.make_standard_montage('standard_1005')
-
-    epochs = mne.read_epochs_eeglab(os.path.join(subject_path, f'{subject_id}_task-tep_all_eeg.set'))
-    epochs.pick(cfg.common_channels)
-    epochs.reorder_channels(channel_order)
-    epochs.set_montage(None)
-    epochs.set_montage(montage)
-
-    if channel_order != epochs.ch_names:
-        raise ValueError(f"Channel order mismatch: {channel_order} vs {epochs.ch_names}")
-
-    return epochs
-
-
-def _run_calibration_stage(epochs, cfg, forward_path, calibration_bundle_path):
+def _run_calibration_stage(trial_loader, cfg, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
-    all_eeg_data = epochs.get_data(copy=False)
-    all_events = epochs.events
-
     print("Appending calibration trials...")
 
     calibrator = Calibrator(cfg, forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
-        trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-        calibrator.add_trial(trial)
+        calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
 
     print("Calibrating...")
 
@@ -154,15 +118,16 @@ def _process_and_save_trial_group(
 
 
 def _run_online_processing_stage(
-    epochs, cfg, subject_output, subject_id, calibration_bundle_path,
+    trial_loader, cfg, subject_output, subject_id, calibration_bundle_path,
     forward_path,
 ):
-    """Online trial processing: only config, epochs, and calibration bundle from disk."""
+    """Online trial processing: only config, trial_loader, and calibration bundle from disk."""
     start_time = time.time()
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
     calibrator = Calibrator.from_bundle(cfg, calibration_params, forward_path)
-    epochs_data = epochs.get_data(copy=False)
+    epochs_data = trial_loader._eeg_data
+    epochs = trial_loader._epochs
 
     _process_and_save_trial_group(
         epochs_data[:N_TRIALS_CALIBRATE], epochs.events[:N_TRIALS_CALIBRATE],
@@ -189,12 +154,12 @@ def run_subject_processing(subject_id: str):
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     calibration_bundle_path = subject_output / f'{subject_id}_calibration_bundle.npy'
 
-    epochs = _load_subject_epochs(subject_id, cfg)
-    _run_calibration_stage(epochs, cfg, forward_path, calibration_bundle_path)
+    trial_loader = TrialLoader(subject_id, cfg)
+    _run_calibration_stage(trial_loader, cfg, forward_path, calibration_bundle_path)
 
     cfg = get_default_config()
     _run_online_processing_stage(
-        epochs, cfg, subject_output, subject_id, calibration_bundle_path, forward_path)
+        trial_loader, cfg, subject_output, subject_id, calibration_bundle_path, forward_path)
 
     print("Done")
 

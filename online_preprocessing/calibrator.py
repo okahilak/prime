@@ -6,7 +6,7 @@ Usage
 -----
     calibrator = Calibrator(cfg, forward)
     for trial in incoming_trials:
-        calibrator.add_trial(trial)
+        calibrator.add_raw_trial(trial)
 
     cal_trials = calibrator.calibrate()  # list[ProcessedTrial]
 
@@ -286,19 +286,6 @@ def _drop_bad_trials(epoch_list, bad_indices):
     for epoch in epoch_list:
         epoch.drop(bad_indices)
     return epoch_list
-
-
-# ==================== Trial construction ====================
-
-def _single_trial_epochs_from_arrays(eeg_data, events, epochs, trial_idx):
-    """One trial as EpochsArray without deep-copying the full subject epochs."""
-    return mne.EpochsArray(
-        eeg_data[trial_idx:trial_idx + 1],
-        info=epochs.info,
-        events=events[trial_idx:trial_idx + 1],
-        tmin=epochs.tmin,
-        verbose=False,
-    )
 
 
 # ==================== Calibration pipeline ====================
@@ -608,17 +595,17 @@ class Calibrator:
     # Public API
     # ------------------------------------------------------------------
 
-    def add_trial(self, trial):
+    def add_raw_trial(self, raw_trial):
         """Append one raw trial (an MNE EpochsArray) to the calibration buffers.
 
         Parameters
         ----------
-        trial : mne.EpochsArray
-            Single-trial epochs as returned by ``_single_trial_epochs_from_arrays``.
+        raw_trial : mne.EpochsArray
+            Raw single-trial epochs as returned by ``TrialLoader.get_trial``.
         """
         self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_trial(
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
-            trial, self._cfg, self._ica_time_range,
+            raw_trial, self._cfg, self._ica_time_range,
         )
 
     def calibrate(self):
