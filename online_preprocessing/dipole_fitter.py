@@ -253,9 +253,8 @@ class DipoleFitter:
 
         Returns
         -------
-        fitting_info : dict
-            Dictionary with keys ``position_index``, ``orientation``, and
-            ``time_range``.  Also stored in ``self.fitting_info``.
+        calibration_amplitudes : np.ndarray
+            Dipole amplitudes (free orientation) fitted to the calibration trials.
         """
         epochs = self._epochs_from_trials(trials)
         if not epochs.info['ch_names'] == self._forward.ch_names:
@@ -277,7 +276,8 @@ class DipoleFitter:
             'orientation': orientation,
             'time_range': time_range,
         }
-        return self._fitting_info
+        calibration_amplitudes = np.array([self.fit_trial(t, orientation=None) for t in trials])
+        return calibration_amplitudes
 
     def fit_trial(self, trial, orientation='use_fitted'):
         """Fit a dipole to a single trial using stored fitting_info.
