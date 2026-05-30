@@ -126,6 +126,7 @@ def main():
     calibration_trials = calibrator.calibrate()
     calibration_amplitudes = dipole_fitter.calibrate(calibration_trials)
     calibration_labels = normalizer.calibrate(calibration_amplitudes)
+    predictor.calibrate(calibration_trials, calibration_labels)
 
     print_summary("INTERVENTION PHASE")
 
@@ -144,8 +145,6 @@ def main():
         intervention_trials.append(processed)
 
     intervention_labels = np.array(intervention_labels)
-
-    predictor.calibrate(calibration_trials, calibration_labels)
 
     n_online_trials = len(intervention_trials)
 
