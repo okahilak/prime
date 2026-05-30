@@ -93,6 +93,8 @@ def main():
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")
 
     # --- Setup ---
+
+    # Get default config
     cfg = get_default_config()
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
 
@@ -126,6 +128,7 @@ def main():
     print_summary("INTERVENTION PHASE")
 
     intervention_labels = []
+    intervention_trials = []
     for trial_idx in range(N_CALIBRATION_TRIALS, 300):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
@@ -136,44 +139,14 @@ def main():
         amplitude = dipole_fitter.fit_trial(processed, orientation=None)
         label = normalizer.transform(amplitude)
         intervention_labels.append(label)
+        intervention_trials.append(processed)
 
     intervention_labels = np.array(intervention_labels)
 
-    # =========================================================================
-    # COMPARE WITH OFFLINE LABELS
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("COMPARE ONLINE vs OFFLINE LABELS")
-    print("=" * 70)
-    offline = np.load(predictions_path)
-    offline_labels = offline["actual_values"]
-
-    n_compare = min(len(intervention_labels), len(offline_labels))
-    online_labels = intervention_labels[:n_compare]
-    offline_labels_cmp = offline_labels[:n_compare]
-
-    print(f"  Online labels count:  {len(intervention_labels)}")
-    print(f"  Offline labels count: {len(offline_labels)}")
-    print(f"  Comparing first {n_compare} labels...")
-    print(f"")
-    print(f"  First online label:   {online_labels[0]:.6f}")
-    print(f"  First offline label:  {offline_labels_cmp[0]:.6f}")
-    print(f"  Match (first):        {np.isclose(online_labels[0], offline_labels_cmp[0], atol=1e-4)}")
-    print(f"")
-    diffs = np.abs(online_labels - offline_labels_cmp)
-    print(f"  Max absolute diff:    {np.max(diffs):.8f}")
-    print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
-    print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
-    print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
-    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-7)
-    print(f"  All match (atol=1e-7): {match_all}")
-    print("=" * 70)
-
-
     # Torch and NumPy setup
     device = torch.device("cuda")
-    np.random.seed(CONFIG["seed"])
     torch.manual_seed(CONFIG["seed"])
+    np.random.seed(CONFIG["seed"])
     torch.cuda.manual_seed_all(CONFIG["seed"])
 
     # Deterministic settings for reproducibility
@@ -216,6 +189,36 @@ def main():
     all_predictions = np.array(all_predictions)
     print(f"\n  Online simulation complete. Predictions: {len(all_predictions)}")
     print(f"  First 5 predictions: {all_predictions[:5]}")
+
+    # =========================================================================
+    # COMPARE WITH OFFLINE LABELS
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("COMPARE ONLINE vs OFFLINE LABELS")
+    print("=" * 70)
+    offline = np.load(predictions_path)
+    offline_labels = offline["actual_values"]
+
+    n_compare = min(len(intervention_labels), len(offline_labels))
+    online_labels = intervention_labels[:n_compare]
+    offline_labels_cmp = offline_labels[:n_compare]
+
+    print(f"  Online labels count:  {len(intervention_labels)}")
+    print(f"  Offline labels count: {len(offline_labels)}")
+    print(f"  Comparing first {n_compare} labels...")
+    print(f"")
+    print(f"  First online label:   {online_labels[0]:.6f}")
+    print(f"  First offline label:  {offline_labels_cmp[0]:.6f}")
+    print(f"  Match (first):        {np.isclose(online_labels[0], offline_labels_cmp[0], atol=1e-4)}")
+    print(f"")
+    diffs = np.abs(online_labels - offline_labels_cmp)
+    print(f"  Max absolute diff:    {np.max(diffs):.8f}")
+    print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
+    print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
+    print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
+    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-7)
+    print(f"  All match (atol=1e-7): {match_all}")
+    print("=" * 70)
 
     # =========================================================================
     # COMPARE WITH OFFLINE PREDICTIONS
