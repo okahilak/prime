@@ -47,28 +47,7 @@ DATA_ROOT = Path("~/prime-data").expanduser()
 PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
 GLOBAL_BACKROTATION_PATH = "results/train/global_backrotation.npy"
 
-# Config matching configs/prime.yaml
-CONFIG = {
-    "tmin": -0.060,
-    "tmax": -0.010,
-    "use_tta": True,
-    "alignment_type": "euclidean",
-    "use_backrotation": True,
-    "alignment_ref_ema_beta": 0.99,
-    "alignment_cov_epsilon": 1e-6,
-    "alignment_transform_epsilon": 1e-7,
-    "tta_cov_buffer_size": 50,
-    "finetune_mode": "full",
-    "finetune_epochs": 1,
-    "batch_size_finetune": 50,
-    "lr_finetune": 0.0001,
-    "weight_decay_finetune": 0.0,
-    "lr_calibration": 0.0001,
-    "calibration_epochs": 50,
-    "window_size": 100,
-    "seed": 42,
-}
-
+SEED = 42
 
 def print_summary(summary_text):
     print("\n" + "=" * 70)
@@ -106,7 +85,7 @@ def main():
 
     global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
 
-    predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=CONFIG["seed"])
+    predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
     calibrator = Calibrator(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
