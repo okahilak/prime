@@ -126,12 +126,15 @@ def write_dataset(output_dir, subject_id, raw_data, event_samples, sfreq, n_chan
     json_filename = f"{subject_id}.json"
 
     # Write CSV data (no header, comma-separated)
+    # Use full double precision (17 significant digits) to avoid ICA divergence
+    # from tiny numerical differences
     print(f"Writing data CSV ({raw_data.shape[0]} rows x {raw_data.shape[1]} cols)...")
     np.savetxt(
         output_dir / data_filename,
         raw_data,
         delimiter=',',
-        fmt='%.7g',
+        # TODO: Would %.9g be sufficient?
+        fmt='%.17g',
     )
 
     # Write event file (event times in seconds, one per line)
