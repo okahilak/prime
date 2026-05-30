@@ -75,6 +75,12 @@ CONFIG = {
 }
 
 
+def print_summary(summary_text):
+    print("\n" + "=" * 70)
+    print(summary_text)
+    print("=" * 70)
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python simulate_online.py <subject_id>")
@@ -83,11 +89,8 @@ def main():
     subject_id_str = f"sub-{subject_id:03d}"
     predictions_path = f"results/test/predictions_subj_{subject_id}.npz"
 
-    print("=" * 70)
-    print("SIMULATE ONLINE PROCESSING (trial-by-trial)")
     print(f"Subject: {subject_id_str}")
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")
-    print("=" * 70)
 
     # --- Setup ---
     cfg = get_default_config()
@@ -104,9 +107,7 @@ def main():
     # =========================================================================
     # CALIBRATION PHASE — feed trials one at a time
     # =========================================================================
-    print("\n" + "=" * 70)
-    print("CALIBRATION PHASE")
-    print("=" * 70)
+    print_summary("CALIBRATION PHASE")
 
     # --- Trial-by-trial accumulation ---
     calibrator = Calibrator(cfg, forward_path)
@@ -114,75 +115,32 @@ def main():
     normalizer = TEPNormalizer(scale_factor=1.0)
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
-        # Simulate receiving a single trial
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
-
         calibrator.add_trial(trial)
 
-        if (trial_idx + 1) % 25 == 0:
-            print(f"  Accumulated {trial_idx + 1}/{N_CALIBRATION_TRIALS} calibration trials")
+    # Run calibration
+    calibration_trials = calibrator.calibrate()
+    dipole_fitter.fit(calibration_trials)
+    calibration_amplitudes = dipole_fitter.fit_trials(calibration_trials, orientation=None)
+    normalizer.fit(calibration_amplitudes)
+    calibration_labels = normalizer.transform(calibration_amplitudes)
 
-    # --- We have enough trials: run calibration ---
-    print("\nRunning calibration preprocessing...")
-    cal_trials = calibrator.calibrate()
-    print(f"Calibration preprocessing done, used {len(cal_trials)}/{N_CALIBRATION_TRIALS} trials.")
+    print_summary("CALIBRATION COMPLETE")
+    print_summary("INTERVENTION PHASE")
 
-    # --- Calibrate dipole fitting parameters ---
-    print("\nCalibrating dipole parameters...")
-    dipole_fitter.fit(cal_trials)
-
-    # --- Fit dipoles to calibration post-stim trials ---
-    print("\nFitting dipoles to calibration trials...")
-    cal_amplitudes = dipole_fitter.fit_trials(cal_trials, orientation=None)
-    print(f"  {len(cal_amplitudes)} dipoles")
-
-    # --- Summary ---
-    print("\n" + "=" * 70)
-    print("CALIBRATION COMPLETE")
-    print(f"  Calibration params obtained: {list(calibrator.calibration_params.keys())}")
-    print(f"  Calibration trials survived: {len(cal_trials)}")
-    print("=" * 70)
-
-    # =========================================================================
-    # INTERVENTION PHASE — process post-calibration trials, fit dipoles,
-    # compute normalized TEP labels using the same Calibrator preprocessing
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("INTERVENTION PHASE — TEP label computation")
-    print("=" * 70)
-
-    n_intervention = n_total_trials - N_CALIBRATION_TRIALS
-    print(f"Processing {n_intervention} intervention trials...")
-
-    # --- Process intervention trials: require both pre & post to pass ---
     intervention_trials = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+    for trial_idx in range(N_CALIBRATION_TRIALS, 300):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
-        if processed is not None:
-            intervention_trials.append(processed)
-        if (trial_idx - N_CALIBRATION_TRIALS + 1) % 100 == 0:
-            print(f"  Preprocessed {trial_idx - N_CALIBRATION_TRIALS + 1}/{n_intervention} "
-                  f"intervention trials")
 
-    print(f"  {len(intervention_trials)}/{n_intervention} intervention trials survived "
-          f"(both pre & post)")
+        if processed is None:
+            continue
 
-    print("\nFitting free-orientation dipoles to intervention trials...")
+        intervention_trials.append(processed)
+
     int_amplitudes = dipole_fitter.fit_trials(intervention_trials, orientation=None)
-    print(f"  {len(int_amplitudes)} dipoles fitted")
-
-    # --- TEP normalization ---
-    normalizer.fit(cal_amplitudes)
-    all_labels = normalizer.transform(np.concatenate([cal_amplitudes, int_amplitudes]))
-
-    # Extract intervention labels
-    int_labels = all_labels[len(cal_amplitudes):]
-    # Also compute calibration labels (needed for calibration fine-tuning)
-    cal_labels = all_labels[:len(cal_amplitudes)]
-    print(f"\n  Calibration TEP amplitudes: {len(cal_amplitudes)}")
-    print(f"  Intervention TEP amplitudes: {len(int_amplitudes)}")
-    print(f"  Intervention labels (first 5): {int_labels[:5]}")
+    all_labels = normalizer.transform(np.concatenate([calibration_amplitudes, int_amplitudes]))
+    intervention_labels = all_labels[len(calibration_amplitudes):]
 
     # =========================================================================
     # COMPARE WITH OFFLINE LABELS
@@ -193,11 +151,11 @@ def main():
     offline = np.load(predictions_path)
     offline_labels = offline["actual_values"]
 
-    n_compare = min(len(int_labels), len(offline_labels))
-    online_labels = int_labels[:n_compare]
+    n_compare = min(len(intervention_labels), len(offline_labels))
+    online_labels = intervention_labels[:n_compare]
     offline_labels_cmp = offline_labels[:n_compare]
 
-    print(f"  Online labels count:  {len(int_labels)}")
+    print(f"  Online labels count:  {len(intervention_labels)}")
     print(f"  Offline labels count: {len(offline_labels)}")
     print(f"  Comparing first {n_compare} labels...")
     print(f"")
@@ -214,12 +172,6 @@ def main():
     print(f"  All match (atol=1e-7): {match_all}")
     print("=" * 70)
 
-    # =========================================================================
-    # CLASSIFIER — Load pretrained, calibrate, run online finetuning
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("CLASSIFIER — Pretrained model + Calibration + Online finetuning")
-    print("=" * 70)
 
     # Torch and NumPy setup
     device = torch.device("cuda")
@@ -233,27 +185,10 @@ def main():
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     torch.use_deterministic_algorithms(True, warn_only=True)
 
-    # --- Prepare pre-stim EEG data info ---
-    cal_pre_epochs = mne.concatenate_epochs([t.epoch_pre for t in cal_trials])
-    cal_pre_data = cal_pre_epochs.copy().crop(
-        tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
-    ).get_data(copy=False)
-    print(f"\n  Pre-stim EEG shape: ({cal_pre_data.shape[1]} ch, {cal_pre_data.shape[2]} timepoints)")
-    print(f"  Calibration trials for classifier: {len(cal_trials)}")
-
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
     global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH)
-    print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
-
-    # --- STAGE 2: CALIBRATION FINE-TUNING ---
-    print("\n  --- Calibration (using OnlinePredictor.calibrate) ---")
-    predictor.calibrate(cal_trials, cal_labels)
-    print(f"  Calibration complete ({len(cal_trials)} trials, "
-          f"{CONFIG['calibration_epochs']} epochs)")
-
-    # --- STAGE 3: ONLINE FINE-TUNING (trial-by-trial) ---
-    print("\n  --- Online fine-tuning simulation ---")
+    predictor.calibrate(calibration_trials, calibration_labels)
 
     n_online_trials = len(intervention_trials)
 
@@ -269,7 +204,7 @@ def main():
 
     for trial_idx in range(n_online_trials):
         trial = intervention_trials[trial_idx]
-        single_label = int_labels[trial_idx]
+        single_label = intervention_labels[trial_idx]
 
         # --- PREDICT ---
         pred_prob = predictor.predict(trial)
@@ -296,12 +231,12 @@ def main():
     offline_labels = offline["actual_values"]
 
     # --- Labels comparison ---
-    n_compare = min(len(int_labels), len(offline_labels))
-    label_diffs = np.abs(int_labels[:n_compare] - offline_labels[:n_compare])
+    n_compare = min(len(intervention_labels), len(offline_labels))
+    label_diffs = np.abs(intervention_labels[:n_compare] - offline_labels[:n_compare])
     print(f"\n  LABELS ({n_compare} trials):")
     print(f"    Max diff:       {np.max(label_diffs):.2e}")
     print(f"    Num diffs > 0:  {np.sum(label_diffs > 0)}")
-    print(f"    Exact match:    {np.array_equal(int_labels[:n_compare], offline_labels[:n_compare])}")
+    print(f"    Exact match:    {np.array_equal(intervention_labels[:n_compare], offline_labels[:n_compare])}")
 
     # --- Predictions comparison ---
     n_compare_pred = min(len(all_predictions), len(offline_preds))
@@ -319,7 +254,7 @@ def main():
     print(f"    All close (1e-4): {preds_all_close}")
     print("=" * 70)
 
-    labels_match = np.array_equal(int_labels[:n_compare], offline_labels[:n_compare])
+    labels_match = np.array_equal(intervention_labels[:n_compare], offline_labels[:n_compare])
     if not labels_match:
         print("\nRESULT: FAIL — Labels do not match.")
         sys.exit(1)
