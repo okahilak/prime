@@ -104,12 +104,9 @@ def main():
     n_total_trials = all_eeg_data.shape[0]
     print(f"Loaded {n_total_trials} total trials for {subject_id_str}")
 
-    # =========================================================================
-    # CALIBRATION PHASE — feed trials one at a time
-    # =========================================================================
+    # Calibration phase
     print_summary("CALIBRATION PHASE")
 
-    # --- Trial-by-trial accumulation ---
     global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=CONFIG["seed"])
@@ -122,17 +119,17 @@ def main():
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         calibrator.add_trial(trial)
 
-    # Run calibration
     calibration_trials = calibrator.calibrate()
     calibration_amplitudes = dipole_fitter.calibrate(calibration_trials)
     calibration_labels = normalizer.calibrate(calibration_amplitudes)
     predictor.calibrate(calibration_trials, calibration_labels)
 
+    # Intervention phase
     print_summary("INTERVENTION PHASE")
 
     intervention_labels = []
-    all_predictions = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, 300):
+    online_predictions = []
+    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
 
@@ -145,81 +142,49 @@ def main():
         predictor.finetune(processed, label)
 
         intervention_labels.append(label)
-        all_predictions.append(probability)
+        online_predictions.append(probability)
 
     intervention_labels = np.array(intervention_labels)
-    all_predictions = np.array(all_predictions)
+    online_predictions = np.array(online_predictions)
 
-    # =========================================================================
-    # COMPARE WITH OFFLINE LABELS
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("COMPARE ONLINE vs OFFLINE LABELS")
-    print("=" * 70)
-    offline = np.load(predictions_path)
-    offline_labels = offline["actual_values"]
+    # Compare with offline results
+    offline_data = np.load(predictions_path)
+    offline_labels = offline_data["actual_values"]
+    offline_predictions = offline_data["predictions"]
 
-    n_compare = min(len(intervention_labels), len(offline_labels))
-    online_labels = intervention_labels[:n_compare]
-    offline_labels_cmp = offline_labels[:n_compare]
+    if len(intervention_labels) != len(offline_labels):
+        raise RuntimeError(
+            f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
+        )
+    if len(online_predictions) != len(offline_predictions):
+        raise RuntimeError(
+            f"Prediction count mismatch: online={len(online_predictions)}, offline={len(offline_predictions)}"
+        )
 
-    print(f"  Online labels count:  {len(intervention_labels)}")
-    print(f"  Offline labels count: {len(offline_labels)}")
-    print(f"  Comparing first {n_compare} labels...")
-    print(f"")
-    print(f"  First online label:   {online_labels[0]:.6f}")
-    print(f"  First offline label:  {offline_labels_cmp[0]:.6f}")
-    print(f"  Match (first):        {np.isclose(online_labels[0], offline_labels_cmp[0], atol=1e-4)}")
-    print(f"")
-    diffs = np.abs(online_labels - offline_labels_cmp)
-    print(f"  Max absolute diff:    {np.max(diffs):.8f}")
-    print(f"  Mean absolute diff:   {np.mean(diffs):.8f}")
-    print(f"  Num diffs > 0.01:     {np.sum(diffs > 0.01)}")
-    print(f"  Num diffs > 0.001:    {np.sum(diffs > 0.001)}")
-    match_all = np.allclose(online_labels, offline_labels_cmp, atol=1e-7)
-    print(f"  All match (atol=1e-7): {match_all}")
-    print("=" * 70)
+    label_differences = np.abs(intervention_labels - offline_labels)
+    prediction_differences = np.abs(online_predictions - offline_predictions)
 
-    # =========================================================================
-    # COMPARE WITH OFFLINE PREDICTIONS
-    # =========================================================================
+    labels_match = np.allclose(intervention_labels, offline_labels, atol=1e-7)
+    predictions_all_close = np.allclose(online_predictions, offline_predictions, atol=1e-4)
+
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE")
     print("=" * 70)
-    offline = np.load(predictions_path)
-    offline_preds = offline["predictions"]
-    offline_labels = offline["actual_values"]
-
-    # --- Labels comparison ---
-    n_compare = min(len(intervention_labels), len(offline_labels))
-    label_diffs = np.abs(intervention_labels[:n_compare] - offline_labels[:n_compare])
-    print(f"\n  LABELS ({n_compare} trials):")
-    print(f"    Max diff:       {np.max(label_diffs):.2e}")
-    print(f"    Num diffs > 0:  {np.sum(label_diffs > 0)}")
-    print(f"    Exact match:    {np.array_equal(intervention_labels[:n_compare], offline_labels[:n_compare])}")
-
-    # --- Predictions comparison ---
-    n_compare_pred = min(len(all_predictions), len(offline_preds))
-    pred_diffs = np.abs(all_predictions[:n_compare_pred] - offline_preds[:n_compare_pred])
-    preds_all_close = np.allclose(
-        all_predictions[:n_compare_pred], offline_preds[:n_compare_pred], atol=1e-4
-    )
-    print(f"\n  PREDICTIONS ({n_compare_pred} trials):")
-    print(f"    Max diff:       {np.max(pred_diffs):.6f}")
-    print(f"    Mean diff:      {np.mean(pred_diffs):.6f}")
-    print(f"    Num exact:      {np.sum(pred_diffs == 0)}/{n_compare_pred}")
-    print(f"    Num < 1e-6:     {np.sum(pred_diffs < 1e-6)}")
-    print(f"    Num < 1e-4:     {np.sum(pred_diffs < 1e-4)}")
-    print(f"    Num < 0.001:    {np.sum(pred_diffs < 0.001)}")
-    print(f"    All close (1e-4): {preds_all_close}")
+    print(f"\n  LABELS ({len(intervention_labels)} trials):")
+    print(f"    Max diff:           {np.max(label_differences):.2e}")
+    print(f"    Mean diff:          {np.mean(label_differences):.2e}")
+    print(f"    All close (1e-7):   {labels_match}")
+    print(f"\n  PREDICTIONS ({len(online_predictions)} trials):")
+    print(f"    Max diff:           {np.max(prediction_differences):.6f}")
+    print(f"    Mean diff:          {np.mean(prediction_differences):.6f}")
+    print(f"    All close (1e-4):   {predictions_all_close}")
     print("=" * 70)
 
-    labels_match = np.array_equal(intervention_labels[:n_compare], offline_labels[:n_compare])
     if not labels_match:
         print("\nRESULT: FAIL — Labels do not match.")
         sys.exit(1)
 
-    if not preds_all_close:
+    if not predictions_all_close:
         print("\nRESULT: FAIL — Predictions do not match within tolerance.")
         sys.exit(1)
 
