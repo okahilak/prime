@@ -233,13 +233,13 @@ def main():
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     torch.use_deterministic_algorithms(True, warn_only=True)
 
-    # --- Prepare pre-stim EEG data (matching offline tmin/tmax crop) ---
+    # --- Prepare pre-stim EEG data info ---
     cal_pre_epochs = mne.concatenate_epochs([t.epoch_pre for t in cal_trials])
     cal_pre_data = cal_pre_epochs.copy().crop(
         tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
     ).get_data(copy=False)
     print(f"\n  Pre-stim EEG shape: ({cal_pre_data.shape[1]} ch, {cal_pre_data.shape[2]} timepoints)")
-    print(f"  Calibration trials for classifier: {cal_pre_data.shape[0]}")
+    print(f"  Calibration trials for classifier: {len(cal_trials)}")
 
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
     global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
@@ -248,19 +248,14 @@ def main():
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---
     print("\n  --- Calibration (using OnlinePredictor.calibrate) ---")
-    predictor.calibrate(cal_pre_data, cal_labels)
-    print(f"  Calibration complete ({len(cal_pre_data)} trials, "
+    predictor.calibrate(cal_trials, cal_labels)
+    print(f"  Calibration complete ({len(cal_trials)} trials, "
           f"{CONFIG['calibration_epochs']} epochs)")
 
     # --- STAGE 3: ONLINE FINE-TUNING (trial-by-trial) ---
     print("\n  --- Online fine-tuning simulation ---")
 
-    # Prepare intervention pre-stim data
-    int_pre_epochs = mne.concatenate_epochs([t.epoch_pre for t in intervention_trials])
-    int_pre_data = int_pre_epochs.copy().crop(
-        tmin=CONFIG["tmin"], tmax=CONFIG["tmax"], include_tmax=True
-    ).get_data(copy=False)
-    n_online_trials = len(int_pre_data)
+    n_online_trials = len(intervention_trials)
 
     # Restrict to first 150 trials
     n_online_trials = min(n_online_trials, 150)
@@ -273,15 +268,15 @@ def main():
     all_predictions = []
 
     for trial_idx in range(n_online_trials):
-        single_epoch_np = int_pre_data[trial_idx]
-        single_label_np = int_labels[trial_idx]
+        trial = intervention_trials[trial_idx]
+        single_label = int_labels[trial_idx]
 
         # --- PREDICT ---
-        pred_prob = predictor.predict(single_epoch_np)
+        pred_prob = predictor.predict(trial)
         all_predictions.append(pred_prob)
 
         # --- FINETUNE (adapt alignment + buffered supervised update) ---
-        predictor.finetune(single_epoch_np, single_label_np)
+        predictor.finetune(trial, single_label)
 
         if (trial_idx + 1) % 100 == 0:
             print(f"    Trial {trial_idx + 1}/{n_online_trials}")

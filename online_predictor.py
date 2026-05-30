@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
+import mne
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,6 +19,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
 from models.builder import build_model
+from online_preprocessing.calibrator import ProcessedTrial
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
@@ -125,12 +127,12 @@ class OnlinePredictor:
 
     Usage:
         predictor = OnlinePredictor(global_backrotation, model_path="pretrained.pt")
-        predictor.calibrate(calibration_epochs, calibration_labels)
+        predictor.calibrate(cal_trials, cal_labels)
 
         torch.manual_seed(seed)  # caller's responsibility
-        for epoch_np, label in stream:
-            prob = predictor.predict(epoch_np)
-            loss = predictor.finetune(epoch_np, label)
+        for trial, label in zip(intervention_trials, int_labels):
+            prob = predictor.predict(trial)
+            loss = predictor.finetune(trial, label)
     """
 
     def __init__(
@@ -172,18 +174,76 @@ class OnlinePredictor:
         if self._finetuning_enabled:
             self._init_optimizer_and_buffers()
 
-    def predict(self, epoch_np: np.ndarray) -> float:
+    def _extract_epoch_data(self, trial: ProcessedTrial) -> np.ndarray:
+        """Extract pre-stim EEG data from a ProcessedTrial, cropped to [tmin, tmax].
+
+        Returns:
+            Numpy array of shape (n_channels, n_times).
         """
-        Predict the probability for a single epoch without side effects.
+        return trial.epoch_pre.copy().crop(
+            tmin=self.args.tmin, tmax=self.args.tmax, include_tmax=True
+        ).get_data(copy=False).squeeze(0)
+
+    def _extract_epochs_data(self, trials: List[ProcessedTrial]) -> np.ndarray:
+        """Extract pre-stim EEG data from a list of ProcessedTrials.
+
+        Returns:
+            Numpy array of shape (n_trials, n_channels, n_times).
+        """
+        epochs = mne.concatenate_epochs([t.epoch_pre for t in trials])
+        return epochs.copy().crop(
+            tmin=self.args.tmin, tmax=self.args.tmax, include_tmax=True
+        ).get_data(copy=False)
+
+    def predict(self, trial: ProcessedTrial) -> float:
+        """
+        Predict the probability for a single trial without side effects.
 
         Args:
-            epoch_np: A single EEG epoch array of shape (n_channels, n_times).
+            trial: A ProcessedTrial instance.
 
         Returns:
             Predicted probability (float in [0, 1]).
         """
-        # TTAWrapper.predict returns raw logits (output - decision_criterion).
-        # Sigmoid is applied on-device to match predict_batch exactly.
+        epoch_np = self._extract_epoch_data(trial)
+        return self._predict_numpy(epoch_np)
+
+    def predict_logits(self, trial: ProcessedTrial) -> float:
+        """
+        Return raw logit for a single trial (no sigmoid).
+
+        Useful when callers need the unnormalized output, e.g. for custom
+        thresholding or external evaluation functions.
+        """
+        epoch_np = self._extract_epoch_data(trial)
+        self.model.eval()
+        epoch_t = (
+            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
+        )
+        with torch.no_grad():
+            logits = self.model.predict(epoch_t)
+        return logits.item()
+
+    def predict_batch(self, trials: List[ProcessedTrial], batch_size: int = 50) -> np.ndarray:
+        """
+        Predict probabilities for a batch of trials.
+
+        Uses the same code path as predict() (model.predict → sigmoid),
+        ensuring numeric equivalence between batch evaluation and the
+        per-trial online loop.
+
+        Args:
+            trials: List of ProcessedTrial instances.
+            batch_size: Number of trials per forward pass.
+
+        Returns:
+            Array of predicted probabilities, shape (n_trials,).
+        """
+        epochs_np = self._extract_epochs_data(trials)
+        return self._predict_batch_numpy(epochs_np, batch_size)
+
+    def _predict_numpy(self, epoch_np: np.ndarray) -> float:
+        """Predict probability from a single numpy epoch (n_channels, n_times)."""
         self.model.eval()
         epoch_t = (
             torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
@@ -193,36 +253,8 @@ class OnlinePredictor:
             prob = torch.sigmoid(logits)
         return prob.item()
 
-    def predict_logits(self, epoch_np: np.ndarray) -> float:
-        """
-        Return raw logit for a single epoch (no sigmoid).
-
-        Useful when callers need the unnormalized output, e.g. for custom
-        thresholding or external evaluation functions.
-        """
-        self.model.eval()
-        epoch_t = (
-            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
-        )
-        with torch.no_grad():
-            logits = self.model.predict(epoch_t)
-        return logits.item()
-
-    def predict_batch(self, epochs_np: np.ndarray, batch_size: int = 50) -> np.ndarray:
-        """
-        Predict probabilities for a batch of epochs.
-
-        Uses the same code path as predict() (model.predict → sigmoid),
-        ensuring numeric equivalence between batch evaluation and the
-        per-trial online loop.
-
-        Args:
-            epochs_np: EEG epochs, shape (n_trials, n_channels, n_times).
-            batch_size: Number of trials per forward pass.
-
-        Returns:
-            Array of predicted probabilities, shape (n_trials,).
-        """
+    def _predict_batch_numpy(self, epochs_np: np.ndarray, batch_size: int = 50) -> np.ndarray:
+        """Predict probabilities from numpy epochs (n_trials, n_channels, n_times)."""
         self.model.eval()
         all_probs = []
         n_trials = len(epochs_np)
@@ -248,19 +280,21 @@ class OnlinePredictor:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
-    def finetune(self, epoch_np: np.ndarray, label: float) -> Optional[float]:
+    def finetune(self, trial: ProcessedTrial, label: float) -> Optional[float]:
         """
         Adapt alignment (unsupervised) and perform buffered supervised
         finetuning on recent trials.
 
         Args:
-            epoch_np: The EEG epoch array of shape (n_channels, n_times).
+            trial: A ProcessedTrial instance.
             label: The ground-truth label for this trial.
 
         Returns:
             The average finetuning loss if a training step was performed,
             None otherwise.
         """
+        epoch_np = self._extract_epoch_data(trial)
+
         # 1. Unsupervised alignment adaptation
         if self.args.use_tta and self.args.alignment_type not in ("none", None):
             self.model.adapt_alignment(epoch_np)
@@ -298,7 +332,7 @@ class OnlinePredictor:
             self._init_optimizer_and_buffers()
 
     def calibrate(
-        self, epochs_np: np.ndarray, labels: np.ndarray, **kwargs
+        self, cal_trials: List[ProcessedTrial], cal_labels: np.ndarray, **kwargs
     ) -> None:
         """
         Perform initial calibration: initialize alignment from calibration
@@ -309,11 +343,12 @@ class OnlinePredictor:
         This matches the original training path.
 
         Args:
-            epochs_np: Calibration epochs, shape (n_trials, n_channels, n_times).
-            labels: Calibration labels, shape (n_trials,).
+            cal_trials: List of ProcessedTrial instances for calibration.
+            cal_labels: Calibration labels, shape (n_trials,).
             **kwargs: Optional overrides for lr (lr_calibration) and
                       n_epochs (calibration_epochs).
         """
+        epochs_np = self._extract_epochs_data(cal_trials)
         lr = kwargs.get("lr", getattr(self.args, "lr_calibration", 0.0001))
         n_epochs = kwargs.get(
             "n_epochs", getattr(self.args, "calibration_epochs", 50)
@@ -349,7 +384,7 @@ class OnlinePredictor:
             criterion = nn.BCEWithLogitsLoss()
 
             loader = self._make_loader(
-                epochs_for_training, labels, batch_size, shuffle=True
+                epochs_for_training, cal_labels, batch_size, shuffle=True
             )
             if loader is None:
                 return
