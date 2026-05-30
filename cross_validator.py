@@ -3,7 +3,6 @@
 CrossValidator module for managing cross-validation with separated train and test stages.
 """
 
-import copy
 import gc
 import logging
 import time
@@ -201,7 +200,7 @@ class CrossValidator:
         self.console = console
         self.run_output_dir = run_output_dir
         self.is_cv = is_cv
-        self.model_state_dict: Optional[dict] = None
+        self.model_path: Optional[Path] = None
         self.n_channels: int = -1
         self.n_timepoints: int = -1
         self.global_backrotation: Optional[np.ndarray] = None
@@ -269,24 +268,23 @@ class CrossValidator:
             run_name_suffix=f"Fold_{fold_idx+1}_PRIME" if fold_idx is not None else "PRIME",
         )
 
-        self.model_state_dict = copy.deepcopy(model.state_dict())
-
-        if self.args.get("save_pretrained_model", False):
-            if self.is_cv:
-                suffix = f"_fold_{fold_idx+1}"
-            elif self.args.get("train_all", False):
-                suffix = "_all"
-            else:
-                suffix = ""
-            save_path = self.run_output_dir / f"pretrained{suffix}.pt"
-            save_checkpoint({"model_state_dict": model.state_dict()}, save_path)
-            self.console.print(f"      [green]Saved pretrained model to {save_path.name}[/green]")
+        # Always save pretrained model so OnlinePredictor can load from path
+        if self.is_cv:
+            suffix = f"_fold_{fold_idx+1}"
+        elif self.args.get("train_all", False):
+            suffix = "_all"
+        else:
+            suffix = ""
+        save_path = self.run_output_dir / f"pretrained{suffix}.pt"
+        save_checkpoint({"model_state_dict": model.state_dict()}, save_path)
+        self.model_path = save_path
+        self.console.print(f"      [green]Saved pretrained model to {save_path.name}[/green]")
 
         if self.args.save_checkpoints:
             checkpoint_dir = get_checkpoint_dir(self.run_output_dir)
             label = f"model_PRIME_fold_{fold_idx+1}_pretrained.pt" if fold_idx is not None else "model_PRIME_pretrained.pt"
-            save_path = checkpoint_dir / label
-            save_checkpoint({"model_state_dict": self.model_state_dict}, save_path)
+            checkpoint_save_path = checkpoint_dir / label
+            save_checkpoint({"model_state_dict": model.state_dict()}, checkpoint_save_path)
 
         # Save global back-rotation matrix if produced
         if self.global_backrotation is not None:
@@ -323,7 +321,7 @@ class CrossValidator:
             chkpt_path = checkpoint_dir / "pretrained.pt"
         assert chkpt_path.is_file(), f"Checkpoint not found: {chkpt_path}"
 
-        self.model_state_dict = torch.load(chkpt_path, map_location='cpu')['model_state_dict']
+        self.model_path = chkpt_path
         self.console.print(f"  Loaded checkpoint: {chkpt_path}")
 
         # Load back-rotation matrix if available
@@ -399,9 +397,9 @@ class CrossValidator:
 
         # --- Build predictor ---
         predictor = OnlinePredictor(
-            self.global_backrotation, model_state_dict=self.model_state_dict,
+            self.global_backrotation, model_path=self.model_path,
         )
-        if self.model_state_dict is not None:
+        if self.model_path is not None:
             self.console.print("        Loaded pre-trained state.")
 
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}

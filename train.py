@@ -186,9 +186,6 @@ def run_train_only(args, device, console, run_output_dir):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # Always save the pretrained model in this mode
-    args.save_pretrained_model = True
-
     cv = CrossValidator(args, device, console, run_output_dir)
     train_epochs, train_labels = cv._load_train_data(train_subject_ids=subjects_to_run)
     assert train_epochs is not None and train_epochs.size > 0, "No training data loaded."

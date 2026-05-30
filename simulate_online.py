@@ -243,8 +243,7 @@ def main():
 
     # --- Create the OnlinePredictor (single instance for calibration + online) ---
     global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
-    checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=device, weights_only=False)
-    predictor = OnlinePredictor(global_backrotation, model_state_dict=checkpoint["model_state_dict"])
+    predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH)
     print(f"  Loaded pretrained model from: {PRETRAINED_MODEL_PATH}")
 
     # --- STAGE 2: CALIBRATION FINE-TUNING ---

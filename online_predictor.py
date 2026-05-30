@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -123,7 +124,7 @@ class OnlinePredictor:
         to ensure deterministic dropout etc. across paths.
 
     Usage:
-        predictor = OnlinePredictor(global_backrotation, model_state_dict=state_dict)
+        predictor = OnlinePredictor(global_backrotation, model_path="pretrained.pt")
         predictor.calibrate(calibration_epochs, calibration_labels)
 
         torch.manual_seed(seed)  # caller's responsibility
@@ -135,7 +136,7 @@ class OnlinePredictor:
     def __init__(
         self,
         global_backrotation: np.ndarray,
-        model_state_dict: Optional[dict] = None,
+        model_path: Optional[Union[str, Path]] = None,
     ):
         self.device = torch.device("cuda")
         self.args = _DEFAULT_ARGS
@@ -155,8 +156,9 @@ class OnlinePredictor:
             global_backrotation=global_backrotation,
         ).to(self.device)
 
-        if model_state_dict is not None:
-            self.model.wrapped_model.load_state_dict(model_state_dict)
+        if model_path is not None:
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+            self.model.wrapped_model.load_state_dict(checkpoint["model_state_dict"])
 
         # Setup finetuning optimizer and history buffers
         self._optimizer: Optional[torch.optim.Optimizer] = None
