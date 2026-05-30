@@ -131,7 +131,7 @@ def main():
     print_summary("INTERVENTION PHASE")
 
     intervention_labels = []
-    intervention_trials = []
+    all_predictions = []
     for trial_idx in range(N_CALIBRATION_TRIALS, 300):
         trial = _single_trial_epochs_from_arrays(all_eeg_data, all_events, epochs, trial_idx)
         processed = calibrator.preprocess(trial)
@@ -141,37 +141,14 @@ def main():
 
         amplitude = dipole_fitter.fit_trial(processed, orientation=None)
         label = normalizer.transform(amplitude)
+        probability = predictor.predict(processed)
+        predictor.finetune(processed, label)
+
         intervention_labels.append(label)
-        intervention_trials.append(processed)
+        all_predictions.append(probability)
 
     intervention_labels = np.array(intervention_labels)
-
-    n_online_trials = len(intervention_trials)
-
-    # Restrict to first 150 trials
-    n_online_trials = min(n_online_trials, 150)
-
-    print(f"  Online trials: {n_online_trials}")
-
-    all_predictions = []
-
-    for trial_idx in range(n_online_trials):
-        trial = intervention_trials[trial_idx]
-        single_label = intervention_labels[trial_idx]
-
-        # --- PREDICT ---
-        pred_prob = predictor.predict(trial)
-        all_predictions.append(pred_prob)
-
-        # --- FINETUNE (adapt alignment + buffered supervised update) ---
-        predictor.finetune(trial, single_label)
-
-        if (trial_idx + 1) % 100 == 0:
-            print(f"    Trial {trial_idx + 1}/{n_online_trials}")
-
     all_predictions = np.array(all_predictions)
-    print(f"\n  Online simulation complete. Predictions: {len(all_predictions)}")
-    print(f"  First 5 predictions: {all_predictions[:5]}")
 
     # =========================================================================
     # COMPARE WITH OFFLINE LABELS
