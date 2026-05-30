@@ -1,5 +1,6 @@
 # %%
 import numpy as np
+import pandas as pd
 from scipy.stats import ecdf
 
 
@@ -8,7 +9,10 @@ class TEPNormalizer:
     A stateful normalizer that learns from a calibration set and applies transformations
     causally to generate soft, probabilistic labels.
 
-    Call transform() one amplitude at a time; EWMA state is maintained internally.
+    Usage:
+        normalizer = TEPNormalizer()
+        cal_labels = normalizer.calibrate(cal_amplitudes)
+        label = normalizer.transform(new_amplitude)
     """
     def __init__(
         self,
@@ -17,54 +21,52 @@ class TEPNormalizer:
     ):
         self.scale_factor = scale_factor
         self.ewma_span = ewma_span
-        self._alpha = 2.0 / (ewma_span + 1)
-        # --- Ignore the initial unstable period of EWMA when fitting ---
         self.warmup_period = ewma_span
-        self.is_fitted = False
-        self.cal_mean_ = 0
-        self.cal_std_ = 1
-        self.cdf_function_ = None
-        # EWMA running state (for adjust=True mode)
-        self._ewma_numer = 0.0
-        self._ewma_denom = 0.0
+        self.is_calibrated = False
+        self._cal_mean = 0.0
+        self._cal_std = 1.0
+        self._cdf_function = None
+        self._amplitudes: list = []
 
-    def fit(self, cal_amplitudes: np.ndarray):
+    def calibrate(self, cal_amplitudes: np.ndarray) -> np.ndarray:
         """
-        Learns normalization stats and the ECDF from the calibration block,
-        ignoring the initial EWMA warm-up period for stability.
-
-        Also resets the EWMA running state so subsequent transform() calls
-        start fresh.
+        Learn normalization stats and ECDF from the calibration block.
 
         Parameters
         ----------
         cal_amplitudes : array-like
             1-D array of calibration TEP amplitudes (one per trial).
+
+        Returns
+        -------
+        np.ndarray
+            Calibration labels (soft probabilistic values).
         """
-        import pandas as pd
-        values = pd.Series(np.asarray(cal_amplitudes, dtype=float)) * self.scale_factor
+        self._amplitudes = list(np.asarray(cal_amplitudes, dtype=float))
+        values = pd.Series(self._amplitudes) * self.scale_factor
 
         ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
-        detrended_values = values - ewma_trend
+        detrended = values - ewma_trend
 
-        # --- Use warmup period to learn from the stable part of the signal ---
-        stable_detrended_values = detrended_values[self.warmup_period:]
+        stable_detrended = detrended[self.warmup_period:]
+        self._cal_mean = np.nanmean(stable_detrended)
+        self._cal_std = np.nanstd(stable_detrended)
+        if self._cal_std < 1e-9:
+            self._cal_std = 1.0
 
-        self.cal_mean_ = np.nanmean(stable_detrended_values)
-        self.cal_std_ = np.nanstd(stable_detrended_values)
-        if self.cal_std_ < 1e-9:
-            self.cal_std_ = 1
+        normalized = (stable_detrended - self._cal_mean) / self._cal_std
+        self._cdf_function = ecdf(normalized.dropna()).cdf.evaluate
+        self.is_calibrated = True
 
-        normalized_values = (stable_detrended_values - self.cal_mean_) / self.cal_std_
-        self.cdf_function_ = ecdf(normalized_values.dropna()).cdf.evaluate
-        self.is_fitted = True
-        self._ewma_numer = 0.0
-        self._ewma_denom = 0.0
-        return self
+        all_normalized = (detrended - self._cal_mean) / self._cal_std
+        return all_normalized.apply(self._cdf_function).values
 
     def transform(self, amplitude: float) -> float:
         """
-        Transform a single amplitude into a soft label, updating EWMA state.
+        Transform a single amplitude into a soft label.
+
+        Appends the amplitude to the internal history and recomputes
+        the EWMA-based label using the full sequence.
 
         Parameters
         ----------
@@ -76,20 +78,13 @@ class TEPNormalizer:
         float
             The soft probabilistic label (CDF value).
         """
-        if not self.is_fitted:
-            raise RuntimeError("The normalizer has not been fitted yet. Call .fit() first.")
+        if not self.is_calibrated:
+            raise RuntimeError("Not calibrated yet. Call .calibrate() first.")
 
-        value = float(amplitude) * self.scale_factor
+        self._amplitudes.append(float(amplitude))
+        values = pd.Series(self._amplitudes) * self.scale_factor
 
-        # Update EWMA (pandas adjust=True equivalent):
-        # numer_t = x_t + (1 - alpha) * numer_{t-1}
-        # denom_t = 1 + (1 - alpha) * denom_{t-1}
-        # ewma_t = numer_t / denom_t
-        decay = 1.0 - self._alpha
-        self._ewma_numer = value + decay * self._ewma_numer
-        self._ewma_denom = 1.0 + decay * self._ewma_denom
-        ewma = self._ewma_numer / self._ewma_denom
-
-        detrended = value - ewma
-        normalized = (detrended - self.cal_mean_) / self.cal_std_
-        return float(self.cdf_function_(normalized))
+        ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
+        detrended = values.iloc[-1] - ewma_trend.iloc[-1]
+        normalized = (detrended - self._cal_mean) / self._cal_std
+        return float(self._cdf_function(normalized))

@@ -186,8 +186,9 @@ class TEPParadigm(BaseParadigm):
             cal_amplitudes, all_amplitudes = self._extract_amplitudes(
                 full_metadata, cal_mask)
             normalizer = TEPNormalizer(scale_factor=1.0)
-            normalizer.fit(cal_amplitudes)
-            y_run = np.array([normalizer.transform(a) for a in all_amplitudes])
+            cal_labels = normalizer.calibrate(cal_amplitudes)
+            int_labels = np.array([normalizer.transform(a) for a in all_amplitudes[len(cal_amplitudes):]])
+            y_run = np.concatenate([cal_labels, int_labels])
 
             nan_mask = np.isnan(y_run)
             if np.any(nan_mask):
