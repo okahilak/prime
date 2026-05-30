@@ -36,6 +36,7 @@ from online_preprocessing.dipole_fitter import DipoleFitter
 from tep_normalizer import TEPNormalizer
 from online_predictor import OnlinePredictor
 from online_preprocessing.trial_loader import TrialLoader
+from online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 
 # =============================================================================
 # Hard-coded constants
@@ -92,7 +93,13 @@ def main():
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
-    trial_loader = TrialLoader(subject_id_str)
+
+#    trial_loader = TrialLoader(subject_id_str)
+    json_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}.json"
+    trial_loader = TrialLoaderFromCsv(json_path)
+
+    n_total_trials = trial_loader.num_trials
+    print(f"Loaded {n_total_trials} trials for {subject_id_str}")
 
     # Calibration phase
     print_summary("CALIBRATION PHASE")
@@ -120,7 +127,7 @@ def main():
     predictions = []
     for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         if trial_idx % 100 == 0:
-            print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
+            print(f"Processing trial {trial_idx}/{n_total_trials}...")
 
         trial = calibrator.preprocess(trial_loader.get_trial(trial_idx))
 
