@@ -18,7 +18,6 @@ import json
 import sys
 from pathlib import Path
 
-import mne
 import numpy as np
 
 # Add paths for imports
@@ -28,11 +27,6 @@ sys.path.insert(0, str(ROOT_DIR / "prime"))
 sys.path.insert(0, str(ROOT_DIR / "prime" / "online_preprocessing"))
 
 from prime import Decider, EVENT_SAMPLE_WINDOW
-from online_preprocessing.calibrator import Calibrator
-from online_preprocessing.dipole_fitter import DipoleFitter
-from online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
-from tep_normalizer import TEPNormalizer
-from online_predictor import OnlinePredictor
 
 # Same constants as simulate_online.py
 N_CALIBRATION_TRIALS = 125
@@ -88,13 +82,9 @@ def extract_buffer(raw_data, event_sample, sfreq, window, n_eeg_channels, n_emg_
 
 
 def run_comparison(n_trials):
-    """Run both reference and Decider paths for n_trials and compare."""
+    """Run the Decider path for n_trials."""
 
     dataset_path = DATA_ROOT / "simulator" / "sub-021" / "sub-021-short.json"
-    ref_json_path = DATA_ROOT / "simulator" / "sub-021" / "sub-021-short.json"
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-    pretrained_model_path = str(ROOT_DIR / "prime" / "results" / "train" / "pretrained.pt")
-    global_backrotation_path = str(ROOT_DIR / "prime" / "results" / "train" / "global_backrotation.npy")
 
     # --- Load data ---
     raw_data, event_times, sfreq, n_eeg_channels, n_emg_channels = load_dataset(dataset_path)
@@ -104,62 +94,6 @@ def run_comparison(n_trials):
     print(f"Event sample window: {EVENT_SAMPLE_WINDOW}")
     print(f"Samples per trial: {int(round((EVENT_SAMPLE_WINDOW[1] - EVENT_SAMPLE_WINDOW[0]) * sfreq)) + 1}")
 
-    # --- Load reference trial loader ---
-    trial_loader = TrialLoaderFromCsv(ref_json_path)
-
-    # --- First: verify raw data matches between the two approaches ---
-    print("\n--- Verifying raw trial data matches ---")
-    for i in range(min(3, n_trials)):
-        ref_trial = trial_loader.get_trial(i)
-        ref_data = ref_trial.get_data(copy=False)[0]  # (n_channels, n_times)
-
-        eeg_buffer, _, time_offsets = extract_buffer(
-            raw_data, event_samples[i], sfreq,
-            EVENT_SAMPLE_WINDOW, n_eeg_channels, n_emg_channels,
-        )
-        dec_data = eeg_buffer.T  # (n_channels, n_times)
-
-        # Check shapes
-        if ref_data.shape != dec_data.shape:
-            print(f"  Trial {i}: SHAPE MISMATCH ref={ref_data.shape} dec={dec_data.shape}")
-            continue
-
-        max_diff = np.max(np.abs(ref_data - dec_data))
-        print(f"  Trial {i}: shape={ref_data.shape}  max_diff={max_diff:.2e}  "
-              f"tmin_ref={ref_trial.tmin:.4f}  tmin_dec={time_offsets[0]:.4f}")
-
-    # --- Run reference pipeline ---
-    print("\n--- Running REFERENCE (simulate_online.py logic) ---")
-    global_backrotation = np.load(global_backrotation_path)
-    ref_predictor = OnlinePredictor(global_backrotation, model_path=pretrained_model_path, seed=SEED)
-    ref_calibrator = Calibrator(forward_path)
-    ref_dipole_fitter = DipoleFitter(forward_path)
-    ref_normalizer = TEPNormalizer()
-
-    for trial_idx in range(min(N_CALIBRATION_TRIALS, n_trials)):
-        ref_calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
-
-    ref_labels = []
-    ref_predictions = []
-    if n_trials > N_CALIBRATION_TRIALS:
-        trials = ref_calibrator.calibrate()
-        amplitudes = ref_dipole_fitter.calibrate(trials)
-        labels = ref_normalizer.calibrate(amplitudes)
-        ref_predictor.calibrate(trials, labels)
-
-        for trial_idx in range(N_CALIBRATION_TRIALS, n_trials):
-            trial = ref_calibrator.preprocess(trial_loader.get_trial(trial_idx))
-            if trial is None:
-                print(f"  Ref trial {trial_idx}: REJECTED")
-                continue
-            amplitude = ref_dipole_fitter.fit_trial(trial)
-            label = ref_normalizer.transform(amplitude)
-            probability = ref_predictor.predict(trial)
-            ref_predictor.finetune(trial, label)
-            ref_labels.append(label)
-            ref_predictions.append(probability)
-            print(f"  Ref trial {trial_idx}: pred={probability:.6f}  label={label:.6f}")
-
     # --- Run Decider pipeline ---
     print("\n--- Running DECIDER (prime.py process_event) ---")
     decider = Decider(
@@ -168,9 +102,6 @@ def run_comparison(n_trials):
         num_emg_channels=n_emg_channels,
         sampling_frequency=int(sfreq),
     )
-
-    dec_labels = []
-    dec_predictions = []
 
     for trial_idx in range(n_trials):
         eeg_buffer, emg_buffer, time_offsets = extract_buffer(
@@ -190,66 +121,9 @@ def run_comparison(n_trials):
         )
 
         if result is not None:
-            dec_predictions.append(result["prediction"])
-            dec_labels.append(result["label"])
             print(f"  Dec trial {trial_idx}: pred={result['prediction']:.6f}  label={result['label']:.6f}")
 
-    # --- Compare ---
-    ref_labels = np.array(ref_labels)
-    ref_predictions = np.array(ref_predictions)
-    dec_labels = np.array(dec_labels)
-    dec_predictions = np.array(dec_predictions)
-
-    print("\n" + "=" * 70)
-    print("COMPARISON: Reference vs Decider")
-    print("=" * 70)
-
-    if n_trials <= N_CALIBRATION_TRIALS:
-        print(f"\n  Only calibration trials run ({n_trials}/{N_CALIBRATION_TRIALS}).")
-        print("  Raw data verified above. No predictions to compare yet.")
-        print("=" * 70)
-        return
-
-    if len(ref_predictions) != len(dec_predictions):
-        print(f"\n  COUNT MISMATCH: ref={len(ref_predictions)}, decider={len(dec_predictions)}")
-        n_compare = min(len(ref_predictions), len(dec_predictions))
-    else:
-        n_compare = len(ref_predictions)
-        print(f"\n  Trial counts match: {n_compare}")
-
-    if n_compare > 0:
-        label_diffs = np.abs(ref_labels[:n_compare] - dec_labels[:n_compare])
-        pred_diffs = np.abs(ref_predictions[:n_compare] - dec_predictions[:n_compare])
-
-        labels_match = np.allclose(ref_labels[:n_compare], dec_labels[:n_compare], atol=1e-7)
-        preds_match = np.allclose(ref_predictions[:n_compare], dec_predictions[:n_compare], atol=1e-4)
-
-        print(f"\n  LABELS ({n_compare} trials):")
-        print(f"    Max diff:         {np.max(label_diffs):.2e}")
-        print(f"    Mean diff:        {np.mean(label_diffs):.2e}")
-        print(f"    All close (1e-7): {labels_match}")
-
-        print(f"\n  PREDICTIONS ({n_compare} trials):")
-        print(f"    Max diff:         {np.max(pred_diffs):.6f}")
-        print(f"    Mean diff:        {np.mean(pred_diffs):.6f}")
-        print(f"    All close (1e-4): {preds_match}")
-
-        # Print all trial results for easy inspection
-        print(f"\n  Per-trial results:")
-        for i in range(n_compare):
-            match_str = "OK" if (label_diffs[i] < 1e-7 and pred_diffs[i] < 1e-4) else "DIFF"
-            print(f"    [{match_str}] Trial {N_CALIBRATION_TRIALS + i}: "
-                  f"ref_pred={ref_predictions[i]:.6f} dec_pred={dec_predictions[i]:.6f} "
-                  f"ref_label={ref_labels[i]:.6f} dec_label={dec_labels[i]:.6f}")
-
-        print("=" * 70)
-        if labels_match and preds_match:
-            print("\nRESULT: PASS")
-        else:
-            print("\nRESULT: FAIL")
-    else:
-        print("\n  No intervention trials to compare.")
-        print("=" * 70)
+    print("\nDecider run complete.")
 
 
 def main():
