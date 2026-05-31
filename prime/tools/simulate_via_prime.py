@@ -22,7 +22,7 @@ import mne
 import numpy as np
 
 # Add paths for imports
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "prime"))
 sys.path.insert(0, str(ROOT_DIR / "prime" / "online_preprocessing"))
@@ -90,7 +90,7 @@ def extract_buffer(raw_data, event_sample, sfreq, window, n_eeg_channels, n_emg_
 def run_comparison(n_trials):
     """Run both reference and Decider paths for n_trials and compare."""
 
-    dataset_path = ROOT_DIR / "simulation" / "sub-021-short.json"
+    dataset_path = DATA_ROOT / "simulator" / "sub-021" / "sub-021-short.json"
     ref_json_path = DATA_ROOT / "simulator" / "sub-021" / "sub-021-short.json"
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     pretrained_model_path = str(ROOT_DIR / "prime" / "results" / "train" / "pretrained.pt")
