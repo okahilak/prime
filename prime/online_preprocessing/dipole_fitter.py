@@ -275,7 +275,7 @@ class DipoleFitter:
             'orientation': orientation,
             'time_range': time_range,
         }
-        calibration_amplitudes = np.array([self.fit_trial(t) for t in trials])
+        calibration_amplitudes = np.array([self.fit_trial(trials[i]) for i in range(len(trials))])
         return calibration_amplitudes
 
     def fit_trial(self, trial, orientation='free'):

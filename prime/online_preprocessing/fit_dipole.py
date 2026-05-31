@@ -2,8 +2,7 @@
 Dipole calibration and single-trial fitting pipeline.
 
 Runs calibration then fits dipoles to all trials for one subject.
-Outputs: {subject}_dipole_fitting_info.npz
-         {subject}_calibration_amplitudes.npy
+Outputs: {subject}_calibration_amplitudes.npy
          {subject}_intervention_amplitudes.npy
 """
 import mne
@@ -22,7 +21,7 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 mne.set_log_level("ERROR")
 
 
-def run_calibration(subject, subjects_directory_eeg, forward_path):
+def run_fitting(subject, subjects_directory_eeg, forward_path):
     """
     Computes dipole fitting parameters from calibration trials for a single subject.
     Saves the fitting info to an .npz file and returns the fitted DipoleFitter.
@@ -38,23 +37,7 @@ def run_calibration(subject, subjects_directory_eeg, forward_path):
         return None
 
     fitter = DipoleFitter(forward_path)
-    fitting_info = fitter.fit(epochs)
-
-    # Save
-    os.makedirs(subject_directory, exist_ok=True)
-    output_path = os.path.join(subject_directory, f'{subject}_dipole_fitting_info.npz')
-    np.savez(output_path, **fitting_info)
-    print(f"Fitting info saved to {output_path}")
-    print(f"--- Calibration: finished for subject {subject} ---")
-    return fitter
-
-
-def run_fitting(subject, subjects_directory_eeg, fitter):
-    """
-    Fits dipoles to all single trials using a calibrated DipoleFitter.
-    Saves the fitted dipoles to an .npz file.
-    """
-    print(f"--- Fitting: starting for subject {subject} ---")
+    _ = fitter.calibrate(epochs)
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
@@ -85,9 +68,7 @@ def main():
     forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
     os.makedirs(subjects_directory_eeg, exist_ok=True)
 
-    fitter = run_calibration(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, forward_path=forward_path)
-    if fitter is not None:
-        run_fitting(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, fitter=fitter)
+    run_fitting(subject=args.subject, subjects_directory_eeg=subjects_directory_eeg, forward_path=forward_path)
 
 
 if __name__ == "__main__":
