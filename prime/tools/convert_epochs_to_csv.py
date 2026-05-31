@@ -9,7 +9,7 @@ Usage:
     python convert_epochs_to_csv.py <subject_id> [--output-dir <dir>]
 
 Example:
-    python convert_epochs_to_csv.py sub-021 --output-dir /home/user/prime-data/simulator
+    python convert_epochs_to_csv.py sub-021 --output-dir data/simulator
 """
 
 import argparse
@@ -20,7 +20,7 @@ from pathlib import Path
 import mne
 import numpy as np
 
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 COMMON_CHANNELS = [
     'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
@@ -178,7 +178,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: ~/prime-data/simulator/<subject_id>)",
+        help="Output directory (default: data/simulator/<subject_id>)",
     )
     parser.add_argument(
         "--short",

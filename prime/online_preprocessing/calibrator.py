@@ -43,7 +43,7 @@ except ImportError:
     from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
     from config import get_default_config
 
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 warnings.filterwarnings(
     "ignore",

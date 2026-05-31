@@ -17,7 +17,7 @@ try:
 except ImportError:
     from dipole_fitter import DipoleFitter
 
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 mne.set_log_level("ERROR")
 

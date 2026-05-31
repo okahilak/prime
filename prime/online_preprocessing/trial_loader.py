@@ -5,7 +5,7 @@ from pathlib import Path
 
 import mne
 
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 COMMON_CHANNELS = [
     'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',

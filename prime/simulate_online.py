@@ -42,7 +42,7 @@ from online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 # Hard-coded constants
 # =============================================================================
 N_CALIBRATION_TRIALS = 125
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
 
 PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
 GLOBAL_BACKROTATION_PATH = "results/train/global_backrotation.npy"

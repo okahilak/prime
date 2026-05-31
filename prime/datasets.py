@@ -39,7 +39,7 @@ from tta_wrapper import (
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
-DATA_ROOT_PATH = Path("~/prime-data/processed").expanduser()
+DATA_ROOT_PATH = Path(__file__).resolve().parent.parent / "data" / "processed"
 
 
 # %%

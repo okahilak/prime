@@ -15,7 +15,7 @@ except ImportError:
     from calibrator import Calibrator, ProcessedTrial
     from trial_loader import TrialLoader
 
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 N_TRIALS_CALIBRATE = 125
 

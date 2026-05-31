@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Run preprocessing and/or dipole extraction for every subject under
-~/prime-data/raw/{subject}/.
+data/raw/{subject}/.
 
 Example:
   python online_preprocessing/run_all_subjects.py --step both
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DATA_ROOT = Path("~/prime-data").expanduser()
+DATA_ROOT = SCRIPT_DIR.parent.parent / "data"
 
 RAW_DATA_DIR = DATA_ROOT / "raw"
 DIPOLE_FIT_SCRIPT = SCRIPT_DIR / "fit_dipole.py"
