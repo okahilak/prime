@@ -58,7 +58,7 @@ def dipole_done(subject: str) -> bool:
 
 def _build_prep_env() -> dict:
     prep_env = os.environ.copy()
-    prep_pythonpath = str(SCRIPT_DIR)
+    prep_pythonpath = str(SCRIPT_DIR.parent)
     if prep_env.get("PYTHONPATH"):
         prep_pythonpath = f"{prep_pythonpath}{os.pathsep}{prep_env['PYTHONPATH']}"
     prep_env["PYTHONPATH"] = prep_pythonpath
