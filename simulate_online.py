@@ -111,6 +111,7 @@ def main():
         trial = calibrator.preprocess(trial_loader.get_trial(trial_idx))
 
         if trial is None:
+            print(f"Trial {trial_idx}: REJECTED by preprocessing")
             continue
 
         amplitude = dipole_fitter.fit_trial(trial)
@@ -120,6 +121,8 @@ def main():
 
         intervention_labels.append(label)
         predictions.append(probability)
+
+        print(f"Trial {trial_idx}: prediction={probability:.6f}  label={label:.6f}")
 
     intervention_labels = np.array(intervention_labels)
     predictions = np.array(predictions)
