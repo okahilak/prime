@@ -76,10 +76,14 @@ class TEPDataset(BaseDataset):
         tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_amplitudes.npy"
         tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_amplitudes.npy"
 
-        required_files = [eeg_cal_file, eeg_int_file, tep_cal_file, tep_int_file]
-        if not all(f.exists() for f in required_files):
-            log.warning(f"Data files missing for S{subject} (TEP). Skipping.")
-            return {}
+        if not eeg_cal_file.exists():
+            raise FileNotFoundError(f"S{subject}: Missing calibration EEG file: {eeg_cal_file}")
+        if not eeg_int_file.exists():
+            raise FileNotFoundError(f"S{subject}: Missing intervention EEG file: {eeg_int_file}")
+        if not tep_cal_file.exists():
+            raise FileNotFoundError(f"S{subject}: Missing calibration TEP file: {tep_cal_file}")
+        if not tep_int_file.exists():
+            raise FileNotFoundError(f"S{subject}: Missing intervention TEP file: {tep_int_file}")
 
         epochs_cal = mne.read_epochs(eeg_cal_file, preload=True, verbose=False)
         epochs_int = mne.read_epochs(eeg_int_file, preload=True, verbose=False)
