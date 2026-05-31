@@ -180,6 +180,11 @@ def main():
         default=None,
         help="Output directory (default: ~/prime-data/simulator/<subject_id>)",
     )
+    parser.add_argument(
+        "--short",
+        action="store_true",
+        help="Only use the first 200 trials; output files are named <subject_id>-short_*",
+    )
     args = parser.parse_args()
 
     mne.set_log_level("WARNING")
@@ -192,6 +197,12 @@ def main():
     print(f"Loading epochs for {args.subject_id}...")
     epochs = load_and_prepare_epochs(args.subject_id)
 
+    output_subject_id = args.subject_id
+    if args.short:
+        epochs = epochs[:200]
+        output_subject_id = f"{args.subject_id}-short"
+        print(f"--short: using first {len(epochs)} epochs, output prefix: {output_subject_id}")
+
     print(f"Epochs: {epochs.get_data().shape}")
     print(f"  sfreq={epochs.info['sfreq']}, tmin={epochs.tmin}, tmax={epochs.tmax}")
 
@@ -199,7 +210,7 @@ def main():
 
     json_path = write_dataset(
         output_dir,
-        args.subject_id,
+        output_subject_id,
         raw_data,
         event_samples,
         epochs.info['sfreq'],
