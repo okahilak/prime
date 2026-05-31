@@ -18,6 +18,8 @@ Requires:
 See simulate_online.py for the offline simulation equivalent.
 """
 
+import hashlib
+import time
 import sys
 import warnings
 from pathlib import Path
@@ -44,9 +46,11 @@ from tep_normalizer import TEPNormalizer
 # Paths — adjust per setup
 # ---------------------------------------------------------------------------
 
-FORWARD_PATH = Path("fsaverage") / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = Path("classifier") / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = Path("classifier") / "global_backrotation.npy"
+PRIME_DIR = Path(__file__).parent / "prime"
+
+FORWARD_PATH = PRIME_DIR / "fsaverage" / "fsaverage-fwd.fif"
+PRETRAINED_MODEL_PATH = PRIME_DIR / "classifier" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = PRIME_DIR / "classifier" / "global_backrotation.npy"
 
 # ---------------------------------------------------------------------------
 # Protocol parameters
@@ -69,7 +73,7 @@ CHANNEL_NAMES = [
 
 # Event sample window: must cover the full trial range needed by the Calibrator.
 # ICA needs [-1.1, -0.005], post needs [-0.03, 0.1]. Use the dataset range for safety.
-EVENT_SAMPLE_WINDOW = [-1.3, 0.6]
+EVENT_SAMPLE_WINDOW = [-1.3, 0.5998]
 
 
 class Decider:
@@ -140,6 +144,11 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         """Process a trial event. Mirrors simulate_online.py trial-by-trial logic."""
+
+        # Buffer size print
+        n_samples, n_channels = eeg_buffer.shape
+        eeg_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
+        print(f"\nProcessing trial {self.trial_count + 1}  buffer shape={eeg_buffer.shape}  sha256={eeg_checksum}")
 
         # Convert the raw EEG buffer into an MNE EpochsArray
         trial = self._buffer_to_epochs(eeg_buffer, time_offsets)
