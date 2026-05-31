@@ -100,7 +100,7 @@ def _process_subject(
         else:
             _run_command(
                 [python, "-u", "-m", "online_preprocessing.fit_dipole", "--subject", subject],
-                os.environ.copy(),
+                prep_env,
                 f"dipole fit {subject}",
             )
             n_ok += 1
