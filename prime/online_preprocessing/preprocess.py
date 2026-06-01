@@ -158,13 +158,13 @@ def _run_online_processing_stage(
     _process_and_save_trial_group(
         epochs_data[:N_TRIALS_CALIBRATE], epochs.events[:N_TRIALS_CALIBRATE],
         epochs.info, epochs.tmin,
-        preprocessor, subject_output, subject_id, label='calibration',
+        preprocessor, subject_output, subject_id, 'calibration',
         raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
     )
     _process_and_save_trial_group(
         epochs_data[N_TRIALS_CALIBRATE:], epochs.events[N_TRIALS_CALIBRATE:],
         epochs.info, epochs.tmin,
-        preprocessor, subject_output, subject_id, label='intervention',
+        preprocessor, subject_output, subject_id, 'intervention',
         raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
     )
 
