@@ -31,7 +31,7 @@ class ProcessedTrial:
     epoch_post: mne.EpochsArray
 
 try:
-    from ..prime_config import get_pre_time_range
+    from ..prime_config import get_pre_time_range, get_tep_time_range
     from .utils.ica_calibrator import get_number_of_components, get_ica
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
@@ -40,7 +40,7 @@ try:
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from prime_config import get_pre_time_range
+    from prime_config import get_pre_time_range, get_tep_time_range
     from utils.ica_calibrator import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
@@ -56,6 +56,15 @@ def _validate_pre_stim_window(tmin_pre: float, tmax_pre: float, pre_range: list)
         raise ValueError(
             f"Pre-stim window [{tmin_pre}, {tmax_pre}] must satisfy "
             f"{pre_t0} <= tmin_pre < tmax_pre <= {pre_t1} (pre_range)"
+        )
+
+
+def _validate_tep_window(tmin_tep: float, tmax_tep: float, post_range: list) -> None:
+    post_t0, post_t1 = post_range
+    if not (post_t0 <= tmin_tep and tmax_tep <= post_t1 and tmin_tep < tmax_tep):
+        raise ValueError(
+            f"TEP window [{tmin_tep}, {tmax_tep}] must satisfy "
+            f"{post_t0} <= tmin_tep < tmax_tep <= {post_t1} (post_range)"
         )
 
 
@@ -591,10 +600,14 @@ class Calibrator:
     def __init__(self, forward_path):
         cfg = get_default_config()
         tmin_pre, tmax_pre = get_pre_time_range()
+        tmin_tep, tmax_tep = get_tep_time_range()
         _validate_pre_stim_window(tmin_pre, tmax_pre, cfg.pre_range)
+        _validate_tep_window(tmin_tep, tmax_tep, cfg.post_range)
         self._cfg = cfg
         self._tmin_pre = tmin_pre
         self._tmax_pre = tmax_pre
+        self._tmin_tep = tmin_tep
+        self._tmax_tep = tmax_tep
         self._opts = cfg.to_dicts()
         self._ica_time_range = self._opts['ica_opts']['pre_timerange']
 
@@ -608,6 +621,9 @@ class Calibrator:
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
         return epoch_pre.copy().crop(self._tmin_pre, self._tmax_pre, include_tmax=True)
+
+    def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
+        return epoch_post.copy().crop(self._tmin_tep, self._tmax_tep, include_tmax=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -659,10 +675,10 @@ class Calibrator:
                 pre_data[i:i+1], info=pre_epochs.info,
                 events=pre_epochs.events[i:i+1], tmin=pre_epochs.tmin, verbose=False,
             ))
-            ep_post = mne.EpochsArray(
+            ep_post = self._crop_post_to_tep_window(mne.EpochsArray(
                 post_data[i:i+1], info=post_epochs.info,
                 events=post_epochs.events[i:i+1], tmin=post_epochs.tmin, verbose=False,
-            )
+            ))
             trials.append(ProcessedTrial(ep_pre, ep_post))
         return trials
 
@@ -704,6 +720,7 @@ class Calibrator:
         result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
         if result_post is False:
             return None
+        result_post = self._crop_post_to_tep_window(result_post)
 
         return ProcessedTrial(result_pre, result_post)
 

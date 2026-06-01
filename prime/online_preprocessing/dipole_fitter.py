@@ -16,8 +16,7 @@ from sklearn.metrics import r2_score
 import mne
 
 
-def dipoles_for_times(evoked, forward, tmin, tmax):
-	evoked = evoked.copy().crop(tmin, tmax) #crop the data to the time range of interest
+def dipoles_for_times(evoked, forward):
 	data_measured = evoked.data #data in the evoked object
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	data_measured = data_measured - np.mean(data_measured, axis=0) #data ensured to be in average reference (if already not)
@@ -130,8 +129,8 @@ def determine_optimal_ori_and_pos(dipoles, forward):
 
 # ==================== Single-trial fitting ====================
 
-def fit_dipole_to_single_trial(epoch, forward, position_index, ori_vector, tmin, tmax):
-	epoch_cropped = epoch.copy().crop(tmin, tmax) #epoch in the time range of interest
+def fit_dipole_to_single_trial(epoch, forward, position_index, ori_vector, time_range):
+	epoch_cropped = epoch.copy().crop(time_range[0], time_range[1])
 	trial_data = epoch_cropped.get_data(copy=True)[0, :, :] #data n_channels x n_times
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	position_now = position_index*3
@@ -204,10 +203,6 @@ class DipoleFitter:
     ----------
     forward_path : str
         Path to the forward solution.
-    tmin_init : float
-        Start of the initial search window (seconds).
-    tmax_init : float
-        End of the initial search window (seconds).
     min_window_size : int
         Minimum window size (time samples) for ``determine_optimal_time_range``.
     max_window_size : int or None
@@ -216,15 +211,13 @@ class DipoleFitter:
         Exponent for window size scoring.
     """
 
-    def __init__(self, forward_path, tmin_init=0.038, tmax_init=0.050,
+    def __init__(self, forward_path,
                  min_window_size=3, max_window_size=6, window_size_exponent=1.5):
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
 
 		# TODO: Is this necessary? Note that it's not done in the calibrator.
         self._forward = self._forward.pick_channels(COMMON_CHANNELS, ordered=True)
 
-        self._tmin_init = tmin_init
-        self._tmax_init = tmax_init
         self._min_window_size = min_window_size
         self._max_window_size = max_window_size
         self._window_size_exponent = window_size_exponent
@@ -260,9 +253,7 @@ class DipoleFitter:
             raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
 
         evoked = epochs.copy().average()
-        best_dipole_per_time = dipoles_for_times(
-            evoked, self._forward, self._tmin_init, self._tmax_init
-        )
+        best_dipole_per_time = dipoles_for_times(evoked, self._forward)
         time_range, dipoles_in_time_range = determine_optimal_time_range(
             best_dipole_per_time, self._min_window_size,
             self._max_window_size, self._window_size_exponent
@@ -315,9 +306,9 @@ class DipoleFitter:
         else:
             ori_vector = None
         position_index = self._fitting_info['position_index']
-        tmin, tmax = self._fitting_info['time_range']
+        time_range = self._fitting_info['time_range']
         return fit_dipole_to_single_trial(
-            epoch, self._forward, position_index, ori_vector, tmin, tmax
+            epoch, self._forward, position_index, ori_vector, time_range
         )
 
     @property

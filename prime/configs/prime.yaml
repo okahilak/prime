@@ -43,6 +43,12 @@ weight_decay_finetune: 0.0
 # --- Pre-stim EEG window: 50 ms ending 10 ms before TMS pulse ---
 tmin_pre: -0.060
 tmax_pre: -0.010
+
+# --- Post-stim TEP dipole search window ---
+tmin_tep: 0.038
+tmax_tep: 0.050
+
+# --- Filtering ---
 fmin: null
 fmax: null
 resample: null
