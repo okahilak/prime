@@ -367,9 +367,29 @@ def crop_eeg_buffer(
     tmin: float,
     tmax: float,
 ) -> np.ndarray:
-    """Crop (n_samples, n_channels) to [tmin, tmax] inclusive relative to the event."""
-    mask = (time_offsets >= tmin) & (time_offsets <= tmax)
-    return eeg_buffer[mask]
+    """Crop (n_samples, n_channels) to [tmin, tmax] inclusive relative to the event.
+
+    Uses the same sample count as ``epoch_n_times`` / MNE ``crop(..., include_tmax=True)``
+    on an epoch whose first sample is at ``time_offsets[0]``.  A boolean mask on
+    ``time_offsets`` can be off by one when the grid is event-centered (t=0) and
+    ``tmax`` falls between samples (e.g. raw pre ending at -5 ms).
+    """
+    time_offsets = np.asarray(time_offsets, dtype=np.float64)
+    if time_offsets.size < 2:
+        raise ValueError("time_offsets must have at least two samples")
+    dt = float(np.median(np.diff(time_offsets)))
+    if dt <= 0:
+        raise ValueError("time_offsets must be strictly increasing")
+    sfreq = 1.0 / dt
+    start_idx = int(round((tmin - time_offsets[0]) / dt))
+    n_times = epoch_n_times(tmin, tmax, sfreq)
+    end_idx = start_idx + n_times
+    if start_idx < 0 or end_idx > eeg_buffer.shape[0]:
+        raise ValueError(
+            f"cannot crop [{tmin}, {tmax}] from buffer "
+            f"(start={start_idx}, n_times={n_times}, buffer_len={eeg_buffer.shape[0]})"
+        )
+    return eeg_buffer[start_idx:end_idx]
 
 
 def crop_mne_trial_to_raw_epochs(
