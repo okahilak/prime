@@ -37,7 +37,7 @@ from prime_config import (
     get_raw_post_epoch_time_range,
     get_raw_pre_epoch_time_range,
 )
-from online_preprocessing.utils.ica_preprocessor import get_number_of_components, get_ica
+from online_preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
 from online_preprocessing.utils.ssp_sir_python import (
     ssp_sir_to_average,
     ssp_sir_trials,
