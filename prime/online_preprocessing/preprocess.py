@@ -8,14 +8,13 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-try:
-    from ..prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
-    from .preprocessor import Preprocessor, ProcessedTrial, crop_mne_trial_to_raw_epochs
-    from .trial_loader import TrialLoader
-except ImportError:
-    from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
-    from preprocessor import Preprocessor, ProcessedTrial, crop_mne_trial_to_raw_epochs
-    from trial_loader import TrialLoader
+from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from online_preprocessing.preprocessor import (
+    Preprocessor,
+    ProcessedTrial,
+    crop_mne_trial_to_raw_epochs,
+)
+from online_preprocessing.trial_loader import TrialLoader
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 

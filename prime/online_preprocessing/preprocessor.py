@@ -30,34 +30,25 @@ class ProcessedTrial:
     epoch_pre: mne.EpochsArray
     epoch_post: mne.EpochsArray
 
-try:
-    from ..prime_config import (
-        epoch_n_times,
-        get_post_epoch_time_range,
-        get_pre_epoch_time_range,
-        get_raw_post_epoch_time_range,
-        get_raw_pre_epoch_time_range,
-    )
-    from .utils.ica_preprocessor import get_number_of_components, get_ica
-    from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
-    from .utils.sound_modified import sound
-    from .utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
-    from .config import get_default_config
-except ImportError:
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from prime_config import (
-        epoch_n_times,
-        get_post_epoch_time_range,
-        get_pre_epoch_time_range,
-        get_raw_post_epoch_time_range,
-        get_raw_pre_epoch_time_range,
-    )
-    from utils.ica_preprocessor import get_number_of_components, get_ica
-    from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
-    from utils.sound_modified import sound
-    from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
-    from config import get_default_config
+from prime_config import (
+    epoch_n_times,
+    get_post_epoch_time_range,
+    get_pre_epoch_time_range,
+    get_raw_post_epoch_time_range,
+    get_raw_pre_epoch_time_range,
+)
+from online_preprocessing.utils.ica_preprocessor import get_number_of_components, get_ica
+from online_preprocessing.utils.ssp_sir_python import (
+    ssp_sir_to_average,
+    ssp_sir_trials,
+    ssp_sir_single_trial,
+)
+from online_preprocessing.utils.sound_modified import sound
+from online_preprocessing.utils.channel_interpolations import (
+    custom_get_interpolation_matrix,
+    apply_channel_interpolation,
+)
+from online_preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
