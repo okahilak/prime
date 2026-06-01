@@ -119,9 +119,10 @@ def epochs_to_continuous(epochs):
 
 
 def insert_break_after_calibration(raw_data, event_samples, sfreq, start_offset, n_times):
-    """Insert a one-minute random-noise gap centered between trials 125 and 126.
+    """Insert a one-minute random-noise gap starting at the midpoint between trials 125 and 126.
 
-    Trials are 1-indexed. Events from trial 126 onward are shifted by the break length.
+    Trials are 1-indexed. The break extends forward from that point; events from trial 126
+    onward are shifted by the break length.
     """
     if len(event_samples) <= CALIBRATION_TRIALS:
         raise ValueError(
@@ -133,7 +134,7 @@ def insert_break_after_calibration(raw_data, event_samples, sfreq, start_offset,
     end_trial_125 = event_samples[CALIBRATION_TRIALS - 1] + start_offset + n_times
     start_trial_126 = event_samples[CALIBRATION_TRIALS] + start_offset
     midpoint = (end_trial_125 + start_trial_126) / 2
-    break_start = int(round(midpoint - break_samples / 2))
+    break_start = int(round(midpoint))
 
     rng = np.random.default_rng(RANDOM_SEED + 1)
     noise_scale = np.std(raw_data) * 0.1
@@ -145,12 +146,12 @@ def insert_break_after_calibration(raw_data, event_samples, sfreq, start_offset,
     )
 
     event_samples = event_samples.copy()
-    event_samples[event_samples >= break_start] += break_samples
+    event_samples[CALIBRATION_TRIALS:] += break_samples
 
     n_postponed = len(event_samples) - CALIBRATION_TRIALS
     print(
         f"Inserted {BREAK_DURATION_SEC}s break ({break_samples} samples) at sample "
-        f"{break_start} (centered between trials {CALIBRATION_TRIALS} and "
+        f"{break_start} (from midpoint between trials {CALIBRATION_TRIALS} and "
         f"{CALIBRATION_TRIALS + 1}); {n_postponed} events postponed"
     )
     return raw_data, event_samples
@@ -226,7 +227,7 @@ def main():
         action="store_true",
         help=(
             f"After trial {CALIBRATION_TRIALS}, insert a {BREAK_DURATION_SEC}s random-noise "
-            "gap centered between that trial and the next; postpone later events. "
+            "gap at the midpoint before the next trial; postpone later events. "
             "Output uses the <subject_id>-break prefix."
         ),
     )
