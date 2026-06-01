@@ -223,32 +223,23 @@ class DipoleFitter:
         self._window_size_exponent = window_size_exponent
         self._fitting_info = None
 
-    def _epochs_from_trials(self, trials):
-        """Extract concatenated post-stim epochs from a list of ProcessedTrial or pass through mne.Epochs."""
-        if isinstance(trials, mne.BaseEpochs):
-            return trials
-        return mne.concatenate_epochs([t.epoch_post for t in trials])
-
-    def _epoch_from_trial(self, trial):
-        """Extract a single-trial epoch from a ProcessedTrial or pass through mne.Epochs."""
-        if isinstance(trial, mne.BaseEpochs):
-            return trial
-        return trial.epoch_post
-
-    def calibrate(self, trials):
+    def calibrate(self, cal_epochs_post):
         """Compute dipole fitting parameters from calibration trials.
 
         Parameters
         ----------
-        trials : list of ProcessedTrial or mne.Epochs
-            Calibration trials (post-stimulus epochs are used).
+        cal_epochs_post : list of mne.Epochs or mne.Epochs
+            Preprocessed post-stimulus calibration epochs.
 
         Returns
         -------
         calibration_amplitudes : np.ndarray
             Dipole amplitudes (free orientation) fitted to the calibration trials.
         """
-        epochs = self._epochs_from_trials(trials)
+        if isinstance(cal_epochs_post, mne.BaseEpochs):
+            epochs = cal_epochs_post
+        else:
+            epochs = mne.concatenate_epochs(cal_epochs_post)
         if not epochs.info['ch_names'] == self._forward.ch_names:
             raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
 
@@ -266,18 +257,20 @@ class DipoleFitter:
             'orientation': orientation,
             'time_range': time_range,
         }
-        calibration_amplitudes = np.array([self.fit_trial(trials[i]) for i in range(len(trials))])
+        calibration_amplitudes = np.array([
+            self.fit_trial(cal_epochs_post[i]) for i in range(len(cal_epochs_post))
+        ])
         return calibration_amplitudes
 
-    def fit_trial(self, trial, orientation='free'):
+    def fit_trial(self, epoch_post, orientation='free'):
         """Fit a dipole to a single trial using stored fitting_info.
 
         Must be called after ``calibrate()`` or constructed via ``from_fitting_info()``.
 
         Parameters
         ----------
-        trial : ProcessedTrial or mne.Epochs (single-trial)
-            Trial to fit (post-stimulus epoch is used).
+        epoch_post : mne.Epochs (single-trial)
+            Preprocessed post-stimulus epoch.
         orientation : 'free' or 'fixed'
             ``'free'`` (default) performs free-orientation fitting.
             ``'fixed'`` uses the orientation stored in ``fitting_info``.
@@ -292,7 +285,7 @@ class DipoleFitter:
                 f"orientation must be 'free' or 'fixed', got {orientation!r}"
             )
 
-        epoch = self._epoch_from_trial(trial)
+        epoch = epoch_post
         if not epoch.info['ch_names'] == self._forward.ch_names:
             raise ValueError(f"Channel mismatch for epoch and forward solution. Aborting.")
 

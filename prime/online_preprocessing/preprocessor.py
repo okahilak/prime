@@ -8,14 +8,13 @@ Usage
     preprocessor.add_raw_pre_epoch(raw_pre)   # (n_samples, n_channels)
     preprocessor.add_raw_post_epoch(raw_post)
 
-    cal_trials = preprocessor.calibrate()  # list[ProcessedTrial]
+    cal_pre, cal_post = preprocessor.calibrate()
 
-    processed = preprocessor.preprocess(raw_pre, raw_post)  # None if rejected
-    processed.epoch_pre, processed.epoch_post
+    epoch_pre = preprocessor.preprocess_pre(raw_pre)   # None if rejected
+    epoch_post = preprocessor.preprocess_post(raw_post)
 """
 
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 
 import mne
@@ -23,12 +22,6 @@ import numpy as np
 from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
 
-
-@dataclass(frozen=True)
-class ProcessedTrial:
-    """Result of preprocessing a single trial (pre and post epochs)."""
-    epoch_pre: mne.EpochsArray
-    epoch_post: mne.EpochsArray
 
 from prime_config import (
     epoch_n_times,
@@ -849,13 +842,13 @@ class Preprocessor:
     def calibrate(self):
         """Run calibration on the accumulated trials.
 
-        Stores the resulting parameters internally.  Call ``preprocess`` on
-        individual trials afterwards.
+        Stores the resulting parameters internally.  Call ``preprocess_pre`` /
+        ``preprocess_post`` on individual trials afterwards.
 
         Returns
         -------
-        list of ProcessedTrial
-            Calibration trials that survived artifact rejection.
+        tuple[list[mne.EpochsArray], list[mne.EpochsArray]]
+            Pre- and post-stimulus calibration epochs that survived rejection.
         """
         if self._awaiting_post:
             raise RuntimeError("add_raw_post_epoch was not called for the last pre epoch")
@@ -872,21 +865,20 @@ class Preprocessor:
         )
         self._calibration_params = calibration_params
 
-        # Build list of ProcessedTrial from concatenated epochs
         pre_data = pre_epochs.get_data(copy=False)
         post_data = post_epochs.get_data(copy=False)
-        trials = []
+        cal_pre = []
+        cal_post = []
         for i in range(n_successful_trials):
-            ep_pre = self._crop_pre_to_model_window(mne.EpochsArray(
+            cal_pre.append(self._crop_pre_to_model_window(mne.EpochsArray(
                 pre_data[i:i+1], info=pre_epochs.info,
                 events=pre_epochs.events[i:i+1], tmin=pre_epochs.tmin, verbose=False,
-            ))
-            ep_post = self._crop_post_to_tep_window(mne.EpochsArray(
+            )))
+            cal_post.append(self._crop_post_to_tep_window(mne.EpochsArray(
                 post_data[i:i+1], info=post_epochs.info,
                 events=post_epochs.events[i:i+1], tmin=post_epochs.tmin, verbose=False,
-            ))
-            trials.append(ProcessedTrial(ep_pre, ep_post))
-        return trials
+            )))
+        return cal_pre, cal_post
 
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):
@@ -895,29 +887,17 @@ class Preprocessor:
         instance._calibration_params = calibration_params
         return instance
 
-    def preprocess(self, raw_pre: np.ndarray, raw_post: np.ndarray):
-        """Resample and preprocess a single trial (both pre and post).
+    def preprocess_pre(self, raw_pre: np.ndarray) -> mne.EpochsArray | None:
+        """Resample and preprocess a single pre-stimulus trial.
 
         Must be called after ``calibrate()``.
 
-        Parameters
-        ----------
-        raw_pre : np.ndarray, shape (n_samples, n_channels)
-            Raw pre-stimulus epoch at ``raw_sfreq``.
-        raw_post : np.ndarray, shape (n_samples, n_channels)
-            Raw post-stimulus epoch at ``raw_sfreq``.
-
-        Returns
-        -------
-        ProcessedTrial or None
-            Preprocessed trial with ``.epoch_pre`` and ``.epoch_post``,
-            or ``None`` if either segment was rejected.
+        Returns ``None`` if the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
-        self._validate_raw_post_shape(raw_post)
 
         epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
         epoch_pre = epoch_pre.copy().crop(self._pre_stim_tmin, self._pre_stim_tmax)
@@ -925,16 +905,26 @@ class Preprocessor:
         result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
-        result_pre = self._crop_pre_to_model_window(result_pre)
+        return self._crop_pre_to_model_window(result_pre)
+
+    def preprocess_post(self, raw_post: np.ndarray) -> mne.EpochsArray | None:
+        """Resample and preprocess a single post-stimulus trial.
+
+        Must be called after ``calibrate()``.
+
+        Returns ``None`` if the trial was rejected.
+        """
+        if self._calibration_params is None:
+            raise RuntimeError("calibrate() must be called before preprocessing trials.")
+
+        self._validate_raw_post_shape(raw_post)
 
         epoch_post = _numpy_to_epochs_array(raw_post, self._info, self._raw_post_epoch_tmin)
         epoch_post.resample(get_processed_sfreq(), method='polyphase')
         result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
         if result_post is False:
             return None
-        result_post = self._crop_post_to_tep_window(result_post)
-
-        return ProcessedTrial(result_pre, result_post)
+        return self._crop_post_to_tep_window(result_post)
 
     # ------------------------------------------------------------------
     # Convenience helpers

@@ -29,7 +29,6 @@ from datasets import (
 )
 from models.builder import build_model
 from online_predictor import OnlinePredictor, score_predictions
-from online_preprocessing.preprocessor import ProcessedTrial
 from prime_config import get_processed_sfreq
 from utils import (
     RegressionMetricsTracker,
@@ -44,33 +43,19 @@ log = logging.getLogger(__name__)
 
 # --- Helper functions used by CrossValidator ---
 
-def _numpy_epochs_to_trials(
+def _numpy_epochs_to_mne(
     epochs_np: np.ndarray, sfreq: float, tmin: float,
-) -> List[ProcessedTrial]:
-    """Wrap numpy epochs (model-window pre-stim) into ProcessedTrial objects.
-
-    Creates single-trial mne.EpochsArray objects with tmin matching the stored window.
-
-    Args:
-        epochs_np: Array of shape (n_trials, n_channels, n_times).
-        sfreq: Sampling frequency in Hz.
-        tmin: Start time of the epoch in seconds.
-
-    Returns:
-        List of ProcessedTrial (with epoch_post=None).
-    """
+) -> List[mne.EpochsArray]:
+    """Wrap numpy epochs (model-window pre-stim) into single-trial EpochsArray objects."""
     n_trials, n_channels, _ = epochs_np.shape
     info = mne.create_info(
         ch_names=n_channels, sfreq=sfreq, ch_types='eeg'
     )
     info.set_montage(None)
-    trials = []
-    for i in range(n_trials):
-        epoch_arr = mne.EpochsArray(
-            epochs_np[i:i+1], info, tmin=tmin, verbose=False
-        )
-        trials.append(ProcessedTrial(epoch_pre=epoch_arr, epoch_post=None))
-    return trials
+    return [
+        mne.EpochsArray(epochs_np[i:i+1], info, tmin=tmin, verbose=False)
+        for i in range(n_trials)
+    ]
 
 
 def log_memory_usage(stage: str, log_obj=None):
@@ -144,13 +129,13 @@ def pretrain_model(model: nn.Module, train_loader: DataLoader,
     return model
 
 
-def _run_online_finetuning(predictor, test_trials,
+def _run_online_finetuning(predictor, test_epochs_pre,
                            labels_for_finetuning, labels_for_evaluation,
                            is_extreme_mask, original_soft_labels,
                            args, device, console,
                            run_output_dir, subject_id, fold_idx):
     """Run an online finetuning simulation using an already-constructed OnlinePredictor."""
-    n_trials = len(test_trials)
+    n_trials = len(test_epochs_pre)
     if fold_idx is not None:
         log_prefix = f"Fold_{fold_idx}_Subj_{subject_id}_PRIME"
     else:
@@ -164,12 +149,12 @@ def _run_online_finetuning(predictor, test_trials,
     online_iterator = tqdm(range(n_trials), desc=f"Online Sim ({log_prefix})", leave=False)
     for trial_idx in online_iterator:
         trial_start_time = time.time()
-        trial = test_trials[trial_idx]
+        epoch_pre = test_epochs_pre[trial_idx]
         single_label_for_finetuning = labels_for_finetuning[trial_idx]
         single_label_for_evaluation = labels_for_evaluation[trial_idx]
 
-        pred_prob = predictor.predict(trial)
-        step_loss_or_none = predictor.finetune(trial, single_label_for_finetuning)
+        pred_prob = predictor.predict(epoch_pre)
+        step_loss_or_none = predictor.finetune(epoch_pre, single_label_for_finetuning)
         step_loss = step_loss_or_none if step_loss_or_none is not None else np.nan
 
         metrics_tracker.update(y_true=single_label_for_evaluation, y_pred=pred_prob)
@@ -435,14 +420,13 @@ class CrossValidator:
 
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 
-        # Wrap numpy epochs into ProcessedTrial objects
-        all_trials = _numpy_epochs_to_trials(
+        all_epochs_pre = _numpy_epochs_to_mne(
             epochs, sfreq=get_processed_sfreq(), tmin=self.args.pre_epoch_tmin,
         )
 
         # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
-        self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_trials)} trials...")
-        pre_calib_preds = predictor.predict_batch(all_trials, batch_size=self.args.batch_size_finetune)
+        self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_epochs_pre)} trials...")
+        pre_calib_preds = predictor.predict_batch(all_epochs_pre, batch_size=self.args.batch_size_finetune)
         pre_calib_metrics = score_predictions(
             predictions=pre_calib_preds, labels=labels_for_eval,
             is_extreme_mask=is_extreme_mask, original_soft_labels=labels_for_eval,
@@ -454,30 +438,30 @@ class CrossValidator:
         if metadata is not None and 'period' in metadata.columns:
             cal_mask = (metadata['period'] == 'calibration').values
             int_mask = (metadata['period'] == 'intervention').values
-            calibration_trials = [all_trials[i] for i in range(len(all_trials)) if cal_mask[i]]
-            online_trials = [all_trials[i] for i in range(len(all_trials)) if int_mask[i]]
+            calibration_epochs_pre = [all_epochs_pre[i] for i in range(len(all_epochs_pre)) if cal_mask[i]]
+            online_epochs_pre = [all_epochs_pre[i] for i in range(len(all_epochs_pre)) if int_mask[i]]
             calibration_labels = labels_ground_truth[cal_mask]
             online_labels_for_finetuning = labels_ground_truth[int_mask]
             online_labels_for_eval = labels_for_eval[int_mask]
             online_is_extreme_mask = is_extreme_mask[int_mask]
         else:
-            calibration_trials = None
-            online_trials = all_trials
+            calibration_epochs_pre = None
+            online_epochs_pre = all_epochs_pre
             online_labels_for_finetuning = labels_ground_truth
             online_labels_for_eval = labels_for_eval
             online_is_extreme_mask = is_extreme_mask
 
         # --- STAGE 2: CALIBRATION ---
-        if calibration_trials is not None and len(calibration_trials) > 0:
+        if calibration_epochs_pre is not None and len(calibration_epochs_pre) > 0:
             self.console.print(f"      Calibrating for {self.args.calibration_epochs} epochs...")
-            predictor.calibrate(calibration_trials, calibration_labels)
+            predictor.calibrate(calibration_epochs_pre, calibration_labels)
             self.console.print("      [green]Calibration complete.[/green]")
 
         # --- STAGE 3: ONLINE EVALUATION ---
         per_trial_metrics = []
-        if online_trials is not None and len(online_trials) > 0:
-            self.console.print(f"      Post-Calibration Zero-Shot on {len(online_trials)} trials...")
-            post_calib_preds = predictor.predict_batch(online_trials, batch_size=self.args.batch_size_finetune)
+        if online_epochs_pre is not None and len(online_epochs_pre) > 0:
+            self.console.print(f"      Post-Calibration Zero-Shot on {len(online_epochs_pre)} trials...")
+            post_calib_preds = predictor.predict_batch(online_epochs_pre, batch_size=self.args.batch_size_finetune)
             post_calib_metrics = score_predictions(
                 predictions=post_calib_preds, labels=online_labels_for_eval,
                 is_extreme_mask=online_is_extreme_mask, original_soft_labels=online_labels_for_eval,
@@ -485,10 +469,10 @@ class CrossValidator:
             stage_results["post_calib_zero_shot"] = post_calib_metrics
             self.console.print(f"      [bold]Post-Calib ROC AUC: {post_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
 
-            self.console.print(f"      Online finetuning on {len(online_trials)} trials...")
+            self.console.print(f"      Online finetuning on {len(online_epochs_pre)} trials...")
             final_finetuned_metrics, _, per_trial_metrics = _run_online_finetuning(
                 predictor=predictor,
-                test_trials=online_trials,
+                test_epochs_pre=online_epochs_pre,
                 labels_for_finetuning=online_labels_for_finetuning,
                 labels_for_evaluation=online_labels_for_eval,
                 is_extreme_mask=online_is_extreme_mask,

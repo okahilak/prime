@@ -153,16 +153,17 @@ class Decider:
         else:
             # --- Intervention phase ---
             self.trial_count += 1
-            processed = self.preprocessor.preprocess(raw_pre, raw_post)
+            processed_pre = self.preprocessor.preprocess_pre(raw_pre)
+            processed_post = self.preprocessor.preprocess_post(raw_post)
 
-            if processed is None:
+            if processed_pre is None or processed_post is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
                 return None
 
-            amplitude = self.dipole_fitter.fit_trial(processed)
+            amplitude = self.dipole_fitter.fit_trial(processed_post)
             label = self.normalizer.transform(amplitude)
-            probability = self.predictor.predict(processed)
-            self.predictor.finetune(processed, label)
+            probability = self.predictor.predict(processed_pre)
+            self.predictor.finetune(processed_pre, label)
 
             print(f"Trial {self.trial_count}: prediction={probability:.6f}  label={label:.6f}")
 
@@ -178,16 +179,16 @@ class Decider:
         print("RUNNING CALIBRATION")
         print("=" * 60)
 
-        trials = self.preprocessor.calibrate()
-        print(f"  Preprocessor done: {len(trials)} trials survived rejection")
+        cal_pre, cal_post = self.preprocessor.calibrate()
+        print(f"  Preprocessor done: {len(cal_pre)} trials survived rejection")
 
-        amplitudes = self.dipole_fitter.calibrate(trials)
+        amplitudes = self.dipole_fitter.calibrate(cal_post)
         print(f"  Dipole fitter calibrated")
 
         labels = self.normalizer.calibrate(amplitudes)
         print(f"  TEP normalizer calibrated")
 
-        self.predictor.calibrate(trials, labels)
+        self.predictor.calibrate(cal_pre, labels)
         print(f"  Predictor calibrated")
 
         self.is_calibrated = True

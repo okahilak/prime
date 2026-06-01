@@ -11,7 +11,6 @@ import numpy as np
 from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
 from online_preprocessing.preprocessor import (
     Preprocessor,
-    ProcessedTrial,
     crop_mne_trial_to_raw_epochs,
 )
 from online_preprocessing.trial_loader import TrialLoader
@@ -25,9 +24,13 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(raw_pre, raw_post, preprocessor) -> ProcessedTrial | None:
-    """Process a single trial. Returns ProcessedTrial or None if rejected."""
-    return preprocessor.preprocess(raw_pre, raw_post)
+def process_single_trial(raw_pre, raw_post, preprocessor):
+    """Process a single trial. Returns (epoch_pre, epoch_post) or None if rejected."""
+    epoch_pre = preprocessor.preprocess_pre(raw_pre)
+    epoch_post = preprocessor.preprocess_post(raw_post)
+    if epoch_pre is None or epoch_post is None:
+        return None
+    return epoch_pre, epoch_post
 
 
 _online_trial_worker_state = {}
@@ -92,11 +95,11 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     print("Calibrating...")
 
     start_time = time.time()
-    cal_trials = preprocessor.calibrate()
+    cal_pre, _cal_post = preprocessor.calibrate()
 
     _save_calibration_bundle(calibration_bundle_path, preprocessor.calibration_params)
 
-    print(f"Used {len(cal_trials)} trials for calibration")
+    print(f"Used {len(cal_pre)} trials for calibration")
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
@@ -125,8 +128,9 @@ def _process_and_save_trial_group(
 
     for i, (_, processed) in enumerate(results):
         if processed is not None:
-            pre_list.append(processed.epoch_pre)
-            post_list.append(processed.epoch_post)
+            epoch_pre, epoch_post = processed
+            pre_list.append(epoch_pre)
+            post_list.append(epoch_post)
         else:
             bad_trials.append(i)
 

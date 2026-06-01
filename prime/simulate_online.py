@@ -118,10 +118,10 @@ def main():
         preprocessor.add_raw_pre_epoch(raw_pre)
         preprocessor.add_raw_post_epoch(raw_post)
 
-    trials = preprocessor.calibrate()
-    amplitudes = dipole_fitter.calibrate(trials)
+    cal_pre, cal_post = preprocessor.calibrate()
+    amplitudes = dipole_fitter.calibrate(cal_post)
     labels = normalizer.calibrate(amplitudes)
-    predictor.calibrate(trials, labels)
+    predictor.calibrate(cal_pre, labels)
 
     # Intervention phase
     print_summary("INTERVENTION PHASE")
@@ -136,16 +136,17 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        trial = preprocessor.preprocess(raw_pre, raw_post)
+        processed_pre = preprocessor.preprocess_pre(raw_pre)
+        processed_post = preprocessor.preprocess_post(raw_post)
 
-        if trial is None:
+        if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
-        amplitude = dipole_fitter.fit_trial(trial)
+        amplitude = dipole_fitter.fit_trial(processed_post)
         label = normalizer.transform(amplitude)
-        probability = predictor.predict(trial)
-        predictor.finetune(trial, label)
+        probability = predictor.predict(processed_pre)
+        predictor.finetune(processed_pre, label)
 
         intervention_labels.append(label)
         predictions.append(probability)
