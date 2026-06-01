@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
 from models.builder import build_model
-from online_preprocessing.calibrator import ProcessedTrial
+from online_preprocessing.preprocessor import ProcessedTrial
 from prime_config import get_pre_epoch_time_range
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 # Model/data constants (pre-stim window from configs/prime.yaml)
 _N_CHANNELS = 60          # len(COMMON_CHANNELS) after preprocessing
-_SR_HZ = 1000.0           # target_sfreq after Calibrator resampling (raw is 5000 Hz)
+_SR_HZ = 1000.0           # target_sfreq after Preprocessor resampling (raw is 5000 Hz)
 _PRE_EPOCH_TMIN, _PRE_EPOCH_TMAX = get_pre_epoch_time_range()
 _N_TIMEPOINTS = round((_PRE_EPOCH_TMAX - _PRE_EPOCH_TMIN) * _SR_HZ) + 1  # include_tmax
 

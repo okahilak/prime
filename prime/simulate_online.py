@@ -38,7 +38,7 @@ mne.set_log_level("ERROR")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
-from online_preprocessing.calibrator import Calibrator
+from online_preprocessing.preprocessor import Preprocessor
 from online_preprocessing.dipole_fitter import DipoleFitter
 from tep_normalizer import TEPNormalizer
 from online_predictor import OnlinePredictor
@@ -94,14 +94,14 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    calibrator = Calibrator(forward_path)
+    preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
-        calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
+        preprocessor.add_raw_trial(trial_loader.get_trial(trial_idx))
 
-    trials = calibrator.calibrate()
+    trials = preprocessor.calibrate()
     amplitudes = dipole_fitter.calibrate(trials)
     labels = normalizer.calibrate(amplitudes)
     predictor.calibrate(trials, labels)
@@ -115,7 +115,7 @@ def main():
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
-        trial = calibrator.preprocess(trial_loader.get_trial(trial_idx))
+        trial = preprocessor.preprocess(trial_loader.get_trial(trial_idx))
 
         if trial is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")

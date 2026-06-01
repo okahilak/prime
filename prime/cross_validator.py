@@ -29,7 +29,7 @@ from datasets import (
 )
 from models.builder import build_model
 from online_predictor import OnlinePredictor, score_predictions
-from online_preprocessing.calibrator import ProcessedTrial
+from online_preprocessing.preprocessor import ProcessedTrial
 from utils import (
     RegressionMetricsTracker,
     filter_args_for_model,

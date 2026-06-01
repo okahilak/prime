@@ -38,7 +38,7 @@ sys.path.insert(0, str(PRIME_DIR))
 sys.path.insert(0, str(PRIME_DIR / "online_preprocessing"))
 
 from online_predictor import OnlinePredictor
-from online_preprocessing.calibrator import Calibrator
+from online_preprocessing.preprocessor import Preprocessor
 from online_preprocessing.dipole_fitter import DipoleFitter
 from tep_normalizer import TEPNormalizer
 
@@ -71,7 +71,7 @@ CHANNEL_NAMES = [
     'T7', 'T8', 'TP7', 'TP8',
 ]
 
-# Event sample window: must cover the full trial range needed by the Calibrator.
+# Event sample window: must cover the full trial range needed by the Preprocessor.
 # ICA needs [-1.1, -0.005], post needs [-0.03, 0.1]. Use the dataset range for safety.
 EVENT_SAMPLE_WINDOW = [-1.3, 0.5998]
 
@@ -94,7 +94,7 @@ class Decider:
         self.is_calibrated = False
 
         # Initialize pipeline components
-        self.calibrator = Calibrator(str(FORWARD_PATH))
+        self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
         self.normalizer = TEPNormalizer()
 
@@ -155,7 +155,7 @@ class Decider:
 
         if not self.is_calibrated:
             # --- Calibration phase ---
-            self.calibrator.add_raw_trial(trial)
+            self.preprocessor.add_raw_trial(trial)
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
@@ -165,7 +165,7 @@ class Decider:
         else:
             # --- Intervention phase ---
             self.trial_count += 1
-            processed = self.calibrator.preprocess(trial)
+            processed = self.preprocessor.preprocess(trial)
 
             if processed is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
@@ -190,8 +190,8 @@ class Decider:
         print("RUNNING CALIBRATION")
         print("=" * 60)
 
-        trials = self.calibrator.calibrate()
-        print(f"  Calibrator done: {len(trials)} trials survived rejection")
+        trials = self.preprocessor.calibrate()
+        print(f"  Preprocessor done: {len(trials)} trials survived rejection")
 
         amplitudes = self.dipole_fitter.calibrate(trials)
         print(f"  Dipole fitter calibrated")

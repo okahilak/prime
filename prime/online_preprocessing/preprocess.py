@@ -9,10 +9,10 @@ import mne
 import numpy as np
 
 try:
-    from .calibrator import Calibrator, ProcessedTrial
+    from .preprocessor import Preprocessor, ProcessedTrial
     from .trial_loader import TrialLoader
 except ImportError:
-    from calibrator import Calibrator, ProcessedTrial
+    from preprocessor import Preprocessor, ProcessedTrial
     from trial_loader import TrialLoader
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
@@ -24,15 +24,15 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(trial, calibrator) -> ProcessedTrial | None:
+def process_single_trial(trial, preprocessor) -> ProcessedTrial | None:
     """Process a single trial. Returns ProcessedTrial or None if rejected."""
-    return calibrator.preprocess(trial)
+    return preprocessor.preprocess(trial)
 
 
 _online_trial_worker_state = {}
 
 
-def _init_online_trial_worker(batch_data, info, tmin, events, calibrator):
+def _init_online_trial_worker(batch_data, info, tmin, events, preprocessor):
     mne.set_log_level("ERROR")
     global _online_trial_worker_state
     _online_trial_worker_state = {
@@ -40,7 +40,7 @@ def _init_online_trial_worker(batch_data, info, tmin, events, calibrator):
         'info': info,
         'tmin': tmin,
         'events': events,
-        'calibrator': calibrator,
+        'preprocessor': preprocessor,
     }
 
 
@@ -49,7 +49,7 @@ def _process_online_trial_worker(trial_idx):
     trial = mne.EpochsArray(
         s['batch_data'][trial_idx:trial_idx + 1], info=s['info'],
         events=s['events'][trial_idx:trial_idx + 1], tmin=s['tmin'], verbose=False)
-    processed = process_single_trial(trial, s['calibrator'])
+    processed = process_single_trial(trial, s['preprocessor'])
     return trial_idx, processed
 
 
@@ -67,16 +67,16 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     print("Appending calibration trials...")
 
-    calibrator = Calibrator(forward_path)
+    preprocessor = Preprocessor(forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
-        calibrator.add_raw_trial(trial_loader.get_trial(trial_idx))
+        preprocessor.add_raw_trial(trial_loader.get_trial(trial_idx))
 
     print("Calibrating...")
 
     start_time = time.time()
-    cal_trials = calibrator.calibrate()
+    cal_trials = preprocessor.calibrate()
 
-    _save_calibration_bundle(calibration_bundle_path, calibrator.calibration_params)
+    _save_calibration_bundle(calibration_bundle_path, preprocessor.calibration_params)
 
     print(f"Used {len(cal_trials)} trials for calibration")
 
@@ -85,7 +85,7 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
 
 
 def _process_and_save_trial_group(
-    epochs_data, events, info, tmin, calibrator, subject_output, subject_id, label
+    epochs_data, events, info, tmin, preprocessor, subject_output, subject_id, label
 ):
     """Batch-process a pre-indexed group of trials and save pre/post epochs to disk."""
     n_trials = epochs_data.shape[0]
@@ -93,7 +93,7 @@ def _process_and_save_trial_group(
     post_list = []
     bad_trials = []
 
-    initargs = (epochs_data, info, tmin, events, calibrator)
+    initargs = (epochs_data, info, tmin, events, preprocessor)
     with ProcessPoolExecutor(
         max_workers=4,
         initializer=_init_online_trial_worker,
@@ -123,19 +123,19 @@ def _run_online_processing_stage(
     start_time = time.time()
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
-    calibrator = Calibrator.from_bundle(calibration_params, forward_path)
+    preprocessor = Preprocessor.from_bundle(calibration_params, forward_path)
     epochs_data = trial_loader._eeg_data
     epochs = trial_loader._epochs
 
     _process_and_save_trial_group(
         epochs_data[:N_TRIALS_CALIBRATE], epochs.events[:N_TRIALS_CALIBRATE],
         epochs.info, epochs.tmin,
-        calibrator, subject_output, subject_id, label='calibration',
+        preprocessor, subject_output, subject_id, label='calibration',
     )
     _process_and_save_trial_group(
         epochs_data[N_TRIALS_CALIBRATE:], epochs.events[N_TRIALS_CALIBRATE:],
         epochs.info, epochs.tmin,
-        calibrator, subject_output, subject_id, label='intervention',
+        preprocessor, subject_output, subject_id, label='intervention',
     )
 
     end_time = time.time()

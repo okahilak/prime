@@ -215,7 +215,7 @@ class DipoleFitter:
                  min_window_size=3, max_window_size=6, window_size_exponent=1.5):
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
 
-		# TODO: Is this necessary? Note that it's not done in the calibrator.
+		# TODO: Is this necessary? Note that it's not done in the preprocessor.
         self._forward = self._forward.pick_channels(COMMON_CHANNELS, ordered=True)
 
         self._min_window_size = min_window_size

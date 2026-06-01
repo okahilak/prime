@@ -1,16 +1,16 @@
 """
-Calibrator: stateful object that accumulates trials, runs calibration, and
+Preprocessor: stateful object that accumulates trials, runs calibration, and
 preprocesses individual trials using the resulting calibration parameters.
 
 Usage
 -----
-    calibrator = Calibrator(cfg, forward)
+    preprocessor = Preprocessor(cfg, forward)
     for trial in incoming_trials:
-        calibrator.add_raw_trial(trial)
+        preprocessor.add_raw_trial(trial)
 
-    cal_trials = calibrator.calibrate()  # list[ProcessedTrial]
+    cal_trials = preprocessor.calibrate()  # list[ProcessedTrial]
 
-    processed = calibrator.preprocess(trial)  # None if rejected
+    processed = preprocessor.preprocess(trial)  # None if rejected
     processed.epoch_pre, processed.epoch_post
 """
 
@@ -37,7 +37,7 @@ try:
         get_raw_post_epoch_time_range,
         get_raw_pre_epoch_time_range,
     )
-    from .utils.ica_calibrator import get_number_of_components, get_ica
+    from .utils.ica_preprocessor import get_number_of_components, get_ica
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
     from .utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
@@ -51,7 +51,7 @@ except ImportError:
         get_raw_post_epoch_time_range,
         get_raw_pre_epoch_time_range,
     )
-    from utils.ica_calibrator import get_number_of_components, get_ica
+    from utils.ica_preprocessor import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
     from utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
@@ -629,9 +629,9 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg):
     return epoch_post
 
 
-# ==================== Calibrator class ====================
+# ==================== Preprocessor class ====================
 
-class Calibrator:
+class Preprocessor:
     """Accumulates raw trials and produces calibration parameters on demand."""
 
     def __init__(self, forward_path):
@@ -733,7 +733,7 @@ class Calibrator:
 
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):
-        """Create a calibrated Calibrator from pre-computed params (e.g. loaded from disk)."""
+        """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
         instance = cls(forward_path)
         instance._calibration_params = calibration_params
         return instance
