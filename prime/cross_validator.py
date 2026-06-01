@@ -435,7 +435,7 @@ class CrossValidator:
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 
         # Wrap numpy epochs into ProcessedTrial objects
-        all_trials = _numpy_epochs_to_trials(epochs, sfreq=1000.0, tmin=self.args.tmin_pre)
+        all_trials = _numpy_epochs_to_trials(epochs, sfreq=1000.0, tmin=self.args.pre_epoch_tmin)
 
         # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
         self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_trials)} trials...")

@@ -31,7 +31,7 @@ class ProcessedTrial:
     epoch_post: mne.EpochsArray
 
 try:
-    from ..prime_config import get_pre_time_range, get_tep_time_range
+    from ..prime_config import get_post_epoch_time_range, get_pre_epoch_time_range
     from .utils.ica_calibrator import get_number_of_components, get_ica
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
@@ -40,7 +40,7 @@ try:
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from prime_config import get_pre_time_range, get_tep_time_range
+    from prime_config import get_post_epoch_time_range, get_pre_epoch_time_range
     from utils.ica_calibrator import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
@@ -50,21 +50,21 @@ except ImportError:
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
-def _validate_pre_stim_window(tmin_pre: float, tmax_pre: float, pre_range: list) -> None:
+def _validate_pre_epoch_window(pre_epoch_tmin: float, pre_epoch_tmax: float, pre_range: list) -> None:
     pre_t0, pre_t1 = pre_range
-    if not (pre_t0 <= tmin_pre and tmax_pre <= pre_t1 and tmin_pre < tmax_pre):
+    if not (pre_t0 <= pre_epoch_tmin and pre_epoch_tmax <= pre_t1 and pre_epoch_tmin < pre_epoch_tmax):
         raise ValueError(
-            f"Pre-stim window [{tmin_pre}, {tmax_pre}] must satisfy "
-            f"{pre_t0} <= tmin_pre < tmax_pre <= {pre_t1} (pre_range)"
+            f"Pre epoch window [{pre_epoch_tmin}, {pre_epoch_tmax}] must satisfy "
+            f"{pre_t0} <= pre_epoch_tmin < pre_epoch_tmax <= {pre_t1} (pre_range)"
         )
 
 
-def _validate_tep_window(tmin_tep: float, tmax_tep: float, post_range: list) -> None:
+def _validate_post_epoch_window(post_epoch_tmin: float, post_epoch_tmax: float, post_range: list) -> None:
     post_t0, post_t1 = post_range
-    if not (post_t0 <= tmin_tep and tmax_tep <= post_t1 and tmin_tep < tmax_tep):
+    if not (post_t0 <= post_epoch_tmin and post_epoch_tmax <= post_t1 and post_epoch_tmin < post_epoch_tmax):
         raise ValueError(
-            f"TEP window [{tmin_tep}, {tmax_tep}] must satisfy "
-            f"{post_t0} <= tmin_tep < tmax_tep <= {post_t1} (post_range)"
+            f"Post epoch window [{post_epoch_tmin}, {post_epoch_tmax}] must satisfy "
+            f"{post_t0} <= post_epoch_tmin < post_epoch_tmax <= {post_t1} (post_range)"
         )
 
 
@@ -599,15 +599,15 @@ class Calibrator:
 
     def __init__(self, forward_path):
         cfg = get_default_config()
-        tmin_pre, tmax_pre = get_pre_time_range()
-        tmin_tep, tmax_tep = get_tep_time_range()
-        _validate_pre_stim_window(tmin_pre, tmax_pre, cfg.pre_range)
-        _validate_tep_window(tmin_tep, tmax_tep, cfg.post_range)
+        pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
+        post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
+        _validate_pre_epoch_window(pre_epoch_tmin, pre_epoch_tmax, cfg.pre_range)
+        _validate_post_epoch_window(post_epoch_tmin, post_epoch_tmax, cfg.post_range)
         self._cfg = cfg
-        self._tmin_pre = tmin_pre
-        self._tmax_pre = tmax_pre
-        self._tmin_tep = tmin_tep
-        self._tmax_tep = tmax_tep
+        self._pre_epoch_tmin = pre_epoch_tmin
+        self._pre_epoch_tmax = pre_epoch_tmax
+        self._post_epoch_tmin = post_epoch_tmin
+        self._post_epoch_tmax = post_epoch_tmax
         self._opts = cfg.to_dicts()
         self._ica_time_range = self._opts['ica_opts']['pre_timerange']
 
@@ -620,10 +620,10 @@ class Calibrator:
 		# TODO: Should we pick the common channels here? Note that it's done in the dipole fitter.
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
-        return epoch_pre.copy().crop(self._tmin_pre, self._tmax_pre, include_tmax=True)
+        return epoch_pre.copy().crop(self._pre_epoch_tmin, self._pre_epoch_tmax, include_tmax=True)
 
     def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
-        return epoch_post.copy().crop(self._tmin_tep, self._tmax_tep, include_tmax=True)
+        return epoch_post.copy().crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
 
     # ------------------------------------------------------------------
     # Public API
