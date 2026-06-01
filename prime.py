@@ -158,6 +158,9 @@ class Decider:
         if self._pre_handled_for_upcoming_event:
             return None
 
+        pre_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
+        print(f"Pre-epoch sha256={pre_checksum}")
+
         self._pre_handled_for_upcoming_event = True
 
         if not self.is_calibrated:
@@ -186,6 +189,9 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+
+        post_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
+        print(f"Post-epoch sha256={post_checksum}")
 
         if not self.is_calibrated:
             with _profile("add_raw_post_epoch"):

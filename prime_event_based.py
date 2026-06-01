@@ -135,6 +135,12 @@ class Decider:
             eeg_buffer, time_offsets, self._raw_post_tmin, self._raw_post_tmax,
         )
 
+        pre_checksum = hashlib.sha256(raw_pre.tobytes()).hexdigest()
+        print(f"Pre-epoch sha256={pre_checksum}")
+        post_checksum = hashlib.sha256(raw_post.tobytes()).hexdigest()
+        print(f"Post-epoch sha256={post_checksum}")
+
+
         if not self.is_calibrated:
             # --- Calibration phase ---
             self.preprocessor.add_raw_pre_epoch(raw_pre)
