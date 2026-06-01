@@ -106,8 +106,7 @@ def main():
 
     raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
     raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
-    info = trial_loader._epochs.info
-    preprocessor = Preprocessor(forward_path, info)
+    preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()
 

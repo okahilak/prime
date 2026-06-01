@@ -4,7 +4,7 @@ preprocesses individual trials using the resulting calibration parameters.
 
 Usage
 -----
-    preprocessor = Preprocessor(forward_path, info)
+    preprocessor = Preprocessor(forward_path)
     preprocessor.add_raw_pre_epoch(raw_pre)   # (n_samples, n_channels)
     preprocessor.add_raw_post_epoch(raw_post)
 
@@ -86,6 +86,19 @@ def _require_info_sfreq(info: mne.Info, sfreq: float) -> None:
         raise ValueError(
             f"info['sfreq'] must be {sfreq} (configs/prime.yaml), got {info['sfreq']}"
         )
+
+
+def _mne_info_from_forward(forward: mne.Forward) -> mne.Info:
+    raw_sfreq = get_raw_sfreq()
+    montage = mne.channels.make_standard_montage('standard_1005')
+    info = mne.create_info(
+        ch_names=forward.ch_names,
+        sfreq=raw_sfreq,
+        ch_types='eeg',
+    )
+    info.set_montage(montage)
+    _require_info_sfreq(info, raw_sfreq)
+    return info
 
 
 def _validate_post_epoch_window(
@@ -714,10 +727,11 @@ def preprocess_post_trial(epoch_post, calibration_params, cfg):
 class Preprocessor:
     """Accumulates raw trials and produces calibration parameters on demand."""
 
-    def __init__(self, forward_path, info: mne.Info):
+    def __init__(self, forward_path):
         cfg = get_default_config()
         raw_sfreq = get_raw_sfreq()
-        _require_info_sfreq(info, raw_sfreq)
+        self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
+        info = _mne_info_from_forward(self._forward)
         raw_pre_epoch_tmin, raw_pre_epoch_tmax = get_raw_pre_epoch_time_range()
         raw_post_epoch_tmin, raw_post_epoch_tmax = get_raw_post_epoch_time_range()
         pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
@@ -768,9 +782,6 @@ class Preprocessor:
         self._calibration_params = None
         self._pending_pre = None
         self._awaiting_post = False
-
-        self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
-        # TODO: Should we pick the common channels here? Note that it's done in the dipole fitter.
 
     def _validate_raw_pre_shape(self, data: np.ndarray) -> None:
         data = np.asarray(data)
@@ -878,9 +889,9 @@ class Preprocessor:
         return trials
 
     @classmethod
-    def from_bundle(cls, calibration_params, forward_path, info: mne.Info):
+    def from_bundle(cls, calibration_params, forward_path):
         """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
-        instance = cls(forward_path, info)
+        instance = cls(forward_path)
         instance._calibration_params = calibration_params
         return instance
 

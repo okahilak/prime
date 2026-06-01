@@ -40,7 +40,7 @@ sys.path.insert(0, str(PRIME_DIR / "online_preprocessing"))
 from online_predictor import OnlinePredictor
 from online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from online_preprocessing.dipole_fitter import DipoleFitter
-from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range, get_raw_sfreq
+from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
 from tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -60,18 +60,6 @@ GLOBAL_BACKROTATION_PATH = PRIME_DIR / "results" / "train" / "global_backrotatio
 
 N_CALIBRATION_TRIALS = 125
 SEED = 42
-
-# Channel names (must match the dataset and forward solution)
-CHANNEL_NAMES = [
-    'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
-    'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6', 'CPz', 'Cz',
-    'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8',
-    'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6', 'FT7', 'FT8',
-    'Fp1', 'Fp2', 'Fpz', 'Fz', 'Iz', 'O1', 'O2', 'Oz',
-    'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8',
-    'PO3', 'PO4', 'PO7', 'PO8', 'POz', 'Pz',
-    'T7', 'T8', 'TP7', 'TP8',
-]
 
 # Event sample window: must cover the full trial range needed by the Preprocessor.
 # ICA needs [-1.1, -0.005], post needs [-0.03, 0.1]. Use the dataset range for safety.
@@ -95,19 +83,10 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        raw_sfreq = get_raw_sfreq()
-        montage = mne.channels.make_standard_montage('standard_1005')
-        self._mne_info = mne.create_info(
-            ch_names=CHANNEL_NAMES[:num_eeg_channels],
-            sfreq=raw_sfreq,
-            ch_types='eeg',
-        )
-        self._mne_info.set_montage(montage)
-
         self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
         self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
 
-        self.preprocessor = Preprocessor(str(FORWARD_PATH), self._mne_info)
+        self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
         self.normalizer = TEPNormalizer()
 

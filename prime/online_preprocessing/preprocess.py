@@ -80,8 +80,7 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
 
     raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
     raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
-    info = trial_loader._epochs.info
-    preprocessor = Preprocessor(forward_path, info)
+    preprocessor = Preprocessor(forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
         raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
             trial_loader.get_trial(trial_idx),
@@ -149,9 +148,7 @@ def _run_online_processing_stage(
     epochs = trial_loader._epochs
     raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
     raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
-    preprocessor = Preprocessor.from_bundle(
-        calibration_params, forward_path, epochs.info,
-    )
+    preprocessor = Preprocessor.from_bundle(calibration_params, forward_path)
     epochs_data = trial_loader._eeg_data
 
     _process_and_save_trial_group(
