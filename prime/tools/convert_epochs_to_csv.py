@@ -6,10 +6,10 @@ epochs at their original positions and filling gaps with reproducible random
 noise. The output is a JSON metadata file, a CSV data file, and an event file.
 
 Usage:
-    python convert_epochs_to_csv.py <subject_id> [--output-dir <dir>]
+    python convert_epochs_to_csv.py <subject_id> [--short]
 
 Example:
-    python convert_epochs_to_csv.py sub-021 --output-dir data/simulator
+    python convert_epochs_to_csv.py sub-021
 """
 
 import argparse
@@ -176,11 +176,6 @@ def main():
     )
     parser.add_argument("subject_id", help="Subject ID (e.g., sub-021)")
     parser.add_argument(
-        "--output-dir",
-        default=None,
-        help="Output directory (default: data/simulator/<subject_id>)",
-    )
-    parser.add_argument(
         "--short",
         action="store_true",
         help="Only use the first 200 trials; output files are named <subject_id>-short_*",
@@ -189,10 +184,7 @@ def main():
 
     mne.set_log_level("WARNING")
 
-    if args.output_dir is None:
-        output_dir = DATA_ROOT / "simulator" / args.subject_id
-    else:
-        output_dir = Path(args.output_dir)
+    output_dir = DATA_ROOT / "simulator" / args.subject_id
 
     print(f"Loading epochs for {args.subject_id}...")
     epochs = load_and_prepare_epochs(args.subject_id)
