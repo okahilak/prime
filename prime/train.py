@@ -11,6 +11,13 @@ This script handles:
 - Aggregating and reporting performance metrics.
 """
 
+# Force single-threaded BLAS/LAPACK BEFORE importing numpy/scipy/torch.
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 # Core Python libraries
 import argparse
 import gc

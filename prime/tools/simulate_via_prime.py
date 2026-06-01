@@ -13,6 +13,13 @@ Examples:
     python simulation/simulate_via_prime.py --n-trials 130  # 125 calib + 5 intervention
 """
 
+# Force single-threaded BLAS/LAPACK BEFORE importing numpy/scipy/torch.
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import argparse
 import json
 import sys
