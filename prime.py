@@ -158,30 +158,25 @@ class Decider:
         if self._pre_handled_for_upcoming_event:
             return None
 
-        t0 = time.perf_counter()
-        try:
-            self._pre_handled_for_upcoming_event = True
-            raw_pre = eeg_buffer
+        self._pre_handled_for_upcoming_event = True
 
-            if not self.is_calibrated:
-                with _profile("add_raw_pre_epoch"):
-                    self.preprocessor.add_raw_pre_epoch(raw_pre)
-                print(f"Calibration pre epoch queued for trial {self.trial_count + 1}/{N_CALIBRATION_TRIALS}")
-                return None
-
-            with _profile("preprocess_pre"):
-                processed_pre = self.preprocessor.preprocess_pre(raw_pre)
-            self._pending_processed_pre = processed_pre
-            if processed_pre is None:
-                print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
-                return None
-
-            with _profile("predict"):
-                probability = self.predictor.predict(processed_pre)
-            print(f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)")
+        if not self.is_calibrated:
+            with _profile("add_raw_pre_epoch"):
+                self.preprocessor.add_raw_pre_epoch(eeg_buffer)
+            print(f"Calibration pre epoch queued for trial {self.trial_count + 1}/{N_CALIBRATION_TRIALS}")
             return None
-        finally:
-            print(f"[profile] process_periodic total: {(time.perf_counter() - t0) * 1000:.1f}ms")
+
+        with _profile("preprocess_pre"):
+            processed_pre = self.preprocessor.preprocess_pre(eeg_buffer)
+        self._pending_processed_pre = processed_pre
+        if processed_pre is None:
+            print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
+            return None
+
+        with _profile("predict"):
+            probability = self.predictor.predict(processed_pre)
+        print(f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)")
+        return None
 
     # ==================================================================
     # Event processing (post-stim at TMS pulse)
@@ -191,42 +186,37 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        t0 = time.perf_counter()
-        try:
-            raw_post = eeg_buffer
 
-            if not self.is_calibrated:
-                with _profile("add_raw_post_epoch"):
-                    self.preprocessor.add_raw_post_epoch(raw_post)
-                self.trial_count += 1
-                print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
+        if not self.is_calibrated:
+            with _profile("add_raw_post_epoch"):
+                self.preprocessor.add_raw_post_epoch(eeg_buffer)
+            self.trial_count += 1
+            print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
-                if self.trial_count >= N_CALIBRATION_TRIALS:
-                    with _profile("run_calibration"):
-                        self._run_calibration()
+            if self.trial_count >= N_CALIBRATION_TRIALS:
+                with _profile("run_calibration"):
+                    self._run_calibration()
+        else:
+            self.trial_count += 1
+            processed_pre = self._pending_processed_pre
+            self._pending_processed_pre = None
+
+            with _profile("preprocess_post"):
+                processed_post = self.preprocessor.preprocess_post(eeg_buffer)
+            if processed_pre is None or processed_post is None:
+                print(f"Trial {self.trial_count}: REJECTED by preprocessing")
             else:
-                self.trial_count += 1
-                processed_pre = self._pending_processed_pre
-                self._pending_processed_pre = None
+                with _profile("fit_trial"):
+                    amplitude = self.dipole_fitter.fit_trial(processed_post)
+                with _profile("normalize"):
+                    label = self.normalizer.transform(amplitude)
+                with _profile("finetune"):
+                    self.predictor.finetune(processed_pre, label)
+                print(f"Trial {self.trial_count}: label={label:.6f}")
 
-                with _profile("preprocess_post"):
-                    processed_post = self.preprocessor.preprocess_post(raw_post)
-                if processed_pre is None or processed_post is None:
-                    print(f"Trial {self.trial_count}: REJECTED by preprocessing")
-                else:
-                    with _profile("fit_trial"):
-                        amplitude = self.dipole_fitter.fit_trial(processed_post)
-                    with _profile("normalize"):
-                        label = self.normalizer.transform(amplitude)
-                    with _profile("finetune"):
-                        self.predictor.finetune(processed_pre, label)
-                    print(f"Trial {self.trial_count}: label={label:.6f}")
-
-            self._next_event_idx += 1
-            self._pre_handled_for_upcoming_event = False
-            return None
-        finally:
-            print(f"[profile] process_event total: {(time.perf_counter() - t0) * 1000:.1f}ms")
+        self._next_event_idx += 1
+        self._pre_handled_for_upcoming_event = False
+        return None
 
     # ==================================================================
     # Calibration
