@@ -69,7 +69,7 @@ EVENT_SAMPLE_WINDOW = [-1.3, 0.5998]
 class Decider:
     def __init__(
         self,
-        subject_id: str,
+        subject_id: int,
         num_eeg_channels: int,
         num_emg_channels: int,
         sampling_frequency: int,

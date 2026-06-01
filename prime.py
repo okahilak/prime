@@ -77,7 +77,7 @@ def _profile(label: str) -> Iterator[None]:
 class Decider:
     def __init__(
         self,
-        subject_id: str,
+        subject_id: int,
         num_eeg_channels: int,
         num_emg_channels: int,
         sampling_frequency: int,
@@ -93,7 +93,7 @@ class Decider:
         self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
         self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
 
-        subject_id_str = f"sub-{int(subject_id[1:]):03d}"
+        subject_id_str = f"sub-{subject_id:03d}"
 
         events_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
         self._event_times = np.loadtxt(events_path, dtype=np.float64)
