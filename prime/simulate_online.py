@@ -38,7 +38,8 @@ mne.set_log_level("ERROR")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
-from online_preprocessing.preprocessor import Preprocessor
+from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
 from online_preprocessing.dipole_fitter import DipoleFitter
 from tep_normalizer import TEPNormalizer
 from online_predictor import OnlinePredictor
@@ -94,12 +95,22 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    preprocessor = Preprocessor(forward_path)
+    raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
+    raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
+    info = trial_loader._epochs.info
+    source_sfreq = info['sfreq']
+
+    preprocessor = Preprocessor(forward_path, source_sfreq, info)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()
 
     for trial_idx in range(N_CALIBRATION_TRIALS):
-        preprocessor.add_raw_trial(trial_loader.get_trial(trial_idx))
+        raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+            trial_loader.get_trial(trial_idx),
+            raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+        )
+        preprocessor.add_raw_pre_epoch(raw_pre)
+        preprocessor.add_raw_post_epoch(raw_post)
 
     trials = preprocessor.calibrate()
     amplitudes = dipole_fitter.calibrate(trials)
@@ -115,7 +126,11 @@ def main():
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
-        trial = preprocessor.preprocess(trial_loader.get_trial(trial_idx))
+        raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+            trial_loader.get_trial(trial_idx),
+            raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+        )
+        trial = preprocessor.preprocess(raw_pre, raw_post)
 
         if trial is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")

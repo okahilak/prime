@@ -41,7 +41,8 @@ optimizer_type_finetune: "AdamW"
 weight_decay_finetune: 0.0
 
 # --- Raw pre-stim epoch crop (calibration / online preprocessing) ---
-raw_pre_epoch_tmin: -0.505
+# Must cover all pre-stim preprocessing steps (ICA, channel reject, filtering, etc.).
+raw_pre_epoch_tmin: -1.1
 raw_pre_epoch_tmax: -0.005
 
 # --- Raw post-stim epoch crop (calibration / online preprocessing) ---

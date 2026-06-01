@@ -9,10 +9,12 @@ import mne
 import numpy as np
 
 try:
-    from .preprocessor import Preprocessor, ProcessedTrial
+    from ..prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+    from .preprocessor import Preprocessor, ProcessedTrial, crop_mne_trial_to_raw_epochs
     from .trial_loader import TrialLoader
 except ImportError:
-    from preprocessor import Preprocessor, ProcessedTrial
+    from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+    from preprocessor import Preprocessor, ProcessedTrial, crop_mne_trial_to_raw_epochs
     from trial_loader import TrialLoader
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
@@ -24,15 +26,18 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
-def process_single_trial(trial, preprocessor) -> ProcessedTrial | None:
+def process_single_trial(raw_pre, raw_post, preprocessor) -> ProcessedTrial | None:
     """Process a single trial. Returns ProcessedTrial or None if rejected."""
-    return preprocessor.preprocess(trial)
+    return preprocessor.preprocess(raw_pre, raw_post)
 
 
 _online_trial_worker_state = {}
 
 
-def _init_online_trial_worker(batch_data, info, tmin, events, preprocessor):
+def _init_online_trial_worker(
+    batch_data, info, tmin, events, preprocessor,
+    raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+):
     mne.set_log_level("ERROR")
     global _online_trial_worker_state
     _online_trial_worker_state = {
@@ -41,6 +46,10 @@ def _init_online_trial_worker(batch_data, info, tmin, events, preprocessor):
         'tmin': tmin,
         'events': events,
         'preprocessor': preprocessor,
+        'raw_pre_tmin': raw_pre_tmin,
+        'raw_pre_tmax': raw_pre_tmax,
+        'raw_post_tmin': raw_post_tmin,
+        'raw_post_tmax': raw_post_tmax,
     }
 
 
@@ -49,7 +58,10 @@ def _process_online_trial_worker(trial_idx):
     trial = mne.EpochsArray(
         s['batch_data'][trial_idx:trial_idx + 1], info=s['info'],
         events=s['events'][trial_idx:trial_idx + 1], tmin=s['tmin'], verbose=False)
-    processed = process_single_trial(trial, s['preprocessor'])
+    raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+        trial, s['raw_pre_tmin'], s['raw_pre_tmax'], s['raw_post_tmin'], s['raw_post_tmax'],
+    )
+    processed = process_single_trial(raw_pre, raw_post, s['preprocessor'])
     return trial_idx, processed
 
 
@@ -67,9 +79,18 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     print("Appending calibration trials...")
 
-    preprocessor = Preprocessor(forward_path)
+    raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
+    raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
+    info = trial_loader._epochs.info
+    source_sfreq = info['sfreq']
+    preprocessor = Preprocessor(forward_path, source_sfreq, info)
     for trial_idx in range(N_TRIALS_CALIBRATE):
-        preprocessor.add_raw_trial(trial_loader.get_trial(trial_idx))
+        raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+            trial_loader.get_trial(trial_idx),
+            raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+        )
+        preprocessor.add_raw_pre_epoch(raw_pre)
+        preprocessor.add_raw_post_epoch(raw_post)
 
     print("Calibrating...")
 
@@ -85,7 +106,8 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
 
 
 def _process_and_save_trial_group(
-    epochs_data, events, info, tmin, preprocessor, subject_output, subject_id, label
+    epochs_data, events, info, tmin, preprocessor, subject_output, subject_id, label,
+    raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
 ):
     """Batch-process a pre-indexed group of trials and save pre/post epochs to disk."""
     n_trials = epochs_data.shape[0]
@@ -93,7 +115,10 @@ def _process_and_save_trial_group(
     post_list = []
     bad_trials = []
 
-    initargs = (epochs_data, info, tmin, events, preprocessor)
+    initargs = (
+        epochs_data, info, tmin, events, preprocessor,
+        raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+    )
     with ProcessPoolExecutor(
         max_workers=4,
         initializer=_init_online_trial_worker,
@@ -123,19 +148,25 @@ def _run_online_processing_stage(
     start_time = time.time()
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
-    preprocessor = Preprocessor.from_bundle(calibration_params, forward_path)
-    epochs_data = trial_loader._eeg_data
     epochs = trial_loader._epochs
+    raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
+    raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
+    preprocessor = Preprocessor.from_bundle(
+        calibration_params, forward_path, epochs.info['sfreq'], epochs.info,
+    )
+    epochs_data = trial_loader._eeg_data
 
     _process_and_save_trial_group(
         epochs_data[:N_TRIALS_CALIBRATE], epochs.events[:N_TRIALS_CALIBRATE],
         epochs.info, epochs.tmin,
         preprocessor, subject_output, subject_id, label='calibration',
+        raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
     )
     _process_and_save_trial_group(
         epochs_data[N_TRIALS_CALIBRATE:], epochs.events[N_TRIALS_CALIBRATE:],
         epochs.info, epochs.tmin,
         preprocessor, subject_output, subject_id, label='intervention',
+        raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
     )
 
     end_time = time.time()

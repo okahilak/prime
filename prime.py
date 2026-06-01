@@ -38,8 +38,9 @@ sys.path.insert(0, str(PRIME_DIR))
 sys.path.insert(0, str(PRIME_DIR / "online_preprocessing"))
 
 from online_predictor import OnlinePredictor
-from online_preprocessing.preprocessor import Preprocessor
+from online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from online_preprocessing.dipole_fitter import DipoleFitter
+from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
 from tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -93,8 +94,20 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        # Initialize pipeline components
-        self.preprocessor = Preprocessor(str(FORWARD_PATH))
+        montage = mne.channels.make_standard_montage('standard_1005')
+        self._mne_info = mne.create_info(
+            ch_names=CHANNEL_NAMES[:num_eeg_channels],
+            sfreq=sampling_frequency,
+            ch_types='eeg',
+        )
+        self._mne_info.set_montage(montage)
+
+        self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
+        self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
+
+        self.preprocessor = Preprocessor(
+            str(FORWARD_PATH), sampling_frequency, self._mne_info,
+        )
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
         self.normalizer = TEPNormalizer()
 
@@ -104,15 +117,6 @@ class Decider:
             model_path=str(PRETRAINED_MODEL_PATH),
             seed=SEED,
         )
-
-        # Create MNE info for converting buffers to EpochsArray
-        montage = mne.channels.make_standard_montage('standard_1005')
-        self._mne_info = mne.create_info(
-            ch_names=CHANNEL_NAMES[:num_eeg_channels],
-            sfreq=sampling_frequency,
-            ch_types='eeg',
-        )
-        self._mne_info.set_montage(montage)
 
         print(f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
               f"eeg={num_eeg_channels}  emg={num_emg_channels}")
@@ -150,12 +154,17 @@ class Decider:
         eeg_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
         print(f"\nProcessing trial {self.trial_count + 1}  buffer shape={eeg_buffer.shape}  sha256={eeg_checksum}")
 
-        # Convert the raw EEG buffer into an MNE EpochsArray
-        trial = self._buffer_to_epochs(eeg_buffer, time_offsets)
+        raw_pre = crop_eeg_buffer(
+            eeg_buffer, time_offsets, self._raw_pre_tmin, self._raw_pre_tmax,
+        )
+        raw_post = crop_eeg_buffer(
+            eeg_buffer, time_offsets, self._raw_post_tmin, self._raw_post_tmax,
+        )
 
         if not self.is_calibrated:
             # --- Calibration phase ---
-            self.preprocessor.add_raw_trial(trial)
+            self.preprocessor.add_raw_pre_epoch(raw_pre)
+            self.preprocessor.add_raw_post_epoch(raw_post)
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
@@ -165,7 +174,7 @@ class Decider:
         else:
             # --- Intervention phase ---
             self.trial_count += 1
-            processed = self.preprocessor.preprocess(trial)
+            processed = self.preprocessor.preprocess(raw_pre, raw_post)
 
             if processed is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
@@ -207,34 +216,3 @@ class Decider:
         print("CALIBRATION COMPLETE")
         print("=" * 60 + "\n")
 
-    # ==================================================================
-    # Helpers
-    # ==================================================================
-
-    def _buffer_to_epochs(self, eeg_buffer: np.ndarray, time_offsets: np.ndarray) -> mne.EpochsArray:
-        """Convert a NeuroSimo EEG buffer to an MNE EpochsArray.
-
-        Parameters
-        ----------
-        eeg_buffer : np.ndarray, shape (n_samples, n_channels)
-        time_offsets : np.ndarray, shape (n_samples,)
-            Time in seconds relative to the event (0 = event time).
-
-        Returns
-        -------
-        mne.EpochsArray with shape (1, n_channels, n_samples) and correct tmin.
-        """
-        # eeg_buffer: (n_samples, n_channels) -> (1, n_channels, n_samples)
-        data = eeg_buffer.T[np.newaxis, :, :]
-        tmin = float(time_offsets[0])
-
-        # Create a dummy event at sample 0
-        events = np.array([[0, 0, 1]])
-
-        return mne.EpochsArray(
-            data,
-            info=self._mne_info,
-            events=events,
-            tmin=tmin,
-            verbose=False,
-        )
