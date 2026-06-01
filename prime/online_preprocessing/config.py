@@ -117,7 +117,6 @@ class PreprocConfig:
     filter_opts: FilterOpts
 
     # General
-    target_sfreq: float
     use_ica_on_pre: bool
 
     def to_dicts(self):
@@ -255,6 +254,5 @@ def get_default_config() -> PreprocConfig:
             ),
         ),
         filter_opts=FilterOpts(cutoff=[2, 47], btype='bandpass', order=2, pad_time=0.1),
-        target_sfreq=1000,
         use_ica_on_pre=False,
     )

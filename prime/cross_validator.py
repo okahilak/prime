@@ -30,6 +30,7 @@ from datasets import (
 from models.builder import build_model
 from online_predictor import OnlinePredictor, score_predictions
 from online_preprocessing.preprocessor import ProcessedTrial
+from prime_config import get_processed_sfreq
 from utils import (
     RegressionMetricsTracker,
     filter_args_for_model,
@@ -435,7 +436,9 @@ class CrossValidator:
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 
         # Wrap numpy epochs into ProcessedTrial objects
-        all_trials = _numpy_epochs_to_trials(epochs, sfreq=1000.0, tmin=self.args.pre_epoch_tmin)
+        all_trials = _numpy_epochs_to_trials(
+            epochs, sfreq=get_processed_sfreq(), tmin=self.args.pre_epoch_tmin,
+        )
 
         # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
         self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_trials)} trials...")

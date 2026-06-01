@@ -40,7 +40,7 @@ sys.path.insert(0, str(PRIME_DIR / "online_preprocessing"))
 from online_predictor import OnlinePredictor
 from online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from online_preprocessing.dipole_fitter import DipoleFitter
-from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range, get_raw_sfreq
 from tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -95,10 +95,11 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
+        raw_sfreq = get_raw_sfreq()
         montage = mne.channels.make_standard_montage('standard_1005')
         self._mne_info = mne.create_info(
             ch_names=CHANNEL_NAMES[:num_eeg_channels],
-            sfreq=sampling_frequency,
+            sfreq=raw_sfreq,
             ch_types='eeg',
         )
         self._mne_info.set_montage(montage)
@@ -106,9 +107,7 @@ class Decider:
         self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
         self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
 
-        self.preprocessor = Preprocessor(
-            str(FORWARD_PATH), sampling_frequency, self._mne_info,
-        )
+        self.preprocessor = Preprocessor(str(FORWARD_PATH), self._mne_info)
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
         self.normalizer = TEPNormalizer()
 

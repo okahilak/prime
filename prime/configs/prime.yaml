@@ -40,6 +40,10 @@ lr_finetune: 0.0001
 optimizer_type_finetune: "AdamW"
 weight_decay_finetune: 0.0
 
+# --- Sampling rates (Hz) ---
+raw_sfreq: 5000        # incoming EEG from the acquisition pipeline
+processed_sfreq: 1000  # after online preprocessing resampling (model input)
+
 # --- Raw pre-stim epoch crop (calibration / online preprocessing) ---
 # Must cover all pre-stim preprocessing steps (ICA, channel reject, filtering, etc.).
 raw_pre_epoch_tmin: -1.1

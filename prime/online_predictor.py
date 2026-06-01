@@ -21,16 +21,16 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from models.builder import build_model
 from online_preprocessing.preprocessor import ProcessedTrial
-from prime_config import get_pre_epoch_time_range
+from prime_config import epoch_n_times, get_pre_epoch_time_range, get_processed_sfreq
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
 
 # Model/data constants (pre-stim window from configs/prime.yaml)
 _N_CHANNELS = 60          # len(COMMON_CHANNELS) after preprocessing
-_SR_HZ = 1000.0           # target_sfreq after Preprocessor resampling (raw is 5000 Hz)
+_PROCESSED_SFREQ = get_processed_sfreq()
 _PRE_EPOCH_TMIN, _PRE_EPOCH_TMAX = get_pre_epoch_time_range()
-_N_TIMEPOINTS = round((_PRE_EPOCH_TMAX - _PRE_EPOCH_TMIN) * _SR_HZ) + 1  # include_tmax
+_N_TIMEPOINTS = epoch_n_times(_PRE_EPOCH_TMIN, _PRE_EPOCH_TMAX, _PROCESSED_SFREQ)
 
 _DEFAULT_ARGS = OmegaConf.create({
     "pre_epoch_tmin": _PRE_EPOCH_TMIN,
@@ -162,7 +162,7 @@ class OnlinePredictor:
             model_specific_args={},
         )
         self.model = TTAWrapper(
-            base_model, self.args, sr_hz=_SR_HZ,
+            base_model, self.args, sr_hz=_PROCESSED_SFREQ,
             global_backrotation=global_backrotation,
         ).to(self.device)
 
