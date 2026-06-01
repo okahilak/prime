@@ -128,11 +128,6 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         """Process a trial event. Mirrors simulate_online.py trial-by-trial logic."""
 
-        # Buffer size print
-        n_samples, n_channels = eeg_buffer.shape
-        eeg_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
-        print(f"\nProcessing trial {self.trial_count + 1}  buffer shape={eeg_buffer.shape}  sha256={eeg_checksum}")
-
         raw_pre = crop_eeg_buffer(
             eeg_buffer, time_offsets, self._raw_pre_tmin, self._raw_pre_tmax,
         )

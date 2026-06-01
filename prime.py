@@ -16,6 +16,7 @@ Requires:
 See simulate_online.py for the offline simulation equivalent.
 """
 
+import hashlib
 import sys
 import warnings
 from pathlib import Path
