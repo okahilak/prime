@@ -48,10 +48,11 @@ from tep_normalizer import TEPNormalizer
 # ---------------------------------------------------------------------------
 
 PRIME_DIR = Path(__file__).parent / "prime"
+DATA_ROOT = Path(__file__).parent / "data"
 
-FORWARD_PATH = PRIME_DIR / "fsaverage" / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = PRIME_DIR / "classifier" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = PRIME_DIR / "classifier" / "global_backrotation.npy"
+FORWARD_PATH = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
+PRETRAINED_MODEL_PATH = PRIME_DIR / "results" / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = PRIME_DIR / "results" / "train" / "global_backrotation.npy"
 
 # ---------------------------------------------------------------------------
 # Protocol parameters
