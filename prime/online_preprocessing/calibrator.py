@@ -31,7 +31,12 @@ class ProcessedTrial:
     epoch_post: mne.EpochsArray
 
 try:
-    from ..prime_config import get_post_epoch_time_range, get_pre_epoch_time_range
+    from ..prime_config import (
+        get_post_epoch_time_range,
+        get_pre_epoch_time_range,
+        get_raw_post_epoch_time_range,
+        get_raw_pre_epoch_time_range,
+    )
     from .utils.ica_calibrator import get_number_of_components, get_ica
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
@@ -40,7 +45,12 @@ try:
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from prime_config import get_post_epoch_time_range, get_pre_epoch_time_range
+    from prime_config import (
+        get_post_epoch_time_range,
+        get_pre_epoch_time_range,
+        get_raw_post_epoch_time_range,
+        get_raw_pre_epoch_time_range,
+    )
     from utils.ica_calibrator import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
@@ -50,21 +60,37 @@ except ImportError:
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
-def _validate_pre_epoch_window(pre_epoch_tmin: float, pre_epoch_tmax: float, pre_range: list) -> None:
-    pre_t0, pre_t1 = pre_range
-    if not (pre_t0 <= pre_epoch_tmin and pre_epoch_tmax <= pre_t1 and pre_epoch_tmin < pre_epoch_tmax):
+def _validate_pre_epoch_window(
+    pre_epoch_tmin: float,
+    pre_epoch_tmax: float,
+    raw_pre_epoch_tmin: float,
+    raw_pre_epoch_tmax: float,
+) -> None:
+    if not (
+        raw_pre_epoch_tmin <= pre_epoch_tmin
+        and pre_epoch_tmax <= raw_pre_epoch_tmax
+        and pre_epoch_tmin < pre_epoch_tmax
+    ):
         raise ValueError(
             f"Pre epoch window [{pre_epoch_tmin}, {pre_epoch_tmax}] must satisfy "
-            f"{pre_t0} <= pre_epoch_tmin < pre_epoch_tmax <= {pre_t1} (pre_range)"
+            f"{raw_pre_epoch_tmin} <= pre_epoch_tmin < pre_epoch_tmax <= {raw_pre_epoch_tmax}"
         )
 
 
-def _validate_post_epoch_window(post_epoch_tmin: float, post_epoch_tmax: float, post_range: list) -> None:
-    post_t0, post_t1 = post_range
-    if not (post_t0 <= post_epoch_tmin and post_epoch_tmax <= post_t1 and post_epoch_tmin < post_epoch_tmax):
+def _validate_post_epoch_window(
+    post_epoch_tmin: float,
+    post_epoch_tmax: float,
+    raw_post_epoch_tmin: float,
+    raw_post_epoch_tmax: float,
+) -> None:
+    if not (
+        raw_post_epoch_tmin <= post_epoch_tmin
+        and post_epoch_tmax <= raw_post_epoch_tmax
+        and post_epoch_tmin < post_epoch_tmax
+    ):
         raise ValueError(
             f"Post epoch window [{post_epoch_tmin}, {post_epoch_tmax}] must satisfy "
-            f"{post_t0} <= post_epoch_tmin < post_epoch_tmax <= {post_t1} (post_range)"
+            f"{raw_post_epoch_tmin} <= post_epoch_tmin < post_epoch_tmax <= {raw_post_epoch_tmax}"
         )
 
 
@@ -315,11 +341,22 @@ def _drop_bad_trials(epoch_list, bad_indices):
 
 # ==================== Calibration pipeline ====================
 
-def append_calibration_trial(epochs_pre, epochs_pre_ica, epochs_post, trial, cfg, ica_time_range):
+def append_calibration_trial(
+    epochs_pre,
+    epochs_pre_ica,
+    epochs_post,
+    trial,
+    cfg,
+    ica_time_range,
+    raw_pre_epoch_tmin,
+    raw_pre_epoch_tmax,
+    raw_post_epoch_tmin,
+    raw_post_epoch_tmax,
+):
     """Append one raw trial (cropped and resampled) to calibration epoch structs."""
-    trial_pre = trial.copy().crop(cfg.pre_range[0], cfg.pre_range[1])
+    trial_pre = trial.copy().crop(raw_pre_epoch_tmin, raw_pre_epoch_tmax)
     trial_pre_ica = trial.copy().crop(ica_time_range[0], ica_time_range[1])
-    trial_post = trial.copy().crop(cfg.post_range[0], cfg.post_range[1])
+    trial_post = trial.copy().crop(raw_post_epoch_tmin, raw_post_epoch_tmax)
     for segment in (trial_pre, trial_pre_ica, trial_post):
         segment.resample(cfg.target_sfreq, method='polyphase')
     if epochs_pre is None:
@@ -599,11 +636,21 @@ class Calibrator:
 
     def __init__(self, forward_path):
         cfg = get_default_config()
+        raw_pre_epoch_tmin, raw_pre_epoch_tmax = get_raw_pre_epoch_time_range()
+        raw_post_epoch_tmin, raw_post_epoch_tmax = get_raw_post_epoch_time_range()
         pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
         post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
-        _validate_pre_epoch_window(pre_epoch_tmin, pre_epoch_tmax, cfg.pre_range)
-        _validate_post_epoch_window(post_epoch_tmin, post_epoch_tmax, cfg.post_range)
+        _validate_pre_epoch_window(
+            pre_epoch_tmin, pre_epoch_tmax, raw_pre_epoch_tmin, raw_pre_epoch_tmax,
+        )
+        _validate_post_epoch_window(
+            post_epoch_tmin, post_epoch_tmax, raw_post_epoch_tmin, raw_post_epoch_tmax,
+        )
         self._cfg = cfg
+        self._raw_pre_epoch_tmin = raw_pre_epoch_tmin
+        self._raw_pre_epoch_tmax = raw_pre_epoch_tmax
+        self._raw_post_epoch_tmin = raw_post_epoch_tmin
+        self._raw_post_epoch_tmax = raw_post_epoch_tmax
         self._pre_epoch_tmin = pre_epoch_tmin
         self._pre_epoch_tmax = pre_epoch_tmax
         self._post_epoch_tmin = post_epoch_tmin
@@ -640,6 +687,8 @@ class Calibrator:
         self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_trial(
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
             raw_trial, self._cfg, self._ica_time_range,
+            self._raw_pre_epoch_tmin, self._raw_pre_epoch_tmax,
+            self._raw_post_epoch_tmin, self._raw_post_epoch_tmax,
         )
 
     def calibrate(self):
@@ -708,14 +757,14 @@ class Calibrator:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        epoch_pre = trial.copy().crop(self._cfg.pre_range[0], self._cfg.pre_range[1])
+        epoch_pre = trial.copy().crop(self._raw_pre_epoch_tmin, self._raw_pre_epoch_tmax)
         epoch_pre.resample(self._cfg.target_sfreq, method='polyphase')
         result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
         result_pre = self._crop_pre_to_model_window(result_pre)
 
-        epoch_post = trial.copy().crop(self._cfg.post_range[0], self._cfg.post_range[1])
+        epoch_post = trial.copy().crop(self._raw_post_epoch_tmin, self._raw_post_epoch_tmax)
         epoch_post.resample(self._cfg.target_sfreq, method='polyphase')
         result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
         if result_post is False:
