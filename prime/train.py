@@ -207,8 +207,7 @@ def run_test_only(args, device, console, run_output_dir):
     # Get data dimensions
     _, _, n_ch, n_tp, _, _ = load_pretrain_data(
         subject_ids=[subjects_to_run[0]],
-        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "tmin": args.tmin,
-                         "tmax": args.tmax, "resample": args.resample},
+        paradigm_kwargs={"fmin": args.fmin, "fmax": args.fmax, "resample": args.resample},
         data_root=args.data_root, args=args,
     )
     cv.n_channels, cv.n_timepoints = n_ch, n_tp

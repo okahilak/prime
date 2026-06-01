@@ -12,7 +12,6 @@ Core Components:
   extraction for TMS-EEG data types.
 """
 
-import hashlib
 import logging
 import os
 import re
@@ -131,15 +130,11 @@ class TEPParadigm(BaseParadigm):
 
     def __init__(
         self,
-        tmin: float = -0.5,
-        tmax: float = -0.020,
         fmin: Optional[float] = None,
         fmax: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(filters=[], **kwargs)
-        self.tmin = tmin
-        self.tmax = tmax
         self.fmin = fmin
         self.fmax = fmax
         self.target_metadata_col = "TEP_amplitude"
@@ -178,12 +173,6 @@ class TEPParadigm(BaseParadigm):
                 continue
 
             epochs = raw_epochs_data[subject]["0"]["0"]
-            _hash_pre = hashlib.sha256(epochs.get_data(copy=False).tobytes()).hexdigest()
-            print(f"S{subject} pre-crop  SHA256: {_hash_pre}")
-            epochs.crop(tmin=self.tmin, tmax=self.tmax, include_tmax=True)
-            _hash_post = hashlib.sha256(epochs.get_data(copy=False).tobytes()).hexdigest()
-            print(f"S{subject} post-crop SHA256: {_hash_post}")
-            print(f"S{subject} crop is no-op: {_hash_pre == _hash_post}")
 
             full_metadata = epochs.metadata.copy()
 

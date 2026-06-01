@@ -21,20 +21,20 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from models.builder import build_model
 from online_preprocessing.calibrator import ProcessedTrial
+from prime_config import get_pre_time_range
 from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
 
-# Hard-coded model/data constants (matching configs/prime.yaml + preprocessing)
+# Model/data constants (pre-stim window from configs/prime.yaml)
 _N_CHANNELS = 60          # len(COMMON_CHANNELS) after preprocessing
 _SR_HZ = 1000.0           # target_sfreq after Calibrator resampling (raw is 5000 Hz)
-_TMIN = -0.060
-_TMAX = -0.010
-_N_TIMEPOINTS = 51        # round((_TMAX - _TMIN) * _SR_HZ) + 1, with include_tmax
+_TMIN_PRE, _TMAX_PRE = get_pre_time_range()
+_N_TIMEPOINTS = round((_TMAX_PRE - _TMIN_PRE) * _SR_HZ) + 1  # include_tmax
 
 _DEFAULT_ARGS = OmegaConf.create({
-    "tmin": _TMIN,
-    "tmax": _TMAX,
+    "tmin_pre": _TMIN_PRE,
+    "tmax_pre": _TMAX_PRE,
     "use_tta": True,
     "alignment_type": "euclidean",
     "use_backrotation": True,
@@ -183,14 +183,12 @@ class OnlinePredictor:
             self._init_optimizer_and_buffers()
 
     def _extract_epoch_data(self, trial: ProcessedTrial) -> np.ndarray:
-        """Extract pre-stim EEG data from a ProcessedTrial, cropped to [tmin, tmax].
+        """Extract pre-stim EEG data from a ProcessedTrial.
 
         Returns:
             Numpy array of shape (n_channels, n_times).
         """
-        return trial.epoch_pre.copy().crop(
-            tmin=self.args.tmin, tmax=self.args.tmax, include_tmax=True
-        ).get_data(copy=False).squeeze(0)
+        return trial.epoch_pre.get_data(copy=False).squeeze(0)
 
     def _extract_epochs_data(self, trials: List[ProcessedTrial]) -> np.ndarray:
         """Extract pre-stim EEG data from a list of ProcessedTrials.
@@ -199,9 +197,7 @@ class OnlinePredictor:
             Numpy array of shape (n_trials, n_channels, n_times).
         """
         epochs = mne.concatenate_epochs([t.epoch_pre for t in trials])
-        return epochs.copy().crop(
-            tmin=self.args.tmin, tmax=self.args.tmax, include_tmax=True
-        ).get_data(copy=False)
+        return epochs.get_data(copy=False)
 
     def predict(self, trial: ProcessedTrial) -> float:
         """

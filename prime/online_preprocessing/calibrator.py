@@ -31,12 +31,16 @@ class ProcessedTrial:
     epoch_post: mne.EpochsArray
 
 try:
+    from ..prime_config import get_pre_time_range
     from .utils.ica_calibrator import get_number_of_components, get_ica
     from .utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from .utils.sound_modified import sound
     from .utils.channel_interpolations import custom_get_interpolation_matrix, apply_channel_interpolation
     from .config import get_default_config
 except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from prime_config import get_pre_time_range
     from utils.ica_calibrator import get_number_of_components, get_ica
     from utils.ssp_sir_python import ssp_sir_to_average, ssp_sir_trials, ssp_sir_single_trial
     from utils.sound_modified import sound
@@ -44,6 +48,16 @@ except ImportError:
     from config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _validate_pre_stim_window(tmin_pre: float, tmax_pre: float, pre_range: list) -> None:
+    pre_t0, pre_t1 = pre_range
+    if not (pre_t0 <= tmin_pre and tmax_pre <= pre_t1 and tmin_pre < tmax_pre):
+        raise ValueError(
+            f"Pre-stim window [{tmin_pre}, {tmax_pre}] must satisfy "
+            f"{pre_t0} <= tmin_pre < tmax_pre <= {pre_t1} (pre_range)"
+        )
+
 
 warnings.filterwarnings(
     "ignore",
@@ -576,7 +590,11 @@ class Calibrator:
 
     def __init__(self, forward_path):
         cfg = get_default_config()
+        tmin_pre, tmax_pre = get_pre_time_range()
+        _validate_pre_stim_window(tmin_pre, tmax_pre, cfg.pre_range)
         self._cfg = cfg
+        self._tmin_pre = tmin_pre
+        self._tmax_pre = tmax_pre
         self._opts = cfg.to_dicts()
         self._ica_time_range = self._opts['ica_opts']['pre_timerange']
 
@@ -587,6 +605,9 @@ class Calibrator:
 
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
 		# TODO: Should we pick the common channels here? Note that it's done in the dipole fitter.
+
+    def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
+        return epoch_pre.copy().crop(self._tmin_pre, self._tmax_pre, include_tmax=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -634,10 +655,10 @@ class Calibrator:
         post_data = post_epochs.get_data(copy=False)
         trials = []
         for i in range(n_successful_trials):
-            ep_pre = mne.EpochsArray(
+            ep_pre = self._crop_pre_to_model_window(mne.EpochsArray(
                 pre_data[i:i+1], info=pre_epochs.info,
                 events=pre_epochs.events[i:i+1], tmin=pre_epochs.tmin, verbose=False,
-            )
+            ))
             ep_post = mne.EpochsArray(
                 post_data[i:i+1], info=post_epochs.info,
                 events=post_epochs.events[i:i+1], tmin=post_epochs.tmin, verbose=False,
@@ -676,6 +697,7 @@ class Calibrator:
         result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
+        result_pre = self._crop_pre_to_model_window(result_pre)
 
         epoch_post = trial.copy().crop(self._cfg.post_range[0], self._cfg.post_range[1])
         epoch_post.resample(self._cfg.target_sfreq, method='polyphase')

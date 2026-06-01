@@ -46,10 +46,9 @@ log = logging.getLogger(__name__)
 def _numpy_epochs_to_trials(
     epochs_np: np.ndarray, sfreq: float, tmin: float,
 ) -> List[ProcessedTrial]:
-    """Wrap pre-cropped numpy epochs into ProcessedTrial objects.
+    """Wrap numpy epochs (model-window pre-stim) into ProcessedTrial objects.
 
-    Creates single-trial mne.EpochsArray objects with appropriate timing
-    so that OnlinePredictor's internal crop is a no-op.
+    Creates single-trial mne.EpochsArray objects with tmin matching the stored window.
 
     Args:
         epochs_np: Array of shape (n_trials, n_channels, n_times).
@@ -436,7 +435,7 @@ class CrossValidator:
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 
         # Wrap numpy epochs into ProcessedTrial objects
-        all_trials = _numpy_epochs_to_trials(epochs, sfreq=1000.0, tmin=self.args.tmin)
+        all_trials = _numpy_epochs_to_trials(epochs, sfreq=1000.0, tmin=self.args.tmin_pre)
 
         # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
         self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_trials)} trials...")
@@ -602,7 +601,6 @@ class CrossValidator:
     def _paradigm_kwargs(self) -> dict:
         return {
             "fmin": self.args.fmin, "fmax": self.args.fmax,
-            "tmin": self.args.tmin, "tmax": self.args.tmax,
             "resample": self.args.resample,
         }
 
@@ -634,7 +632,7 @@ class CrossValidator:
                                 ) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
         """Load test data for a single subject."""
         dataset = TEPDataset(data_path=self.args.data_root)
-        paradigm = TEPParadigm(tmin=self.args.tmin, tmax=self.args.tmax)
+        paradigm = TEPParadigm()
         test_epochs, test_labels, test_metadata = paradigm.get_data(
             dataset=dataset, subjects=[test_subject_id]
         )
