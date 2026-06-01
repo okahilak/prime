@@ -22,6 +22,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+import argparse
 import sys
 import time
 import warnings
@@ -64,10 +65,16 @@ def print_summary(summary_text):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python simulate_online.py <subject_id>")
-        sys.exit(1)
-    subject_id = int(sys.argv[1])
+    parser = argparse.ArgumentParser(description="Simulate online processing for a single subject.")
+    parser.add_argument("subject_id", type=int, help="Subject ID (e.g. 21 for sub-021)")
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Load trials from CSV simulator dataset instead of raw epochs",
+    )
+    args = parser.parse_args()
+
+    subject_id = args.subject_id
     subject_id_str = f"sub-{subject_id:03d}"
     predictions_path = f"results/test/predictions_subj_{subject_id}.npz"
 
@@ -81,9 +88,11 @@ def main():
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
 
-#    trial_loader = TrialLoader(subject_id_str)
-    json_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}.json"
-    trial_loader = TrialLoaderFromCsv(json_path)
+    if args.csv:
+        json_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}.json"
+        trial_loader = TrialLoaderFromCsv(json_path)
+    else:
+        trial_loader = TrialLoader(subject_id_str)
 
     n_total_trials = trial_loader.num_trials
     print(f"Loaded {n_total_trials} trials for {subject_id_str}")
