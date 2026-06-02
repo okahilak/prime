@@ -16,17 +16,16 @@ Usage
 
 import warnings
 import time
-import math
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
-from functools import lru_cache
-from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt, resample_poly, firwin
+
+from prime.online_preprocessing.utils.filtering import butter_filter, apply_filter
+from prime.online_preprocessing.utils.resampling import resample_buffer_polyphase
 
 
 from prime.prime_config import (
@@ -155,29 +154,6 @@ warnings.filterwarnings(
 mne.set_log_level("ERROR")
 
 
-# ==================== Filtering ====================
-
-def _butter_filter(data, cutoff, btype, fs, order, pad_time):
-    nyquist = fs / 2
-    if isinstance(cutoff, list):
-        if len(cutoff) == 2:
-            normalized = [cutoff[0] / nyquist, cutoff[1] / nyquist]
-        else:
-            raise ValueError("cutoff should be a single value or a list of length 2.")
-    else:
-        normalized = cutoff / nyquist
-    b, a = butter(order, normalized, btype=btype, analog=False)
-    filtered = _apply_filter(data, [b, a], pad_time, fs)
-    return filtered, [b, a]
-
-
-def _apply_filter(data, coeffs, pad_time, fs):
-    n_pad = int(pad_time * fs)
-    padded = np.pad(data, ((0, 0), (0, 0), (n_pad, n_pad)), mode='reflect')
-    filtered = filtfilt(coeffs[0], coeffs[1], padded, padlen=None)
-    return filtered[:, :, n_pad:-n_pad]
-
-
 # ==================== Bad Channel Detection ====================
 
 def _get_bad_channels_epoched(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
@@ -234,7 +210,7 @@ def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, f
 
 def _detect_bad_channels_pre(epochs, options, filter_opts):
     data = epochs.get_data(copy=True)
-    data, filter_coefficients = _butter_filter(data, filter_opts['cutoff'], filter_opts['btype'], epochs.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
+    data, filter_coefficients = butter_filter(data, filter_opts['cutoff'], filter_opts['btype'], epochs.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
     filtered_epochs = mne.EpochsArray(data, epochs.info, epochs.events, tmin=epochs.times[0])
     bad_channels = _get_bad_channels_epoched(filtered_epochs, options['z_score_threshold_mad'],
                                         options['z_score_threshold_power'], options['fmin_fmax'],
@@ -433,56 +409,6 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
-@lru_cache(maxsize=8)
-def _cached_resample_up_down(sfreq_from_str: str, sfreq_to_str: str) -> tuple[int, int]:
-    ratio = Fraction(sfreq_to_str) / Fraction(sfreq_from_str)
-    up = ratio.numerator
-    down = ratio.denominator
-    g = math.gcd(up, down)
-    # resample_poly reduces by gcd as well, so we mirror that here.
-    return up // g, down // g
-
-
-@lru_cache(maxsize=16)
-def _cached_resample_window_taps(
-    up: int, down: int, dtype_name: str
-) -> np.ndarray:
-    """
-    Unscaled FIR taps for resample_poly's default window ('kaiser', 5.0).
-
-    Note: resample_poly applies `h *= up` internally after designing/accepting the taps.
-    """
-    max_rate = max(up, down)
-    f_c = 1.0 / max_rate  # cutoff (relative to Nyquist)
-    half_len = 10 * max_rate  # filter half-length
-    taps_len = 2 * half_len + 1
-    dtype = np.dtype(dtype_name)
-    return firwin(taps_len, f_c, window=("kaiser", 5.0)).astype(dtype)
-
-
-def _resample_buffer_polyphase(
-    data: np.ndarray,
-    sfreq_from: float,
-    sfreq_to: float,
-) -> np.ndarray:
-    """Resample (n_samples, n_channels) using scipy polyphase."""
-    if abs(sfreq_from - sfreq_to) < 1e-9:
-        return data
-
-    up, down = _cached_resample_up_down(str(sfreq_from), str(sfreq_to))
-    if up == down == 1:
-        return data.copy()
-
-    window_taps = _cached_resample_window_taps(up, down, data.dtype.name)
-    return resample_poly(
-        data,
-        up=up,
-        down=down,
-        axis=0,
-        window=window_taps,
-    )
-
-
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -539,9 +465,9 @@ def append_calibration_epochs(
         raw_post_epoch_tmax,
     )
 
-    pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    pre_buf = resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    pre_ica_buf = resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    post_buf = resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
     trial_pre = _numpy_to_epochs_array(pre_buf, info_processed, cfg.pre_stim_timerange[0])
     trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, info_processed, cfg.ica_opts.pre_timerange[0])
@@ -594,7 +520,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     # ICA calibration on filtered pre-stim
     ica_data = epochs_pre_ica.get_data(copy=True)
-    ica_data, _ = _butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
+    ica_data, _ = butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
                                                epochs_pre_ica.info['sfreq'], ica_opts['filtering']['order_bandpass'],
                                                ica_opts['filtering']['pad_time_bandpass'])
     epochs_pre_ica_filtered = mne.EpochsArray(ica_data, info=epochs_pre_ica.info, events=epochs_pre_ica.events, tmin=epochs_pre_ica.times[0])
@@ -611,7 +537,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     # Filter pre-stim
     pre_data = epochs_pre.get_data(copy=True)
-    pre_data = _apply_filter(pre_data, pre_filter_coefficients, filter_opts['pad_time'], epochs_pre.info['sfreq'])
+    pre_data = apply_filter(pre_data, pre_filter_coefficients, filter_opts['pad_time'], epochs_pre.info['sfreq'])
     epochs_pre = mne.EpochsArray(pre_data, info=epochs_pre.info, events=epochs_pre.events, tmin=epochs_pre.times[0])
     if cfg.use_ica_on_pre:
         epochs_pre.set_eeg_reference('average', projection=False, verbose=False)
@@ -913,7 +839,7 @@ class Preprocessor:
                 self._pre_stim_tmax,
             )
         with _profile("preprocess_pre: resample_polyphase"):
-            pre_stim = _resample_buffer_polyphase(
+            pre_stim = resample_buffer_polyphase(
                 pre_stim,
                 sfreq_from=self._info["sfreq"],
                 sfreq_to=self._processed_sfreq,
@@ -932,7 +858,7 @@ class Preprocessor:
 
         filter_opts = self._opts['filter_opts']
         with _profile("preprocess_pre: apply_filter"):
-            data = _apply_filter(
+            data = apply_filter(
                 data,
                 self._calibration_params['pre_stim_filter'],
                 filter_opts['pad_time'],
@@ -998,7 +924,7 @@ class Preprocessor:
             self._raw_post_epoch_tmin,
             self._raw_post_epoch_tmax,
         )
-        post_buf = _resample_buffer_polyphase(
+        post_buf = resample_buffer_polyphase(
             post_buf,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
