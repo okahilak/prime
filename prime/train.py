@@ -41,6 +41,7 @@ from rich.console import Console
 # Local project-specific modules
 from prime.datasets import *
 from prime.cross_validator import CrossValidator, log_memory_usage
+from prime.prime_config import PRIME_CONFIG_PATH
 from prime.utils import save_results_df
 
 # --- Global Setup ---
@@ -82,7 +83,7 @@ def setup_experiment(cli_args=None):
                             help="Full cross-subject k-fold cross-validation")
 
     parser.add_argument("-c", "--config", action="append", default=None,
-                        help="Path to YAML config file(s) (default: configs/prime.yaml)")
+                        help=f"Path to YAML config file(s) (default: {PRIME_CONFIG_PATH})")
     parser.add_argument("--n-splits", type=int, default=None,
                         help="Number of CV splits (default: 2)")
     parser.add_argument("--fold", type=int, default=None,
@@ -91,7 +92,7 @@ def setup_experiment(cli_args=None):
     parsed_args, remaining_argv = parser.parse_known_args(args=cli_args)
 
     if parsed_args.config is None:
-        parsed_args.config = ["configs/prime.yaml"]
+        parsed_args.config = [str(PRIME_CONFIG_PATH)]
 
     config = OmegaConf.load(parsed_args.config[0])
     print(f"Loaded config from: {parsed_args.config[0]}")
