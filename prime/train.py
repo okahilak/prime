@@ -40,7 +40,7 @@ from rich.console import Console
 
 # Local project-specific modules
 from prime.datasets import *
-from cross_validator import CrossValidator, log_memory_usage
+from prime.cross_validator import CrossValidator, log_memory_usage
 from prime.utils import save_results_df
 
 # --- Global Setup ---
