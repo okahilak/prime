@@ -7,9 +7,8 @@ import gc
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
-import mne
 import numpy as np
 import pandas as pd
 import torch
@@ -29,7 +28,6 @@ from prime.datasets import (
 )
 from prime.models.builder import build_model
 from prime.online_predictor import OnlinePredictor, score_predictions
-from prime.prime_config import get_processed_sfreq
 from prime.utils import (
     RegressionMetricsTracker,
     filter_args_for_model,
@@ -39,23 +37,6 @@ from prime.utils import (
 )
 
 log = logging.getLogger(__name__)
-
-
-# --- Helper functions used by CrossValidator ---
-
-def _numpy_epochs_to_mne(
-    epochs_np: np.ndarray, sfreq: float, tmin: float,
-) -> List[mne.EpochsArray]:
-    """Wrap numpy epochs (model-window pre-stim) into single-trial EpochsArray objects."""
-    n_trials, n_channels, _ = epochs_np.shape
-    info = mne.create_info(
-        ch_names=n_channels, sfreq=sfreq, ch_types='eeg'
-    )
-    info.set_montage(None)
-    return [
-        mne.EpochsArray(epochs_np[i:i+1], info, tmin=tmin, verbose=False)
-        for i in range(n_trials)
-    ]
 
 
 def log_memory_usage(stage: str, log_obj=None):
@@ -420,13 +401,9 @@ class CrossValidator:
 
         stage_results = {"pre_calib_zero_shot": {}, "post_calib_zero_shot": {}, "finetuned": {}}
 
-        all_epochs_pre = _numpy_epochs_to_mne(
-            epochs, sfreq=get_processed_sfreq(), tmin=self.args.pre_epoch_tmin,
-        )
-
         # --- STAGE 1: PRE-CALIBRATION EVALUATION ---
-        self.console.print(f"      Pre-Calibration Zero-Shot on {len(all_epochs_pre)} trials...")
-        pre_calib_preds = predictor.predict_batch(all_epochs_pre, batch_size=self.args.batch_size_finetune)
+        self.console.print(f"      Pre-Calibration Zero-Shot on {len(epochs)} trials...")
+        pre_calib_preds = predictor.predict_batch(epochs, batch_size=self.args.batch_size_finetune)
         pre_calib_metrics = score_predictions(
             predictions=pre_calib_preds, labels=labels_for_eval,
             is_extreme_mask=is_extreme_mask, original_soft_labels=labels_for_eval,
@@ -438,15 +415,15 @@ class CrossValidator:
         if metadata is not None and 'period' in metadata.columns:
             cal_mask = (metadata['period'] == 'calibration').values
             int_mask = (metadata['period'] == 'intervention').values
-            calibration_epochs_pre = [all_epochs_pre[i] for i in range(len(all_epochs_pre)) if cal_mask[i]]
-            online_epochs_pre = [all_epochs_pre[i] for i in range(len(all_epochs_pre)) if int_mask[i]]
+            calibration_epochs_pre = epochs[cal_mask]
+            online_epochs_pre = epochs[int_mask]
             calibration_labels = labels_ground_truth[cal_mask]
             online_labels_for_finetuning = labels_ground_truth[int_mask]
             online_labels_for_eval = labels_for_eval[int_mask]
             online_is_extreme_mask = is_extreme_mask[int_mask]
         else:
             calibration_epochs_pre = None
-            online_epochs_pre = all_epochs_pre
+            online_epochs_pre = epochs
             online_labels_for_finetuning = labels_ground_truth
             online_labels_for_eval = labels_for_eval
             online_is_extreme_mask = is_extreme_mask

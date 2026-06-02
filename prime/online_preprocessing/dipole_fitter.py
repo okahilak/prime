@@ -14,10 +14,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 import mne
+from prime.prime_config import epoch_n_times, get_post_epoch_time_range, get_processed_sfreq
 
 
-def dipoles_for_times(evoked, forward):
-	data_measured = evoked.data #data in the evoked object
+def dipoles_for_times(evoked_data, times, forward):
+	data_measured = evoked_data
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	data_measured = data_measured - np.mean(data_measured, axis=0) #data ensured to be in average reference (if already not)
 	n_pos = L.shape[1] // 3  #number of candidate source positions
@@ -29,7 +30,7 @@ def dipoles_for_times(evoked, forward):
 	L_3d = L.reshape(L.shape[0], n_pos, 3).transpose(1, 0, 2)  # (n_pos, n_ch, 3)
 	pinv_all = np.linalg.pinv(L_3d)                              # (n_pos, 3, n_ch)
 
-	for time_index, time in enumerate(evoked.times): #go through the time range of interest
+	for time_index, time in enumerate(times): #go through the time range of interest
 		y = data_measured[:, time_index]
 		ss_tot = np.dot(y, y)
 
@@ -129,9 +130,15 @@ def determine_optimal_ori_and_pos(dipoles, forward):
 
 # ==================== Single-trial fitting ====================
 
-def fit_dipole_to_single_trial(epoch, forward, position_index, ori_vector, time_range):
-	epoch_cropped = epoch.copy().crop(time_range[0], time_range[1])
-	trial_data = epoch_cropped.get_data(copy=True)[0, :, :] #data n_channels x n_times
+def fit_dipole_to_single_trial(trial_data, times, forward, position_index, ori_vector, time_range):
+	time_mask = (times >= time_range[0]) & (times <= time_range[1])
+	if not np.any(time_mask):
+		raise ValueError(
+			f"time_range {time_range} does not overlap with available trial times "
+			f"[{times[0]}, {times[-1]}]."
+		)
+	trial_data = trial_data[:, time_mask]
+	times = times[time_mask]
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	position_now = position_index*3
 	leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
@@ -143,7 +150,7 @@ def fit_dipole_to_single_trial(epoch, forward, position_index, ori_vector, time_
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
-	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, epoch_cropped.times, ori_vector,
+	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, times, ori_vector,
 																leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
 
 	return np.abs(best_amplitude) if ori_vector is not None else best_amplitude
@@ -222,29 +229,47 @@ class DipoleFitter:
         self._max_window_size = max_window_size
         self._window_size_exponent = window_size_exponent
         self._fitting_info = None
+        self._post_epoch_tmin, self._post_epoch_tmax = get_post_epoch_time_range()
+        self._processed_sfreq = get_processed_sfreq()
+        self._post_n_times = epoch_n_times(
+            self._post_epoch_tmin, self._post_epoch_tmax, self._processed_sfreq
+        )
+        self._post_times = np.linspace(
+            self._post_epoch_tmin, self._post_epoch_tmax, self._post_n_times
+        )
 
     def calibrate(self, cal_epochs_post):
         """Compute dipole fitting parameters from calibration trials.
 
         Parameters
         ----------
-        cal_epochs_post : list of mne.Epochs or mne.Epochs
-            Preprocessed post-stimulus calibration epochs.
+        cal_epochs_post : np.ndarray
+            Preprocessed post-stimulus calibration epochs with shape
+            (n_trials, n_channels, n_times).
 
         Returns
         -------
         calibration_amplitudes : np.ndarray
             Dipole amplitudes (free orientation) fitted to the calibration trials.
         """
-        if isinstance(cal_epochs_post, mne.BaseEpochs):
-            epochs = cal_epochs_post
-        else:
-            epochs = mne.concatenate_epochs(cal_epochs_post)
-        if not epochs.info['ch_names'] == self._forward.ch_names:
-            raise ValueError(f"Channel mismatch for epochs and forward solution. Aborting.")
+        epochs = np.asarray(cal_epochs_post)
+        if epochs.ndim != 3:
+            raise ValueError(
+                f"cal_epochs_post must have shape (n_trials, n_channels, n_times), got {epochs.shape}."
+            )
+        if epochs.shape[1] != len(self._forward.ch_names):
+            raise ValueError(
+                f"Channel mismatch: epochs have {epochs.shape[1]} channels, "
+                f"forward has {len(self._forward.ch_names)}."
+            )
+        if epochs.shape[2] != self._post_n_times:
+            raise ValueError(
+                f"Timepoint mismatch: epochs have {epochs.shape[2]} samples, "
+                f"expected {self._post_n_times}."
+            )
 
-        evoked = epochs.copy().average()
-        best_dipole_per_time = dipoles_for_times(evoked, self._forward)
+        evoked = np.mean(epochs, axis=0)
+        best_dipole_per_time = dipoles_for_times(evoked, self._post_times, self._forward)
         time_range, dipoles_in_time_range = determine_optimal_time_range(
             best_dipole_per_time, self._min_window_size,
             self._max_window_size, self._window_size_exponent
@@ -258,7 +283,7 @@ class DipoleFitter:
             'time_range': time_range,
         }
         calibration_amplitudes = np.array([
-            self.fit_trial(cal_epochs_post[i]) for i in range(len(cal_epochs_post))
+            self.fit_trial(epochs[i]) for i in range(len(epochs))
         ])
         return calibration_amplitudes
 
@@ -269,8 +294,9 @@ class DipoleFitter:
 
         Parameters
         ----------
-        epoch_post : mne.Epochs (single-trial)
-            Preprocessed post-stimulus epoch.
+        epoch_post : np.ndarray
+            Preprocessed post-stimulus trial. Accepted shapes:
+            (n_channels, n_times) or (1, n_channels, n_times).
         orientation : 'free' or 'fixed'
             ``'free'`` (default) performs free-orientation fitting.
             ``'fixed'`` uses the orientation stored in ``fitting_info``.
@@ -285,9 +311,27 @@ class DipoleFitter:
                 f"orientation must be 'free' or 'fixed', got {orientation!r}"
             )
 
-        epoch = epoch_post
-        if not epoch.info['ch_names'] == self._forward.ch_names:
-            raise ValueError(f"Channel mismatch for epoch and forward solution. Aborting.")
+        epoch = np.asarray(epoch_post)
+        if epoch.ndim == 3:
+            if epoch.shape[0] != 1:
+                raise ValueError(
+                    f"Expected single trial in shape (1, n_channels, n_times), got {epoch.shape}."
+                )
+            epoch = epoch[0]
+        elif epoch.ndim != 2:
+            raise ValueError(
+                f"epoch_post must have shape (n_channels, n_times) or (1, n_channels, n_times), got {epoch.shape}."
+            )
+
+        if epoch.shape[0] != len(self._forward.ch_names):
+            raise ValueError(
+                f"Channel mismatch: epoch has {epoch.shape[0]} channels, "
+                f"forward has {len(self._forward.ch_names)}."
+            )
+        if epoch.shape[1] != self._post_n_times:
+            raise ValueError(
+                f"Timepoint mismatch: epoch has {epoch.shape[1]} samples, expected {self._post_n_times}."
+            )
 
         if self._fitting_info is None:
             raise RuntimeError(
@@ -301,7 +345,7 @@ class DipoleFitter:
         position_index = self._fitting_info['position_index']
         time_range = self._fitting_info['time_range']
         return fit_dipole_to_single_trial(
-            epoch, self._forward, position_index, ori_vector, time_range
+            epoch, self._post_times, self._forward, position_index, ori_vector, time_range
         )
 
     @property

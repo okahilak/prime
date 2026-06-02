@@ -37,7 +37,7 @@ def run_fitting(subject, subjects_directory_eeg, forward_path):
         return None
 
     fitter = DipoleFitter(forward_path)
-    _ = fitter.calibrate(epochs)
+    _ = fitter.calibrate(epochs.get_data(copy=False))
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
@@ -49,7 +49,8 @@ def run_fitting(subject, subjects_directory_eeg, forward_path):
             print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
             continue
 
-        amplitudes = np.array([fitter.fit_trial(epochs[i]) for i in range(len(epochs))])
+        epoch_data = epochs.get_data(copy=False)
+        amplitudes = np.array([fitter.fit_trial(epoch_data[i]) for i in range(len(epoch_data))])
 
         os.makedirs(subject_directory, exist_ok=True)
         output_path = os.path.join(subject_directory, f'{subject}_{group_label}_amplitudes.npy')

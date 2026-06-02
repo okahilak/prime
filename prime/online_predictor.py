@@ -10,9 +10,8 @@ import logging
 import os
 from collections import deque
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Optional, Union
 
-import mne
 import numpy as np
 import torch
 import torch.nn as nn
@@ -181,36 +180,38 @@ class OnlinePredictor:
         if self._finetuning_enabled:
             self._init_optimizer_and_buffers()
 
-    def predict(self, epoch_pre: mne.BaseEpochs) -> float:
+    def predict(self, epoch_pre: np.ndarray) -> float:
         """
         Predict the probability for a single trial without side effects.
 
         Args:
-            epoch_pre: Preprocessed pre-stimulus epoch (single trial).
+            epoch_pre: Preprocessed pre-stimulus trial as a NumPy array
+                      with shape (n_channels, n_times).
 
         Returns:
             Predicted probability (float in [0, 1]).
         """
-        epoch_np = epoch_pre.get_data(copy=False).squeeze(0)
-        return self._predict_numpy(epoch_np)
+        self.model.eval()
+        epoch_t = torch.from_numpy(epoch_pre).float().unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            logits = self.model.predict(epoch_t)
+            prob = torch.sigmoid(logits)
+        return prob.item()
 
-    def predict_logits(self, epoch_pre: mne.BaseEpochs) -> float:
+    def predict_logits(self, epoch_pre: np.ndarray) -> float:
         """
         Return raw logit for a single trial (no sigmoid).
 
         Useful when callers need the unnormalized output, e.g. for custom
         thresholding or external evaluation functions.
         """
-        epoch_np = epoch_pre.get_data(copy=False).squeeze(0)
         self.model.eval()
-        epoch_t = (
-            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
-        )
+        epoch_t = torch.from_numpy(epoch_pre).float().unsqueeze(0).to(self.device)
         with torch.no_grad():
             logits = self.model.predict(epoch_t)
         return logits.item()
 
-    def predict_batch(self, epochs_pre: List[mne.BaseEpochs], batch_size: int = 50) -> np.ndarray:
+    def predict_batch(self, epochs_pre: np.ndarray, batch_size: int = 50) -> np.ndarray:
         """
         Predict probabilities for a batch of trials.
 
@@ -219,25 +220,14 @@ class OnlinePredictor:
         per-trial online loop.
 
         Args:
-            epochs_pre: Preprocessed pre-stimulus epochs (one per trial).
+            epochs_pre: Preprocessed pre-stimulus trials as a NumPy array
+                        with shape (n_trials, n_channels, n_times).
             batch_size: Number of trials per forward pass.
 
         Returns:
             Array of predicted probabilities, shape (n_trials,).
         """
-        epochs = mne.concatenate_epochs(epochs_pre)
-        return self._predict_batch_numpy(epochs.get_data(copy=False), batch_size)
-
-    def _predict_numpy(self, epoch_np: np.ndarray) -> float:
-        """Predict probability from a single numpy epoch (n_channels, n_times)."""
-        self.model.eval()
-        epoch_t = (
-            torch.from_numpy(epoch_np).float().unsqueeze(0).to(self.device)
-        )
-        with torch.no_grad():
-            logits = self.model.predict(epoch_t)
-            prob = torch.sigmoid(logits)
-        return prob.item()
+        return self._predict_batch_numpy(epochs_pre, batch_size)
 
     def _predict_batch_numpy(self, epochs_np: np.ndarray, batch_size: int = 50) -> np.ndarray:
         """Predict probabilities from numpy epochs (n_trials, n_channels, n_times)."""
@@ -253,30 +243,29 @@ class OnlinePredictor:
                 all_probs.append(probs.cpu().numpy().ravel())
         return np.concatenate(all_probs)
 
-    def finetune(self, epoch_pre: mne.BaseEpochs, label: float) -> Optional[float]:
+    def finetune(self, epoch_pre: np.ndarray, label: float) -> Optional[float]:
         """
         Adapt alignment (unsupervised) and perform buffered supervised
         finetuning on recent trials.
 
         Args:
-            epoch_pre: Preprocessed pre-stimulus epoch (single trial).
+            epoch_pre: Preprocessed pre-stimulus trial as a NumPy array
+                      with shape (n_channels, n_times).
             label: The ground-truth label for this trial.
 
         Returns:
             The average finetuning loss if a training step was performed,
             None otherwise.
         """
-        epoch_np = epoch_pre.get_data(copy=False).squeeze(0)
-
         # 1. Unsupervised alignment adaptation
         if self.args.use_tta and self.args.alignment_type not in ("none", None):
-            self.model.adapt_alignment(epoch_np)
+            self.model.adapt_alignment(epoch_pre)
 
         # 2. Add to finetuning buffer
         if self._optimizer is None:
             return None
 
-        self._epoch_buffer.append(epoch_np)
+        self._epoch_buffer.append(epoch_pre)
         self._label_buffer.append(label)
         self._trial_count += 1
 
@@ -305,7 +294,7 @@ class OnlinePredictor:
             self._init_optimizer_and_buffers()
 
     def calibrate(
-        self, cal_epochs_pre: List[mne.BaseEpochs], cal_labels: np.ndarray, **kwargs
+        self, cal_epochs_pre: np.ndarray, cal_labels: np.ndarray, **kwargs
     ) -> None:
         """
         Perform initial calibration: initialize alignment from calibration
@@ -316,13 +305,13 @@ class OnlinePredictor:
         This matches the original training path.
 
         Args:
-            cal_epochs_pre: Preprocessed pre-stimulus calibration epochs.
+            cal_epochs_pre: Preprocessed calibration trials as a NumPy array
+                            with shape (n_trials, n_channels, n_times).
             cal_labels: Calibration labels, shape (n_trials,).
             **kwargs: Optional overrides for lr (lr_calibration) and
                       n_epochs (calibration_epochs).
         """
-        epochs = mne.concatenate_epochs(cal_epochs_pre)
-        epochs_np = epochs.get_data(copy=False)
+        epochs_np = cal_epochs_pre
         lr = kwargs.get("lr", getattr(self.args, "lr_calibration", 0.0001))
         n_epochs = kwargs.get(
             "n_epochs", getattr(self.args, "calibration_epochs", 50)
