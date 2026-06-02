@@ -953,7 +953,7 @@ class Preprocessor:
     def preprocess_pre(
         self,
         raw_pre: np.ndarray,
-    ) -> mne.EpochsArray | None:
+    ) -> np.ndarray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
         Must be called after ``calibrate()``.
@@ -963,7 +963,8 @@ class Preprocessor:
         raw_pre : np.ndarray
             Raw pre-stimulus trial with shape (n_samples, n_channels).
 
-        Returns ``None`` if the trial was rejected.
+        Returns a NumPy array with shape (n_samples, n_channels), or ``None`` if
+        the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
@@ -980,11 +981,60 @@ class Preprocessor:
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
         )
-        epoch_pre = _numpy_to_epochs_array(pre_stim, self._info_processed, self._pre_stim_tmin)
-        result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
-        if result_pre is False:
+        # Keep pre-stim single-trial preprocessing fully in NumPy.
+        data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
+
+        if self._calibration_params['bad_channels']:
+            interpolation_info = self._calibration_params['channel_interpolation_info']
+            data[..., interpolation_info['bads_idx'], :] = np.matmul(
+                interpolation_info['interpolation_matrix'],
+                data[..., interpolation_info['goods_idx'], :],
+            )
+
+        filter_opts = self._opts['filter_opts']
+        data = _apply_filter(
+            data,
+            self._calibration_params['pre_stim_filter'],
+            filter_opts['pad_time'],
+            self._processed_sfreq,
+        )
+
+        # Mean subtraction (average reference).
+        data -= np.mean(data, axis=1, keepdims=True)
+
+        trial_reject_opts = self._opts['trial_reject_opts']
+
+        # Global MAD check.
+        mad_val = median_abs_deviation(data, axis=(1, 2))[0]
+        z_mad = (
+            mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
+        ) / self._calibration_params['good_trial_stats_pre']['mads_std']
+        threshold = trial_reject_opts['pre']['global_zscore_threshold']
+        if z_mad < threshold[0] or z_mad > threshold[1]:
             return None
-        return self._crop_pre_to_model_window(result_pre)
+
+        # Local MAD check.
+        local_mad = median_abs_deviation(data, axis=2)
+        z_local = zscore(local_mad, axis=1)
+        if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
+            return None
+
+        start = time_to_sample(
+            self._pre_epoch_tmin,
+            self._pre_stim_tmin,
+            self._processed_sfreq,
+        )
+        stop = start + epoch_n_times(
+            self._pre_epoch_tmin,
+            self._pre_epoch_tmax,
+            self._processed_sfreq,
+        )
+        if start < 0 or stop > data.shape[2]:
+            raise ValueError(
+                f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
+                f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
+            )
+        return data[:, :, start:stop]
 
     def preprocess_post(self, raw_post: np.ndarray) -> mne.EpochsArray | None:
         """Resample and preprocess a single post-stimulus trial.

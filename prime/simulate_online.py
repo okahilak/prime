@@ -145,6 +145,10 @@ def main():
         with profile("preprocess_pre"):
             processed_pre = preprocessor.preprocess_pre(raw_pre)
 
+        # Array shape
+        print(f"Trial {trial_idx + 1}: processed_pre array shape={processed_pre.shape}")
+        continue
+
         processed_post = preprocessor.preprocess_post(raw_post)
 
         if processed_pre is None or processed_post is None:
