@@ -5,7 +5,6 @@ Runs calibration then fits dipoles to all trials for one subject.
 Outputs: {subject}_calibration_amplitudes.npy
          {subject}_intervention_amplitudes.npy
 """
-import mne
 import numpy as np
 import os
 import argparse
@@ -18,7 +17,10 @@ except ImportError:
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
-mne.set_log_level("ERROR")
+def _load_post_epochs(subject_directory, subject, group_label):
+    epoch_path = os.path.join(subject_directory, f"{subject}_{group_label}_post.npy")
+    epochs = np.load(epoch_path)
+    return epochs
 
 
 def run_fitting(subject, subjects_directory_eeg, forward_path):
@@ -30,26 +32,21 @@ def run_fitting(subject, subjects_directory_eeg, forward_path):
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
-    try:
-        epochs = mne.read_epochs(os.path.join(subject_directory, f'{subject}_calibration_post.fif'), verbose=False)
-    except FileNotFoundError:
-        print(f"ERROR: Could not find post-stimulus epoch file for subject {subject}. Skipping.")
+    calibration_epochs = _load_post_epochs(subject_directory, subject, "calibration")
+    if calibration_epochs is None:
+        print(f"ERROR: Could not load calibration post-stimulus epochs for subject {subject}. Skipping.")
         return None
 
     fitter = DipoleFitter(forward_path)
-    _ = fitter.calibrate(epochs.get_data(copy=False))
+    _ = fitter.calibrate(calibration_epochs)
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
     for group_label in ('calibration', 'intervention'):
-        epoch_path = os.path.join(subject_directory, f'{subject}_{group_label}_post.fif')
-        try:
-            epochs = mne.read_epochs(epoch_path, verbose=False)
-        except FileNotFoundError:
-            print(f"ERROR: Could not find {epoch_path}. Skipping {group_label}.")
+        epoch_data = _load_post_epochs(subject_directory, subject, group_label)
+        if epoch_data is None:
             continue
 
-        epoch_data = epochs.get_data(copy=False)
         amplitudes = np.array([fitter.fit_trial(epoch_data[i]) for i in range(len(epoch_data))])
 
         os.makedirs(subject_directory, exist_ok=True)
