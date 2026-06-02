@@ -26,7 +26,6 @@ optimizer_type_pretrain: "AdamW"
 weight_decay_pretrain: 0.0
 
 # --- Phase 2: subject-specific calibration (first 100 trials) ---
-use_subject_specific_calibration: true
 num_calibration_trials: 100
 calibration_epochs: 50
 lr_calibration: 0.0001

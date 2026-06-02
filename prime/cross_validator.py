@@ -435,23 +435,14 @@ class CrossValidator:
         self.console.print(f"      [bold]Pre-Calib ROC AUC: {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
 
         # --- Split data for calibration and online phases ---
-        do_subject_calibration = getattr(self.args, "use_subject_specific_calibration", True)
-
-        if do_subject_calibration and metadata is not None and 'period' in metadata.columns:
-            cal_mask = (metadata['period'] == 'calibration').values
-            int_mask = (metadata['period'] == 'intervention').values
-            calibration_epochs_pre = epochs[cal_mask]
-            online_epochs_pre = epochs[int_mask]
-            calibration_labels = labels_ground_truth[cal_mask]
-            online_labels_for_finetuning = labels_ground_truth[int_mask]
-            online_labels_for_eval = labels_for_eval[int_mask]
-            online_is_extreme_mask = is_extreme_mask[int_mask]
-        else:
-            calibration_epochs_pre = None
-            online_epochs_pre = epochs
-            online_labels_for_finetuning = labels_ground_truth
-            online_labels_for_eval = labels_for_eval
-            online_is_extreme_mask = is_extreme_mask
+        cal_mask = (metadata['period'] == 'calibration').values
+        int_mask = (metadata['period'] == 'intervention').values
+        calibration_epochs_pre = epochs[cal_mask]
+        online_epochs_pre = epochs[int_mask]
+        calibration_labels = labels_ground_truth[cal_mask]
+        online_labels_for_finetuning = labels_ground_truth[int_mask]
+        online_labels_for_eval = labels_for_eval[int_mask]
+        online_is_extreme_mask = is_extreme_mask[int_mask]
 
         # --- STAGE 2: CALIBRATION ---
         if calibration_epochs_pre is not None and len(calibration_epochs_pre) > 0:
