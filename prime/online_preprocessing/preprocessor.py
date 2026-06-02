@@ -669,47 +669,6 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
 
 # ==================== Single-trial processing ====================
-
-def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
-    """Preprocess a single pre-stimulus trial using calibrated parameters."""
-    dicts = cfg.to_dicts()
-    trial_reject_opts = dicts['trial_reject_opts']
-    filter_opts = dicts['filter_opts']
-
-    if calibration_params['bad_channels']:
-        epoch_pre, _ = _interpolate_bad_channels(
-            epoch_pre, calibration_params['bad_channels'],
-            calibration_params['channel_interpolation_info'])
-
-    if cfg.use_ica_on_pre:
-        raise NotImplementedError(
-            "Applying ICA to pre-stimulus in single-trials is not currently implemented")
-
-    data = epoch_pre.get_data(copy=False)
-
-    data = _apply_filter(
-        data, calibration_params['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
-
-    # Mean subtraction (average reference)
-    data -= np.mean(data, axis=1)
-
-    # Global MAD check
-    mad_val = median_abs_deviation(data, axis=(1, 2))[0]
-    z_mad = (mad_val - calibration_params['good_trial_stats_pre']['mads_mean']) / calibration_params['good_trial_stats_pre']['mads_std']
-    threshold = trial_reject_opts['pre']['global_zscore_threshold']
-    if z_mad < threshold[0] or z_mad > threshold[1]:
-        return False
-
-    # Local MAD check
-    local_mad = median_abs_deviation(data, axis=2)
-    z_local = zscore(local_mad, axis=1)
-    if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
-        return False
-
-    epoch_pre._data = data
-    return epoch_pre
-
-
 def preprocess_post_trial(epoch_post, calibration_params, cfg):
     """Preprocess a single post-stimulus trial using calibrated parameters."""
     dicts = cfg.to_dicts()
@@ -973,6 +932,8 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
+        # print raw buffer size
+        print(f"Raw pre buffer shape: {raw_pre.shape}")
         pre_stim = crop_eeg_buffer(
             raw_pre,
             self._raw_pre_time_offsets,
