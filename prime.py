@@ -56,7 +56,7 @@ EVENT_LOOKAHEAD_SEC = 0.005
 
 
 @contextmanager
-def _profile(label: str) -> Iterator[None]:
+def profile(label: str) -> Iterator[None]:
     start = time.perf_counter()
     try:
         yield
@@ -92,7 +92,7 @@ class Decider:
         if self.event_times.ndim == 0:
             self.event_times = np.array([float(self.event_times)])
 
-        self.pending_processed_pre: Optional[mne.EpochsArray] = None
+        self.pending_pre: Optional[mne.EpochsArray] = None
 
         self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
@@ -156,20 +156,20 @@ class Decider:
         print(f"Pre-epoch sha256={pre_checksum}")
 
         if not self.is_calibrated:
-            with _profile("add_raw_pre_epoch"):
+            with profile("add_raw_pre_epoch"):
                 self.preprocessor.add_raw_pre_epoch(eeg_buffer)
             print(f"Calibration pre epoch queued for trial {self.trial_count + 1}/{N_CALIBRATION_TRIALS}")
             return None
 
-        with _profile("preprocess_pre"):
-            processed_pre = self.preprocessor.preprocess_pre(eeg_buffer)
-        self.pending_processed_pre = processed_pre
-        if processed_pre is None:
+        with profile("preprocess_pre"):
+            pre = self.preprocessor.preprocess_pre(eeg_buffer)
+        self.pending_pre = pre
+        if pre is None:
             print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
             return None
 
-        with _profile("predict"):
-            probability = self.predictor.predict(processed_pre)
+        with profile("predict"):
+            probability = self.predictor.predict(pre)
         print(f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)")
         return None
 
@@ -186,31 +186,33 @@ class Decider:
         print(f"Post-epoch sha256={post_checksum}")
 
         if not self.is_calibrated:
-            with _profile("add_raw_post_epoch"):
+            with profile("add_raw_post_epoch"):
                 self.preprocessor.add_raw_post_epoch(eeg_buffer)
+
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
-            if self.trial_count >= N_CALIBRATION_TRIALS:
-                with _profile("run_calibration"):
-                    self.run_calibration()
+            if self.trial_count == N_CALIBRATION_TRIALS:
+                self.run_calibration()
+
         else:
             self.trial_count += 1
-            processed_pre = self.pending_processed_pre
-            self.pending_processed_pre = None
+            pre = self.pending_pre
+            self.pending_pre = None
 
-            with _profile("preprocess_post"):
-                processed_post = self.preprocessor.preprocess_post(eeg_buffer)
-            if processed_pre is None or processed_post is None:
+            with profile("preprocess_post"):
+                post = self.preprocessor.preprocess_post(eeg_buffer)
+
+            if pre is None or post is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
-            else:
-                with _profile("fit_trial"):
-                    amplitude = self.dipole_fitter.fit_trial(processed_post)
-                with _profile("normalize"):
-                    label = self.normalizer.transform(amplitude)
-                with _profile("finetune"):
-                    self.predictor.finetune(processed_pre, label)
-                print(f"Trial {self.trial_count}: label={label:.6f}")
+                return None
+
+            with profile("finetune"):
+                amplitude = self.dipole_fitter.fit_trial(post)
+                label = self.normalizer.transform(amplitude)
+                self.predictor.finetune(pre, label)
+
+            print(f"Trial {self.trial_count}: label={label:.6f}")
 
         return None
 
@@ -219,27 +221,14 @@ class Decider:
     # ==================================================================
 
     def run_calibration(self) -> None:
-        print("\n" + "=" * 60)
-        print("RUNNING CALIBRATION")
-        print("=" * 60)
+        print("Running calibration...")
 
-        with _profile("preprocessor.calibrate"):
-            cal_pre, cal_post = self.preprocessor.calibrate()
-        print(f"  Preprocessor done: {len(cal_pre)} trials survived rejection")
+        t0 = time.perf_counter()
 
-        with _profile("dipole_fitter.calibrate"):
-            amplitudes = self.dipole_fitter.calibrate(cal_post)
-        print("  Dipole fitter calibrated")
+        cal_pre, cal_post = self.preprocessor.calibrate()
+        amplitudes = self.dipole_fitter.calibrate(cal_post)
+        labels = self.normalizer.calibrate(amplitudes)
+        self.predictor.calibrate(cal_pre, labels)
 
-        with _profile("normalizer.calibrate"):
-            labels = self.normalizer.calibrate(amplitudes)
-        print("  TEP normalizer calibrated")
-
-        with _profile("predictor.calibrate"):
-            self.predictor.calibrate(cal_pre, labels)
-        print("  Predictor calibrated")
-
+        print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         self.is_calibrated = True
-        print("=" * 60)
-        print("CALIBRATION COMPLETE")
-        print("=" * 60 + "\n")
