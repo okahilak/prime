@@ -34,12 +34,9 @@ from prime.tep_normalizer import TEPNormalizer
 # Paths — adjust per setup
 # ---------------------------------------------------------------------------
 
-PRIME_DIR = Path(__file__).parent / "prime"
-DATA_ROOT = Path(__file__).parent / "data"
-
-FORWARD_PATH = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = PRIME_DIR / "results" / "train" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = PRIME_DIR / "results" / "train" / "global_backrotation.npy"
+FORWARD_PATH = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
+PRETRAINED_MODEL_PATH = Path("results") / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
 
 # ---------------------------------------------------------------------------
 # Protocol parameters
@@ -83,7 +80,7 @@ class Decider:
 
         subject_id_str = f"sub-{subject_id:03d}"
 
-        events_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
+        events_path = Path("data") / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
         self.event_times = np.loadtxt(events_path, dtype=np.float64)
         self.next_event_idx = 0
         if self.event_times.ndim == 0:
@@ -91,14 +88,14 @@ class Decider:
 
         self.pending_pre: Optional[mne.EpochsArray] = None
 
-        self.preprocessor = Preprocessor(str(FORWARD_PATH))
-        self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
+        self.preprocessor = Preprocessor(FORWARD_PATH)
+        self.dipole_fitter = DipoleFitter(FORWARD_PATH)
         self.normalizer = TEPNormalizer()
 
-        global_backrotation = np.load(str(GLOBAL_BACKROTATION_PATH))
+        global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
         self.predictor = OnlinePredictor(
             global_backrotation,
-            model_path=str(PRETRAINED_MODEL_PATH),
+            model_path=PRETRAINED_MODEL_PATH,
             seed=SEED,
         )
 

@@ -37,12 +37,9 @@ from prime.tep_normalizer import TEPNormalizer
 # Paths — adjust per setup
 # ---------------------------------------------------------------------------
 
-PRIME_DIR = Path(__file__).parent / "prime"
-DATA_ROOT = Path(__file__).parent / "data"
-
-FORWARD_PATH = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = PRIME_DIR / "results" / "train" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = PRIME_DIR / "results" / "train" / "global_backrotation.npy"
+FORWARD_PATH = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
+PRETRAINED_MODEL_PATH = Path("results") / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
 
 # ---------------------------------------------------------------------------
 # Protocol parameters
@@ -76,14 +73,14 @@ class Decider:
         self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_time_range()
         self.raw_post_tmin, self.raw_post_tmax = get_raw_post_time_range()
 
-        self.preprocessor = Preprocessor(str(FORWARD_PATH))
-        self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
+        self.preprocessor = Preprocessor(FORWARD_PATH)
+        self.dipole_fitter = DipoleFitter(FORWARD_PATH)
         self.normalizer = TEPNormalizer()
 
-        global_backrotation = np.load(str(GLOBAL_BACKROTATION_PATH))
+        global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
         self.predictor = OnlinePredictor(
             global_backrotation,
-            model_path=str(PRETRAINED_MODEL_PATH),
+            model_path=PRETRAINED_MODEL_PATH,
             seed=SEED,
         )
 
