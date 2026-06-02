@@ -15,6 +15,7 @@ Core Components:
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -26,6 +27,7 @@ from moabb.paradigms.base import BaseParadigm
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
+from prime.prime_config import get_pre_epoch_time_range, get_processed_sfreq
 from prime.tep_normalizer import TEPNormalizer
 from prime.tta_wrapper import (
     PYRIEMANN_AVAILABLE,
@@ -40,6 +42,36 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 DATA_ROOT_PATH = Path(__file__).resolve().parent.parent / "data" / "processed"
+FSAVERAGE_FORWARD = DATA_ROOT_PATH.parent / "fsaverage" / "fsaverage-fwd.fif"
+
+
+@lru_cache(maxsize=8)
+def _channel_names_for_epochs(n_channels: int) -> List[str]:
+    if FSAVERAGE_FORWARD.exists():
+        names = mne.read_forward_solution(FSAVERAGE_FORWARD, verbose=False).ch_names
+        if len(names) == n_channels:
+            return list(names)
+    return [f"Ch{i + 1}" for i in range(n_channels)]
+
+
+def _epochs_from_npy(path: Path) -> mne.BaseEpochs:
+    """Load pre-stimulus epochs from a (trials, channels, times) .npy file."""
+    data = np.load(path)
+    if data.ndim != 3:
+        raise ValueError(
+            f"Expected 3D array (trials, channels, times), got shape {data.shape} at {path}"
+        )
+    n_trials = data.shape[0]
+    tmin, _ = get_pre_epoch_time_range()
+    sfreq = get_processed_sfreq()
+    ch_names = _channel_names_for_epochs(data.shape[1])
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+    events = np.column_stack([
+        np.arange(n_trials),
+        np.zeros(n_trials, dtype=int),
+        np.ones(n_trials, dtype=int),
+    ])
+    return mne.EpochsArray(data, info=info, events=events, tmin=tmin, verbose=False)
 
 
 # %%
@@ -59,19 +91,26 @@ class TEPDataset(BaseDataset):
 
     def _discover_subjects(self) -> List[int]:
         subjects = set()
-        if not self.data_path_root.is_dir(): return []
+        if not self.data_path_root.is_dir():
+            return []
         for subject_dir in self.data_path_root.glob("sub-*"):
-            if subject_dir.is_dir():
-                match = re.search(r"sub-(\d+)", subject_dir.name)
-                if match: subjects.add(int(match.group(1)))
-        return sorted(list(subjects))
+            if not subject_dir.is_dir():
+                continue
+            match = re.search(r"sub-(\d+)", subject_dir.name)
+            if not match:
+                continue
+            subject_id = int(match.group(1))
+            cal_file = subject_dir / f"sub-{subject_id:03d}_calibration_pre.npy"
+            if cal_file.is_file():
+                subjects.add(subject_id)
+        return sorted(subjects)
 
     def _get_single_subject_data(self, subject: int) -> dict:
         subject_id_str = f"{subject:03d}"
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
 
-        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.fif"
-        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.fif"
+        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.npy"
+        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.npy"
         tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_amplitudes.npy"
         tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_amplitudes.npy"
 
@@ -84,8 +123,8 @@ class TEPDataset(BaseDataset):
         if not tep_int_file.exists():
             raise FileNotFoundError(f"S{subject}: Missing intervention TEP file: {tep_int_file}")
 
-        epochs_cal = mne.read_epochs(eeg_cal_file, preload=True, verbose=False)
-        epochs_int = mne.read_epochs(eeg_int_file, preload=True, verbose=False)
+        epochs_cal = _epochs_from_npy(eeg_cal_file)
+        epochs_int = _epochs_from_npy(eeg_int_file)
 
         try:
             tep_cal = np.load(tep_cal_file)
@@ -114,8 +153,8 @@ class TEPDataset(BaseDataset):
     def data_path(self, subject: int, **kwargs) -> List[str]:
         subject_id_str = f"{subject:03d}"
         paths = [
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_pre.fif",
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_pre.fif",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_pre.npy",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_pre.npy",
         ]
         return [str(p) for p in paths if p.exists()]
 
