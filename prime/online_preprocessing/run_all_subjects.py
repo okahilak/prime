@@ -58,7 +58,7 @@ def dipole_done(subject: str) -> bool:
 
 def _build_prep_env() -> dict:
     prep_env = os.environ.copy()
-    prep_pythonpath = str(SCRIPT_DIR.parent)
+    prep_pythonpath = str(SCRIPT_DIR.parent.parent)
     if prep_env.get("PYTHONPATH"):
         prep_pythonpath = f"{prep_pythonpath}{os.pathsep}{prep_env['PYTHONPATH']}"
     prep_env["PYTHONPATH"] = prep_pythonpath
@@ -82,10 +82,10 @@ def _process_subject(
             print(f"  SKIP preprocess: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m online_preprocessing.preprocess --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime.online_preprocessing.preprocess --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "online_preprocessing.preprocess", "--subject", subject],
+                [python, "-u", "-m", "prime.online_preprocessing.preprocess", "--subject", subject],
                 prep_env,
                 f"preprocess {subject}",
             )
@@ -96,10 +96,10 @@ def _process_subject(
             print(f"  SKIP dipole: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m online_preprocessing.fit_dipole --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime.online_preprocessing.fit_dipole --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "online_preprocessing.fit_dipole", "--subject", subject],
+                [python, "-u", "-m", "prime.online_preprocessing.fit_dipole", "--subject", subject],
                 prep_env,
                 f"dipole fit {subject}",
             )
