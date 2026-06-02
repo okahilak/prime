@@ -929,7 +929,10 @@ class Preprocessor:
                 return None
 
         with _profile("preprocess_pre: crop_to_model_window"):
-            return data[:, self._pre_model_window_slice][np.newaxis, :, :]
+            # Slicing can produce non-contiguous views; force contiguous layout
+            # so torch.from_numpy() never sees negative/unsupported strides.
+            model_window = data[:, self._pre_model_window_slice][np.newaxis, :, :]
+            return np.ascontiguousarray(model_window, dtype=np.float64)
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
