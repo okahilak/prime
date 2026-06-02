@@ -109,7 +109,7 @@ def _process_and_save_trial_group(
     epochs_data, events, info, tmin, preprocessor, subject_output, subject_id, label,
     raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
 ):
-    """Batch-process a pre-indexed group of trials and save pre/post epochs to disk."""
+    """Batch-process a pre-indexed group of trials and save pre/post arrays to disk."""
     n_trials = epochs_data.shape[0]
     pre_list = []
     post_list = []
@@ -134,11 +134,21 @@ def _process_and_save_trial_group(
         else:
             bad_trials.append(i)
 
-    epochs_pre_final = mne.concatenate_epochs(pre_list)
-    epochs_post_final = mne.concatenate_epochs(post_list)
+    if pre_list:
+        epochs_pre_final = np.concatenate(pre_list, axis=0)
+        epochs_post_final = np.concatenate(post_list, axis=0)
+    else:
+        epochs_pre_final = np.empty((0, 0, 0), dtype=np.float64)
+        epochs_post_final = np.empty((0, 0, 0), dtype=np.float64)
 
-    for epoch, segment in zip([epochs_pre_final, epochs_post_final], ['pre', 'post']):
-        epoch.save(os.path.join(subject_output, f"{subject_id}_{label}_{segment}.fif"), overwrite=True)
+    np.save(
+        os.path.join(subject_output, f"{subject_id}_{label}_pre.npy"),
+        epochs_pre_final,
+    )
+    np.save(
+        os.path.join(subject_output, f"{subject_id}_{label}_post.npy"),
+        epochs_post_final,
+    )
 
 
 def _run_online_processing_stage(

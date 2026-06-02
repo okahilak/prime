@@ -653,8 +653,19 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
+    pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
+    post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
+
+    epochs_pre = epochs_pre.crop(pre_epoch_tmin, pre_epoch_tmax, include_tmax=True)
+    epochs_post = epochs_post.crop(post_epoch_tmin, post_epoch_tmax, include_tmax=True)
+
     calibration_params['ica'] = ica
-    return calibration_params, n_successful_trials, epochs_pre, epochs_post
+    return (
+        calibration_params,
+        n_successful_trials,
+        epochs_pre.get_data(copy=False),
+        epochs_post.get_data(copy=False),
+    )
 
 
 # ==================== Single-trial processing ====================
@@ -910,7 +921,7 @@ class Preprocessor:
 
         Returns
         -------
-        tuple[list[mne.EpochsArray], list[mne.EpochsArray]]
+        tuple[np.ndarray, np.ndarray]
             Pre- and post-stimulus calibration epochs that survived rejection.
         """
         if self._awaiting_post:
@@ -918,7 +929,7 @@ class Preprocessor:
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
 
-        calibration_params, n_successful_trials, pre_epochs, post_epochs = preprocess_calibration(
+        calibration_params, n_successful_trials, pre_data, post_data = preprocess_calibration(
             self._epochs_pre.copy(),
             self._epochs_pre_ica.copy(),
             self._epochs_post.copy(),
@@ -928,20 +939,12 @@ class Preprocessor:
         )
         self._calibration_params = calibration_params
 
-        pre_data = pre_epochs.get_data(copy=False)
-        post_data = post_epochs.get_data(copy=False)
-        cal_pre = []
-        cal_post = []
-        for i in range(n_successful_trials):
-            cal_pre.append(self._crop_pre_to_model_window(mne.EpochsArray(
-                pre_data[i:i+1], info=pre_epochs.info,
-                events=pre_epochs.events[i:i+1], tmin=pre_epochs.tmin, verbose=False,
-            )))
-            cal_post.append(self._crop_post_to_tep_window(mne.EpochsArray(
-                post_data[i:i+1], info=post_epochs.info,
-                events=post_epochs.events[i:i+1], tmin=post_epochs.tmin, verbose=False,
-            )))
-        return cal_pre, cal_post
+        if n_successful_trials != pre_data.shape[0] or n_successful_trials != post_data.shape[0]:
+            raise RuntimeError(
+                "mismatch between successful trial count and calibration epoch arrays"
+            )
+
+        return pre_data, post_data
 
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):
@@ -1036,12 +1039,13 @@ class Preprocessor:
             )
         return data[:, :, start:stop]
 
-    def preprocess_post(self, raw_post: np.ndarray) -> mne.EpochsArray | None:
+    def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
 
         Must be called after ``calibrate()``.
 
-        Returns ``None`` if the trial was rejected.
+        Returns a NumPy array with shape (1, n_channels, n_samples), or ``None`` if
+        the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
@@ -1062,7 +1066,7 @@ class Preprocessor:
         result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
         if result_post is False:
             return None
-        return self._crop_post_to_tep_window(result_post)
+        return self._crop_post_to_tep_window(result_post).get_data(copy=False)
 
     # ------------------------------------------------------------------
     # Convenience helpers
