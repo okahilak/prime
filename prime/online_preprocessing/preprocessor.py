@@ -878,7 +878,7 @@ class Preprocessor:
         raw_pre : np.ndarray
             Raw pre-stimulus trial with shape (n_samples, n_channels).
 
-        Returns a NumPy array with shape (n_samples, n_channels), or ``None`` if
+        Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
         the trial was rejected.
         """
         if self._calibration_params is None:
@@ -931,7 +931,7 @@ class Preprocessor:
         with _profile("preprocess_pre: crop_to_model_window"):
             # Slicing can produce non-contiguous views; force contiguous layout
             # so torch.from_numpy() never sees negative/unsupported strides.
-            model_window = data[:, self._pre_model_window_slice][np.newaxis, :, :]
+            model_window = data[:, self._pre_model_window_slice]
             return np.ascontiguousarray(model_window, dtype=np.float64)
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
