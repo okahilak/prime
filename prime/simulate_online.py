@@ -23,6 +23,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import argparse
+import hashlib
 import sys
 import time
 import warnings
@@ -135,7 +136,7 @@ def main():
 
     intervention_labels = []
     predictions = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+    for trial_idx in range(N_CALIBRATION_TRIALS, N_CALIBRATION_TRIALS + 10):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
@@ -151,6 +152,10 @@ def main():
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
+
+        processed_pre_buffer = np.ascontiguousarray(processed_pre.get_data())
+        processed_pre_sha256 = hashlib.sha256(processed_pre_buffer.tobytes()).hexdigest()
+        print(f"Trial {trial_idx + 1}: processed_pre sha256={processed_pre_sha256}")
 
         with profile("predict"):
             probability = predictor.predict(processed_pre)
