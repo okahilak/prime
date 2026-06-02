@@ -142,7 +142,7 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        with profile("preprocess_pre"):
+        with profile("preprocess_pre_total"):
             processed_pre = preprocessor.preprocess_pre(raw_pre)
 
         # Array shape
