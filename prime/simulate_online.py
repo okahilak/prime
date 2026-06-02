@@ -15,16 +15,25 @@ Hard-coded settings:
 - Number of calibration trials: 125
 """
 
-# Force single-threaded BLAS/LAPACK BEFORE importing numpy/scipy/torch.
 import os
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
+import sys
+
+
+def _configure_threading_from_cli() -> bool:
+    # Must run before importing numeric libraries so BLAS/OpenMP picks it up.
+    single_threaded = "--single-threaded" in sys.argv
+    if single_threaded:
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        os.environ["MKL_NUM_THREADS"] = "1"
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    return single_threaded
+
+
+SINGLE_THREADED = _configure_threading_from_cli()
 
 import argparse
 import hashlib
-import sys
 import time
 import warnings
 from contextlib import contextmanager
@@ -74,6 +83,11 @@ def main():
     parser = argparse.ArgumentParser(description="Simulate online processing for a single subject.")
     parser.add_argument("subject_id", type=int, help="Subject ID (e.g. 21 for sub-021)")
     parser.add_argument(
+        "--single-threaded",
+        action="store_true",
+        help="Force single-threaded BLAS/OpenMP execution (default: multi-threaded)",
+    )
+    parser.add_argument(
         "--csv",
         action="store_true",
         help="Load trials from CSV simulator dataset instead of raw epochs",
@@ -86,6 +100,7 @@ def main():
 
     print(f"Subject: {subject_id_str}")
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")
+    print(f"Single-threaded: {SINGLE_THREADED}")
 
     # --- Setup ---
 
