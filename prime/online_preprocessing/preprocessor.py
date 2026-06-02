@@ -15,12 +15,16 @@ Usage
 """
 
 import warnings
+import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
+from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, resample_poly
 
 
 from prime.prime_config import (
@@ -47,6 +51,19 @@ from prime.online_preprocessing.utils.channel_interpolations import (
 from prime.online_preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+@contextmanager
+def _profile(label: str, enabled: bool = False) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
 
 
 def _validate_time_range_within(
@@ -402,6 +419,20 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
+def _resample_buffer_polyphase(
+    data: np.ndarray,
+    sfreq_from: float,
+    sfreq_to: float,
+) -> np.ndarray:
+    """Resample (n_samples, n_channels) using scipy polyphase."""
+    if abs(sfreq_from - sfreq_to) < 1e-9:
+        return data
+    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
+    up = ratio.numerator
+    down = ratio.denominator
+    return resample_poly(data, up=up, down=down, axis=0)
+
+
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -617,7 +648,7 @@ def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
         raise NotImplementedError(
             "Applying ICA to pre-stimulus in single-trials is not currently implemented")
 
-    data = epoch_pre.get_data(copy=True)
+    data = epoch_pre.get_data(copy=False)
 
     data = _apply_filter(
         data, calibration_params['pre_stim_filter'], filter_opts['pad_time'], epoch_pre.info['sfreq'])
@@ -638,8 +669,8 @@ def preprocess_pre_trial(epoch_pre, calibration_params, cfg):
     if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
         return False
 
-    return mne.EpochsArray(data, info=epoch_pre.info, events=epoch_pre.events,
-                           tmin=epoch_pre.times[0], verbose=False)
+    epoch_pre._data = data
+    return epoch_pre
 
 
 def preprocess_post_trial(epoch_post, calibration_params, cfg):
@@ -768,6 +799,11 @@ class Preprocessor:
         self._post_epoch_tmin = post_epoch_tmin
         self._post_epoch_tmax = post_epoch_tmax
         self._opts = cfg.to_dicts()
+        self._processed_sfreq = get_processed_sfreq()
+        self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
+        self._info_processed = self._info.copy()
+        with self._info_processed._unlock():
+            self._info_processed["sfreq"] = self._processed_sfreq
 
         self._epochs_pre = None
         self._epochs_pre_ica = None
@@ -793,10 +829,10 @@ class Preprocessor:
             )
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
-        return epoch_pre.copy().crop(self._pre_epoch_tmin, self._pre_epoch_tmax, include_tmax=True)
+        return epoch_pre.crop(self._pre_epoch_tmin, self._pre_epoch_tmax, include_tmax=True)
 
     def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
-        return epoch_post.copy().crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
+        return epoch_post.crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -887,25 +923,51 @@ class Preprocessor:
         instance._calibration_params = calibration_params
         return instance
 
-    def preprocess_pre(self, raw_pre: np.ndarray) -> mne.EpochsArray | None:
+    def preprocess_pre(
+        self,
+        raw_pre: np.ndarray,
+        verbose: bool = False,
+    ) -> mne.EpochsArray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
         Must be called after ``calibrate()``.
+
+        Parameters
+        ----------
+        raw_pre : np.ndarray
+            Raw pre-stimulus trial with shape (n_samples, n_channels).
+        verbose : bool, default=False
+            If ``True``, print per-step preprocessing timings.
 
         Returns ``None`` if the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        self._validate_raw_pre_shape(raw_pre)
+        with _profile("preprocess_pre.validate_shape", enabled=verbose):
+            self._validate_raw_pre_shape(raw_pre)
 
-        epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
-        epoch_pre = epoch_pre.copy().crop(self._pre_stim_tmin, self._pre_stim_tmax)
-        epoch_pre.resample(get_processed_sfreq(), method='polyphase')
-        result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
+        with _profile("preprocess_pre.crop_to_pre_stim", enabled=verbose):
+            pre_stim = crop_eeg_buffer(
+                raw_pre,
+                self._raw_pre_time_offsets,
+                self._pre_stim_tmin,
+                self._pre_stim_tmax,
+            )
+        with _profile("preprocess_pre.resample", enabled=verbose):
+            pre_stim = _resample_buffer_polyphase(
+                pre_stim,
+                sfreq_from=self._info["sfreq"],
+                sfreq_to=self._processed_sfreq,
+            )
+        with _profile("preprocess_pre.numpy_to_epochs", enabled=verbose):
+            epoch_pre = _numpy_to_epochs_array(pre_stim, self._info_processed, self._pre_stim_tmin)
+        with _profile("preprocess_pre.trial_pipeline", enabled=verbose):
+            result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
-        return self._crop_pre_to_model_window(result_pre)
+        with _profile("preprocess_pre.crop_to_model_window", enabled=verbose):
+            return self._crop_pre_to_model_window(result_pre)
 
     def preprocess_post(self, raw_post: np.ndarray) -> mne.EpochsArray | None:
         """Resample and preprocess a single post-stimulus trial.
