@@ -435,7 +435,9 @@ class CrossValidator:
         self.console.print(f"      [bold]Pre-Calib ROC AUC: {pre_calib_metrics.get('roc_auc_all', np.nan):.4f}[/bold]")
 
         # --- Split data for calibration and online phases ---
-        if metadata is not None and 'period' in metadata.columns:
+        do_subject_calibration = getattr(self.args, "use_subject_specific_calibration", True)
+
+        if do_subject_calibration and metadata is not None and 'period' in metadata.columns:
             cal_mask = (metadata['period'] == 'calibration').values
             int_mask = (metadata['period'] == 'intervention').values
             calibration_epochs_pre = epochs[cal_mask]
