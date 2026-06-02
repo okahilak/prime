@@ -81,18 +81,18 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
-        self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_epoch_time_range()
+        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_epoch_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"
 
         events_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
-        self._event_times = np.loadtxt(events_path, dtype=np.float64)
-        self._next_event_idx = 0
-        if self._event_times.ndim == 0:
-            self._event_times = np.array([float(self._event_times)])
+        self.event_times = np.loadtxt(events_path, dtype=np.float64)
+        self.next_event_idx = 0
+        if self.event_times.ndim == 0:
+            self.event_times = np.array([float(self.event_times)])
 
-        self._pending_processed_pre: Optional[mne.EpochsArray] = None
+        self.pending_processed_pre: Optional[mne.EpochsArray] = None
 
         self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
@@ -108,7 +108,7 @@ class Decider:
         print(
             f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
             f"eeg={num_eeg_channels}  emg={num_emg_channels}  "
-            f"events={len(self._event_times)}"
+            f"events={len(self.event_times)}"
         )
 
     # ==================================================================
@@ -118,8 +118,8 @@ class Decider:
     def get_configuration(self) -> dict[str, Any]:
         # Periodic buffer ends at the current sample; with EVENT_LOOKAHEAD_SEC until the
         # pulse, that sample is raw_pre_tmax relative to the upcoming event.
-        sample_window = [self._raw_pre_tmin + EVENT_LOOKAHEAD_SEC, 0.0]
-        event_sample_window = [self._raw_post_tmin, self._raw_post_tmax]
+        sample_window = [self.raw_pre_tmin + EVENT_LOOKAHEAD_SEC, 0.0]
+        event_sample_window = [self.raw_post_tmin, self.raw_post_tmax]
         return {
             "periodic_processing_interval": 1.0 / self.sampling_frequency,
             "sample_window": sample_window,
@@ -131,16 +131,16 @@ class Decider:
     # Periodic processing (pre-stim, 5 ms before each event)
     # ==================================================================
 
-    def _event_upcoming(self, reference_time: float) -> bool:
-        if self._next_event_idx >= len(self._event_times):
+    def event_upcoming(self, reference_time: float) -> bool:
+        if self.next_event_idx >= len(self.event_times):
             return False
 
-        event_time = float(self._event_times[self._next_event_idx])
+        event_time = float(self.event_times[self.next_event_idx])
         dt = 1.0 / self.sampling_frequency
 
         is_upcoming = abs((event_time - reference_time) - EVENT_LOOKAHEAD_SEC) <= dt / 2
         if is_upcoming:
-            self._next_event_idx += 1
+            self.next_event_idx += 1
 
         return is_upcoming
 
@@ -149,7 +149,7 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
-        if is_warm_up or not self._event_upcoming(reference_time):
+        if is_warm_up or not self.event_upcoming(reference_time):
             return None
 
         pre_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
@@ -163,7 +163,7 @@ class Decider:
 
         with _profile("preprocess_pre"):
             processed_pre = self.preprocessor.preprocess_pre(eeg_buffer)
-        self._pending_processed_pre = processed_pre
+        self.pending_processed_pre = processed_pre
         if processed_pre is None:
             print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
             return None
@@ -193,11 +193,11 @@ class Decider:
 
             if self.trial_count >= N_CALIBRATION_TRIALS:
                 with _profile("run_calibration"):
-                    self._run_calibration()
+                    self.run_calibration()
         else:
             self.trial_count += 1
-            processed_pre = self._pending_processed_pre
-            self._pending_processed_pre = None
+            processed_pre = self.pending_processed_pre
+            self.pending_processed_pre = None
 
             with _profile("preprocess_post"):
                 processed_post = self.preprocessor.preprocess_post(eeg_buffer)
@@ -218,7 +218,7 @@ class Decider:
     # Calibration
     # ==================================================================
 
-    def _run_calibration(self) -> None:
+    def run_calibration(self) -> None:
         print("\n" + "=" * 60)
         print("RUNNING CALIBRATION")
         print("=" * 60)
