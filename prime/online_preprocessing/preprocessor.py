@@ -54,10 +54,7 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
 @contextmanager
-def _profile(label: str, enabled: bool = False) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
+def _profile(label: str) -> Iterator[None]:
     start = time.perf_counter()
     try:
         yield
@@ -858,73 +855,80 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
-        # print raw buffer size
-        print(f"Raw pre buffer shape: {raw_pre.shape}")
-        pre_stim = crop_eeg_buffer(
-            raw_pre,
-            self._raw_pre_time_offsets,
-            self._pre_stim_tmin,
-            self._pre_stim_tmax,
-        )
-        pre_stim = _resample_buffer_polyphase(
-            pre_stim,
-            sfreq_from=self._info["sfreq"],
-            sfreq_to=self._processed_sfreq,
-        )
+        with _profile("preprocess_pre: crop_eeg_buffer"):
+            pre_stim = crop_eeg_buffer(
+                raw_pre,
+                self._raw_pre_time_offsets,
+                self._pre_stim_tmin,
+                self._pre_stim_tmax,
+            )
+        with _profile("preprocess_pre: resample_polyphase"):
+            pre_stim = _resample_buffer_polyphase(
+                pre_stim,
+                sfreq_from=self._info["sfreq"],
+                sfreq_to=self._processed_sfreq,
+            )
         # Keep pre-stim single-trial preprocessing fully in NumPy.
-        data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
+        with _profile("preprocess_pre: to_numpy_float64"):
+            data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
 
         if self._calibration_params['bad_channels']:
-            interpolation_info = self._calibration_params['channel_interpolation_info']
-            data[..., interpolation_info['bads_idx'], :] = np.matmul(
-                interpolation_info['interpolation_matrix'],
-                data[..., interpolation_info['goods_idx'], :],
-            )
+            with _profile("preprocess_pre: interpolate_bad_channels"):
+                interpolation_info = self._calibration_params['channel_interpolation_info']
+                data[..., interpolation_info['bads_idx'], :] = np.matmul(
+                    interpolation_info['interpolation_matrix'],
+                    data[..., interpolation_info['goods_idx'], :],
+                )
 
         filter_opts = self._opts['filter_opts']
-        data = _apply_filter(
-            data,
-            self._calibration_params['pre_stim_filter'],
-            filter_opts['pad_time'],
-            self._processed_sfreq,
-        )
+        with _profile("preprocess_pre: apply_filter"):
+            data = _apply_filter(
+                data,
+                self._calibration_params['pre_stim_filter'],
+                filter_opts['pad_time'],
+                self._processed_sfreq,
+            )
 
         # Mean subtraction (average reference).
-        data -= np.mean(data, axis=1, keepdims=True)
+        with _profile("preprocess_pre: mean_subtraction"):
+            data -= np.mean(data, axis=1, keepdims=True)
 
         trial_reject_opts = self._opts['trial_reject_opts']
 
         # Global MAD check.
-        mad_val = median_abs_deviation(data, axis=(1, 2))[0]
-        z_mad = (
-            mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
-        ) / self._calibration_params['good_trial_stats_pre']['mads_std']
-        threshold = trial_reject_opts['pre']['global_zscore_threshold']
-        if z_mad < threshold[0] or z_mad > threshold[1]:
-            return None
+        with _profile("preprocess_pre: global_mad_check"):
+            mad_val = median_abs_deviation(data, axis=(1, 2))[0]
+            z_mad = (
+                mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
+            ) / self._calibration_params['good_trial_stats_pre']['mads_std']
+            threshold = trial_reject_opts['pre']['global_zscore_threshold']
+            if z_mad < threshold[0] or z_mad > threshold[1]:
+                return None
 
         # Local MAD check.
-        local_mad = median_abs_deviation(data, axis=2)
-        z_local = zscore(local_mad, axis=1)
-        if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
-            return None
+        with _profile("preprocess_pre: local_mad_check"):
+            local_mad = median_abs_deviation(data, axis=2)
+            z_local = zscore(local_mad, axis=1)
+            if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
+                return None
 
-        start = time_to_sample(
-            self._pre_epoch_tmin,
-            self._pre_stim_tmin,
-            self._processed_sfreq,
-        )
-        stop = start + epoch_n_times(
-            self._pre_epoch_tmin,
-            self._pre_epoch_tmax,
-            self._processed_sfreq,
-        )
-        if start < 0 or stop > data.shape[2]:
-            raise ValueError(
-                f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
-                f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
+        with _profile("preprocess_pre: crop_to_model_window"):
+            start = time_to_sample(
+                self._pre_epoch_tmin,
+                self._pre_stim_tmin,
+                self._processed_sfreq,
             )
-        return data[:, :, start:stop]
+            stop = start + epoch_n_times(
+                self._pre_epoch_tmin,
+                self._pre_epoch_tmax,
+                self._processed_sfreq,
+            )
+            if start < 0 or stop > data.shape[2]:
+                raise ValueError(
+                    f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
+                    f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
+                )
+            return data[:, :, start:stop]
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
