@@ -38,9 +38,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 mne.set_log_level("ERROR")
 
 # --- Local imports ---
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
-
 from prime.prime_config import get_raw_post_time_range, get_raw_pre_time_range
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
@@ -53,10 +50,9 @@ from prime.online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 # Hard-coded constants
 # =============================================================================
 N_CALIBRATION_TRIALS = 125
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
 
-PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
-GLOBAL_BACKROTATION_PATH = "results/train/global_backrotation.npy"
+PRETRAINED_MODEL_PATH = Path("prime") / "results" / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("prime") / "results" / "train" / "global_backrotation.npy"
 
 SEED = 42
 
@@ -89,20 +85,20 @@ def main():
 
     subject_id = args.subject_id
     subject_id_str = f"sub-{subject_id:03d}"
-    predictions_path = f"results/test/predictions_subj_{subject_id}.npz"
+    predictions_path = Path("prime") / "results" / "test" / f"predictions_subj_{subject_id}.npz"
 
     print(f"Subject: {subject_id_str}")
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")
 
     # --- Setup ---
 
-    forward_path = DATA_ROOT / "fsaverage" / "fsaverage-fwd.fif"
+    forward_path = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
 
     if args.csv:
-        json_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}.json"
+        json_path = Path("data") / "simulator" / subject_id_str / f"{subject_id_str}.json"
         trial_loader = TrialLoaderFromCsv(json_path)
     else:
         trial_loader = TrialLoader(subject_id_str)
