@@ -134,7 +134,7 @@ def main():
 
     intervention_labels = []
     predictions = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, N_CALIBRATION_TRIALS + 10):
+    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
