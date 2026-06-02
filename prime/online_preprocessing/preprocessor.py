@@ -61,7 +61,10 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
 @contextmanager
-def _profile(label: str) -> Iterator[None]:
+def _profile(label: str, enabled: bool = False) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
     start = time.perf_counter()
     try:
         yield
@@ -881,14 +884,16 @@ class Preprocessor:
         Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
         the trial was rejected.
         """
+        PROFILING_ENABLED = False
+
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
         cal = self._calibration_params
-        with _profile("preprocess_pre: crop_eeg_buffer"):
+        with _profile("preprocess_pre: crop_eeg_buffer", PROFILING_ENABLED):
             pre_stim = raw_pre[self._pre_stim_crop_slice]
-        with _profile("preprocess_pre: resample_polyphase"):
+        with _profile("preprocess_pre: resample_polyphase", PROFILING_ENABLED):
             if self._resample_up != self._resample_down:
                 pre_stim = resample_poly(
                     pre_stim,
@@ -897,15 +902,15 @@ class Preprocessor:
                     axis=0,
                     window=self._resample_window_taps,
                 )
-        with _profile("preprocess_pre: to_numpy_float64"):
+        with _profile("preprocess_pre: to_numpy_float64", PROFILING_ENABLED):
             data = np.ascontiguousarray(pre_stim.T, dtype=np.float64)
 
         if cal['bad_channels']:
-            with _profile("preprocess_pre: interpolate_bad_channels"):
+            with _profile("preprocess_pre: interpolate_bad_channels", PROFILING_ENABLED):
                 ii = cal['channel_interpolation_info']
                 data[ii['bads_idx'], :] = ii['interpolation_matrix'] @ data[ii['goods_idx'], :]
 
-        with _profile("preprocess_pre: apply_filter"):
+        with _profile("preprocess_pre: apply_filter", PROFILING_ENABLED):
             data, self._pre_filter_workspace = apply_filter_2d(
                 data,
                 cal['pre_stim_filter'],
@@ -913,22 +918,22 @@ class Preprocessor:
                 self._pre_filter_workspace,
             )
 
-        with _profile("preprocess_pre: mean_subtraction"):
+        with _profile("preprocess_pre: mean_subtraction", PROFILING_ENABLED):
             data -= data.mean(axis=0, keepdims=True)
 
-        with _profile("preprocess_pre: global_mad_check"):
+        with _profile("preprocess_pre: global_mad_check", PROFILING_ENABLED):
             z_mad = (_mad_scalar_2d(data) - self._pre_mads_mean) / self._pre_mads_std
             thr = self._pre_global_z_thresh
             if z_mad < thr[0] or z_mad > thr[1]:
                 return None
 
-        with _profile("preprocess_pre: local_mad_check"):
+        with _profile("preprocess_pre: local_mad_check", PROFILING_ENABLED):
             local_mad = _mad_per_channel_2d(data)
             z_local = (local_mad - local_mad.mean()) / local_mad.std(ddof=0)
             if np.any(np.abs(z_local) > self._pre_local_z_thresh):
                 return None
 
-        with _profile("preprocess_pre: crop_to_model_window"):
+        with _profile("preprocess_pre: crop_to_model_window", PROFILING_ENABLED):
             # Slicing can produce non-contiguous views; force contiguous layout
             # so torch.from_numpy() never sees negative/unsupported strides.
             model_window = data[:, self._pre_model_window_slice]
