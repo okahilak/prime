@@ -313,10 +313,18 @@ class CrossValidator:
             assert fold_idx is not None, "fold_idx is required in CV mode."
         checkpoint_dir = Path(checkpoint_dir)
         if self.is_cv:
-            chkpt_path = checkpoint_dir / f"pretrained_fold_{fold_idx+1}.pt"
+            checkpoint_candidates = [checkpoint_dir / f"pretrained_fold_{fold_idx+1}.pt"]
         else:
-            chkpt_path = checkpoint_dir / "pretrained.pt"
-        assert chkpt_path.is_file(), f"Checkpoint not found: {chkpt_path}"
+            checkpoint_candidates = [
+                checkpoint_dir / "pretrained.pt",
+                checkpoint_dir / "pretrained_all.pt",
+            ]
+        
+        chkpt_path = next((path for path in checkpoint_candidates if path.is_file()), None)
+        assert chkpt_path is not None, (
+            "Checkpoint not found. Tried: "
+            + ", ".join(str(path) for path in checkpoint_candidates)
+        )
 
         self.model_path = chkpt_path
         self.console.print(f"  Loaded checkpoint: {chkpt_path}")
@@ -324,10 +332,21 @@ class CrossValidator:
         # Load back-rotation matrix if available
         if getattr(self.args, "use_backrotation", False):
             if self.is_cv:
-                backrotation_path = checkpoint_dir / f"global_backrotation_fold_{fold_idx+1}.npy"
+                backrotation_candidates = [
+                    checkpoint_dir / f"global_backrotation_fold_{fold_idx+1}.npy"
+                ]
             else:
-                backrotation_path = checkpoint_dir / "global_backrotation.npy"
-            assert backrotation_path.exists(), f"Back-rotation matrix not found: {backrotation_path}"
+                backrotation_candidates = [
+                    checkpoint_dir / "global_backrotation.npy",
+                    checkpoint_dir / "global_backrotation_all.npy",
+                ]
+            
+            backrotation_path = next((path for path in backrotation_candidates if path.exists()), None)
+            assert backrotation_path is not None, (
+                "Back-rotation matrix not found. Tried: "
+                + ", ".join(str(path) for path in backrotation_candidates)
+            )
+            
             self.global_backrotation = np.load(backrotation_path)
             self.console.print(f"  [green]Loaded global back-rotation matrix from {backrotation_path.name}.[/green]")
 
@@ -394,7 +413,11 @@ class CrossValidator:
 
         # --- Build predictor ---
         predictor = OnlinePredictor(
-            self.global_backrotation, model_path=self.model_path, seed=self.args.seed,
+            self.global_backrotation,
+            model_path=self.model_path,
+            seed=self.args.seed,
+            args=self.args,
+            device=self.device,
         )
         if self.model_path is not None:
             self.console.print("        Loaded pre-trained state.")
