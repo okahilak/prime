@@ -444,6 +444,6 @@ class OnlinePredictor:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=0,
-            pin_memory=torch.cuda.is_available(),
+            pin_memory=True,
             generator=generator,
         )

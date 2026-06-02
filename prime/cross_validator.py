@@ -75,7 +75,7 @@ def create_dataloader(epochs: np.ndarray, labels: np.ndarray, batch_size: int,
 
     return DataLoader(
         dataset, batch_size=batch_size, shuffle=shuffle_data,
-        num_workers=0, pin_memory=torch.cuda.is_available(), generator=generator,
+        num_workers=0, pin_memory=True, generator=generator,
     )
 
 
