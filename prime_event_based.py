@@ -77,8 +77,8 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self._raw_pre_tmin, self._raw_pre_tmax = get_raw_pre_epoch_time_range()
-        self._raw_post_tmin, self._raw_post_tmax = get_raw_post_epoch_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_epoch_time_range()
+        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_epoch_time_range()
 
         self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
@@ -123,10 +123,10 @@ class Decider:
         """Process a trial event. Mirrors simulate_online.py trial-by-trial logic."""
 
         raw_pre = crop_eeg_buffer(
-            eeg_buffer, time_offsets, self._raw_pre_tmin, self._raw_pre_tmax,
+            eeg_buffer, time_offsets, self.raw_pre_tmin, self.raw_pre_tmax,
         )
         raw_post = crop_eeg_buffer(
-            eeg_buffer, time_offsets, self._raw_post_tmin, self._raw_post_tmax,
+            eeg_buffer, time_offsets, self.raw_post_tmin, self.raw_post_tmax,
         )
 
         pre_checksum = hashlib.sha256(raw_pre.tobytes()).hexdigest()
@@ -143,7 +143,7 @@ class Decider:
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
             if self.trial_count >= N_CALIBRATION_TRIALS:
-                self._run_calibration()
+                self.run_calibration()
 
         else:
             # --- Intervention phase ---
@@ -168,26 +168,15 @@ class Decider:
     # Calibration
     # ==================================================================
 
-    def _run_calibration(self) -> None:
-        """Run the full calibration pipeline (matches simulate_online.py)."""
-        print("\n" + "=" * 60)
-        print("RUNNING CALIBRATION")
-        print("=" * 60)
+    def run_calibration(self) -> None:
+        print("Running calibration...")
+
+        t0 = time.perf_counter()
 
         cal_pre, cal_post = self.preprocessor.calibrate()
-        print(f"  Preprocessor done: {len(cal_pre)} trials survived rejection")
-
         amplitudes = self.dipole_fitter.calibrate(cal_post)
-        print(f"  Dipole fitter calibrated")
-
         labels = self.normalizer.calibrate(amplitudes)
-        print(f"  TEP normalizer calibrated")
-
         self.predictor.calibrate(cal_pre, labels)
-        print(f"  Predictor calibrated")
 
+        print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         self.is_calibrated = True
-        print("=" * 60)
-        print("CALIBRATION COMPLETE")
-        print("=" * 60 + "\n")
-
