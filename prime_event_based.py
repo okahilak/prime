@@ -28,10 +28,6 @@ from typing import Any, Optional
 import mne
 import numpy as np
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-mne.set_log_level("ERROR")
-
 from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
