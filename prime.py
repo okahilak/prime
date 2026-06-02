@@ -88,11 +88,10 @@ class Decider:
 
         events_path = DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
         self._event_times = np.loadtxt(events_path, dtype=np.float64)
+        self._next_event_idx = 0
         if self._event_times.ndim == 0:
             self._event_times = np.array([float(self._event_times)])
-        self._next_event_idx = 0
 
-        self._pre_handled_for_upcoming_event = False
         self._pending_processed_pre: Optional[mne.EpochsArray] = None
 
         self.preprocessor = Preprocessor(str(FORWARD_PATH))
@@ -135,9 +134,15 @@ class Decider:
     def _event_upcoming(self, reference_time: float) -> bool:
         if self._next_event_idx >= len(self._event_times):
             return False
+
         event_time = float(self._event_times[self._next_event_idx])
         dt = 1.0 / self.sampling_frequency
-        return abs((event_time - reference_time) - EVENT_LOOKAHEAD_SEC) <= dt / 2
+
+        is_upcoming = abs((event_time - reference_time) - EVENT_LOOKAHEAD_SEC) <= dt / 2
+        if is_upcoming:
+            self._next_event_idx += 1
+
+        return is_upcoming
 
     def process_periodic(
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
@@ -146,13 +151,9 @@ class Decider:
             is_warm_up: bool) -> dict[str, Any] | None:
         if is_warm_up or not self._event_upcoming(reference_time):
             return None
-        if self._pre_handled_for_upcoming_event:
-            return None
 
         pre_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
         print(f"Pre-epoch sha256={pre_checksum}")
-
-        self._pre_handled_for_upcoming_event = True
 
         if not self.is_calibrated:
             with _profile("add_raw_pre_epoch"):
@@ -211,8 +212,6 @@ class Decider:
                     self.predictor.finetune(processed_pre, label)
                 print(f"Trial {self.trial_count}: label={label:.6f}")
 
-        self._next_event_idx += 1
-        self._pre_handled_for_upcoming_event = False
         return None
 
     # ==================================================================
