@@ -198,33 +198,6 @@ class TEPParadigm(BaseParadigm):
         all_amplitudes = full_metadata[self.target_metadata_col].values.astype(float)
         return cal_amplitudes, all_amplitudes
       
-    def _make_realtime_labels(self, full_metadata: pd.DataFrame, cal_mask: pd.Series) -> np.ndarray:
-        """Create labels in metadata order using calibration trials to initialize EWMA/CDF.
-    
-        This preserves the current calibration-then-intervention behavior, but it
-        is also safe if metadata rows are ever not strictly contiguous by period.
-        """
-        cal_amplitudes = full_metadata.loc[cal_mask, self.target_metadata_col].values.astype(float)
-    
-        normalizer = TEPNormalizer(scale_factor=1.0)
-        cal_labels = normalizer.calibrate(cal_amplitudes)
-    
-        y_run = np.full(len(full_metadata), np.nan, dtype=float)
-    
-        cal_mask_np = cal_mask.to_numpy(dtype=bool)
-        y_run[cal_mask_np] = cal_labels
-    
-        intervention_mask = ~cal_mask_np
-        intervention_indices = np.where(intervention_mask)[0]
-        intervention_amplitudes = full_metadata.iloc[intervention_indices][
-            self.target_metadata_col
-        ].values.astype(float)
-    
-        for idx, amplitude in zip(intervention_indices, intervention_amplitudes):
-            y_run[idx] = normalizer.transform(amplitude)
-    
-        return y_run
-
     def get_data(self, dataset, subjects=None, return_epochs=False):
         if not self.is_valid(dataset):
             raise ValueError(f"Dataset {dataset.code} is not compatible.")
@@ -248,7 +221,21 @@ class TEPParadigm(BaseParadigm):
                 log.warning(f"S{subject}: No calibration trials found in metadata. Skipping.")
                 continue
 
-            y_run = self._make_realtime_labels(full_metadata, cal_mask)
+            # Check if calibration trials are contiguous and at the start of metadata.
+            cal_mask_np = cal_mask.to_numpy(dtype=bool)
+            expected_cal_mask = np.zeros(len(full_metadata), dtype=bool)
+            expected_cal_mask[:n_cal] = True
+            if not np.array_equal(cal_mask_np, expected_cal_mask):
+                raise ValueError(
+                    f"S{subject}: Calibration trials must be contiguous and at the start of metadata."
+                )
+
+            # Extract calibration and full amplitude arrays from metadata.
+            cal_amplitudes, all_amplitudes = self._extract_amplitudes(full_metadata, cal_mask)
+            normalizer = TEPNormalizer(scale_factor=1.0)
+            cal_labels = normalizer.calibrate(cal_amplitudes)
+            int_labels = np.array([normalizer.transform(a) for a in all_amplitudes[n_cal:]])
+            y_run = np.concatenate([cal_labels, int_labels])
 
             nan_mask = np.isnan(y_run)
             if np.any(nan_mask):
