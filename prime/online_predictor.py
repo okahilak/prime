@@ -10,7 +10,7 @@ import logging
 import os
 from collections import deque
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, List, Optional, Union
 
 import numpy as np
 import torch
@@ -133,9 +133,11 @@ class OnlinePredictor:
 
     def __init__(
         self,
-        global_backrotation: np.ndarray,
+        global_backrotation: Optional[np.ndarray],
         model_path: Optional[Union[str, Path]] = None,
         seed: int = 42,
+        args: Optional[Any] = None,
+        device: Optional[Union[str, torch.device]] = None,
     ):
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -146,8 +148,32 @@ class OnlinePredictor:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.use_deterministic_algorithms(True, warn_only=True)
 
-        self.device = torch.device("cuda")
-        self.args = OmegaConf.merge(_DEFAULT_ARGS, OmegaConf.create({"seed": seed}))
+        if args is None:
+            args_conf = OmegaConf.create({})
+        elif OmegaConf.is_config(args):
+            args_conf = args
+        else:
+            args_conf = OmegaConf.create(args)
+        
+        self.args = OmegaConf.merge(
+            _DEFAULT_ARGS,
+            args_conf,
+            OmegaConf.create({"seed": seed}),
+        )
+        
+        if device is None:
+            requested_device = getattr(self.args, "device", None)
+            device = torch.device(str(requested_device)) if requested_device else torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+        else:
+            device = torch.device(device)
+        
+        if device.type == "cuda" and not torch.cuda.is_available():
+            log.warning("CUDA was requested but is not available; falling back to CPU.")
+            device = torch.device("cpu")
+        
+        self.device = device
         self.global_backrotation = global_backrotation
 
         # Build model and wrap with TTA
@@ -444,6 +470,6 @@ class OnlinePredictor:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=0,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             generator=generator,
         )
