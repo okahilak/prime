@@ -164,6 +164,7 @@ def main():
 
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
+            continue
 
         with profile("predict"):
             probability = predictor.predict(processed_pre)
