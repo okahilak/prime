@@ -8,8 +8,6 @@ Usage
     fitting_info = fitter.calibrate(trials)       # also stored in fitter.fitting_info
     amplitudes = [fitter.fit_trial(t) for t in trials]  # free orientation
 """
-import time
-
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
@@ -17,12 +15,12 @@ import mne
 from prime.prime_config import epoch_n_times, get_post_epoch_time_range, get_processed_sfreq
 
 
-def dipoles_for_times(evoked_data, times, forward):
+def dipoles_for_indices(evoked_data, forward):
 	data_measured = evoked_data
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	data_measured = data_measured - np.mean(data_measured, axis=0) #data ensured to be in average reference (if already not)
 	n_pos = L.shape[1] // 3  #number of candidate source positions
-	best_dipole_per_time = [] #initialize a list for optimal dipoles for each time point
+	best_dipole_per_index = [] #initialize a list for optimal dipoles for each sample index
 
 	# Batch-precompute all pseudoinverses once.
 	# Reshape L (n_ch, n_pos*3) -> (n_pos, n_ch, 3), then pinv -> (n_pos, 3, n_ch).
@@ -30,8 +28,8 @@ def dipoles_for_times(evoked_data, times, forward):
 	L_3d = L.reshape(L.shape[0], n_pos, 3).transpose(1, 0, 2)  # (n_pos, n_ch, 3)
 	pinv_all = np.linalg.pinv(L_3d)                              # (n_pos, 3, n_ch)
 
-	for time_index, time in enumerate(times): #go through the time range of interest
-		y = data_measured[:, time_index]
+	for index in range(data_measured.shape[1]): #go through all sample indices
+		y = data_measured[:, index]
 		ss_tot = np.dot(y, y)
 
 		# Vectorized dipole fitting over all source positions simultaneously
@@ -51,26 +49,26 @@ def dipoles_for_times(evoked_data, times, forward):
 		position = forward['source_rr'][best_pos_index] #position of the dipole in the source space
 
 		#store the statistics of the best dipole to a dictionary
-		best_dipole_statistics = {'amplitude': amplitude, 'orientation':orientation, 'position': position, 'time':time,
+		best_dipole_statistics = {'amplitude': amplitude, 'orientation':orientation, 'position': position, 'index': index,
 						'position_index':best_pos_index, 'moment': best_dipole_moment, 'r2':best_r2, 'data_predicted': best_data_predicted}
 
-		best_dipole_per_time.append(best_dipole_statistics) #store the best dipole of the current time to the list
+		best_dipole_per_index.append(best_dipole_statistics) #store the best dipole of the current index to the list
 
-	return best_dipole_per_time #return the list of dipoles in dictionaries for each time point
+	return best_dipole_per_index #return the list of dipoles in dictionaries for each index
 
 
-def determine_optimal_time_range(dipoles, min_window_size, max_window_size, window_size_exponent):
-	n_times = len(dipoles)
+def determine_optimal_index_range(dipoles, min_window_size, max_window_size, window_size_exponent):
+	n_indices = len(dipoles)
 	amplitudes = np.array([dipole['amplitude'] for dipole in dipoles])
 	positions = np.array([dipole['position'] for dipole in dipoles])
 	orientations = np.array([dipole['orientation'] for dipole in dipoles])
 	if max_window_size is None:
-		max_window_size = n_times
+		max_window_size = n_indices
 
 	# --- 1. Pre-computation loop ---
 	window_data = []
 	for window_size in range(min_window_size, max_window_size + 1):
-		for start in range(n_times - window_size + 1):
+		for start in range(n_indices - window_size + 1):
 			end = start + window_size
 
 			#Amplitude
@@ -90,7 +88,7 @@ def determine_optimal_time_range(dipoles, min_window_size, max_window_size, wind
             
 			window_data.append({
                 'start': start, 'end': end, 'size': window_size,
-                'pos_stability': pos_stability, 'ori_stability': ori_stability, 'min_amplitude':amplitude_score, 'time_range': (dipoles[start]['time'], dipoles[end - 1]['time']),
+                'pos_stability': pos_stability, 'ori_stability': ori_stability, 'min_amplitude':amplitude_score, 'index_range': (start, end),
             })
 
     # --- 2. Convert to DataFrame and Rank --
@@ -111,10 +109,10 @@ def determine_optimal_time_range(dipoles, min_window_size, max_window_size, wind
 	best_segment_row = df.loc[df['final_score'].idxmax()]
 	start, end = int(best_segment_row['start']), int(best_segment_row['end'])
 
-	time_range = (dipoles[start]['time'], dipoles[end - 1]['time'])
-	dipoles_in_time_range = dipoles[start:end]
+	index_range = (start, end)
+	dipoles_in_index_range = dipoles[start:end]
     
-	return time_range, dipoles_in_time_range
+	return index_range, dipoles_in_index_range
 
 
 def determine_optimal_ori_and_pos(dipoles, forward):
@@ -130,15 +128,11 @@ def determine_optimal_ori_and_pos(dipoles, forward):
 
 # ==================== Single-trial fitting ====================
 
-def fit_dipole_to_single_trial(trial_data, times, forward, position_index, ori_vector, time_range):
-	time_mask = (times >= time_range[0]) & (times <= time_range[1])
-	if not np.any(time_mask):
-		raise ValueError(
-			f"time_range {time_range} does not overlap with available trial times "
-			f"[{times[0]}, {times[-1]}]."
-		)
-	trial_data = trial_data[:, time_mask]
-	times = times[time_mask]
+def fit_dipole_to_single_trial(trial_data, forward, position_index, ori_vector, index_range):
+	start, end = index_range
+	trial_data = trial_data[:, start:end]
+	if trial_data.shape[1] == 0:
+		raise ValueError(f"index_range {index_range} selects no samples.")
 	L = forward['sol']['data'] - np.mean(forward['sol']['data'], axis=0) #leadfield in average reference
 	position_now = position_index*3
 	leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the current position
@@ -150,18 +144,18 @@ def fit_dipole_to_single_trial(trial_data, times, forward, position_index, ori_v
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
-	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, times, ori_vector,
+	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, ori_vector,
 																leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
 
 	return np.abs(best_amplitude) if ori_vector is not None else best_amplitude
 
 
-def get_single_trial_dipole(trial_data, times, ori_vector, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
+def get_single_trial_dipole(trial_data, ori_vector, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv):
 	best_r2 = -np.inf #initialize best r2 value
 	best_r2_default = best_r2
 
-	for time_index, time_now in enumerate(times):
-		data_measured = trial_data[:, time_index] #get the data at the current time point
+	for time_index in range(trial_data.shape[1]):
+		data_measured = trial_data[:, time_index] #get the data at the current sample index
 
 		if ori_vector is not None:
 			#scalar amplitude of the fixed source, from y_measured = amplitude * leadfield_in_ori = leadfield_in_ori * amplitude
@@ -182,13 +176,12 @@ def get_single_trial_dipole(trial_data, times, ori_vector, leadfield_in_ori, lea
 			best_y_predicted = data_predicted #update the best predicted topography (forward-modeled dipole)
 			best_amplitude = amplitude #update the best amplitude
 			best_dipole_moment = dipole_moment #update best dipole moment
-			best_time = time_now #update the best time
 			best_data_measured = data_measured #update the respectively "measured data"
 
 	if best_r2 == best_r2_default:
 		raise ValueError("Did not find a sufficient R2 for trial")
 
-	return best_y_predicted, best_amplitude, ori, best_dipole_moment, best_time, best_r2, best_data_measured
+	return best_y_predicted, best_amplitude, ori, best_dipole_moment, best_r2, best_data_measured
 
 
 # ==================== DipoleFitter class ====================
@@ -211,7 +204,7 @@ class DipoleFitter:
     forward_path : str
         Path to the forward solution.
     min_window_size : int
-        Minimum window size (time samples) for ``determine_optimal_time_range``.
+        Minimum window size (sample indices) for ``determine_optimal_index_range``.
     max_window_size : int or None
         Maximum window size.  ``None`` means unconstrained.
     window_size_exponent : float
@@ -233,9 +226,6 @@ class DipoleFitter:
         self._processed_sfreq = get_processed_sfreq()
         self._post_n_times = epoch_n_times(
             self._post_epoch_tmin, self._post_epoch_tmax, self._processed_sfreq
-        )
-        self._post_times = np.linspace(
-            self._post_epoch_tmin, self._post_epoch_tmax, self._post_n_times
         )
 
     def calibrate(self, cal_epochs_post):
@@ -269,18 +259,18 @@ class DipoleFitter:
             )
 
         evoked = np.mean(epochs, axis=0)
-        best_dipole_per_time = dipoles_for_times(evoked, self._post_times, self._forward)
-        time_range, dipoles_in_time_range = determine_optimal_time_range(
-            best_dipole_per_time, self._min_window_size,
+        best_dipole_per_index = dipoles_for_indices(evoked, self._forward)
+        index_range, dipoles_in_index_range = determine_optimal_index_range(
+            best_dipole_per_index, self._min_window_size,
             self._max_window_size, self._window_size_exponent
         )
         position_index, orientation = determine_optimal_ori_and_pos(
-            dipoles_in_time_range, self._forward
+            dipoles_in_index_range, self._forward
         )
         self._fitting_info = {
             'position_index': position_index,
             'orientation': orientation,
-            'time_range': time_range,
+            'index_range': index_range,
         }
         calibration_amplitudes = np.array([
             self.fit_trial(epochs[i]) for i in range(len(epochs))
@@ -343,9 +333,9 @@ class DipoleFitter:
         else:
             ori_vector = None
         position_index = self._fitting_info['position_index']
-        time_range = self._fitting_info['time_range']
+        index_range = self._fitting_info['index_range']
         return fit_dipole_to_single_trial(
-            epoch, self._post_times, self._forward, position_index, ori_vector, time_range
+            epoch, self._forward, position_index, ori_vector, index_range
         )
 
     @property
