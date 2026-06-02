@@ -16,15 +16,17 @@ Usage
 
 import warnings
 import time
+import math
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from functools import lru_cache
 from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt, resample_poly
+from scipy.signal import butter, filtfilt, resample_poly, firwin
 
 
 from prime.prime_config import (
@@ -61,6 +63,21 @@ def _profile(label: str) -> Iterator[None]:
     finally:
         elapsed = time.perf_counter() - start
         print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
+
+
+def _median_abs_deviation_np(a: np.ndarray, axis) -> np.ndarray:
+    """NumPy equivalent of SciPy median_abs_deviation(..., scale=1.0)."""
+    a = np.asarray(a)
+    median = np.median(a, axis=axis, keepdims=True)
+    return np.median(np.abs(a - median), axis=axis)
+
+
+def _zscore_np(a: np.ndarray, axis) -> np.ndarray:
+    """NumPy equivalent of SciPy zscore(..., ddof=0)."""
+    a = np.asarray(a)
+    mean = np.mean(a, axis=axis, keepdims=True)
+    std = np.std(a, axis=axis, ddof=0, keepdims=True)
+    return (a - mean) / std
 
 
 def _validate_time_range_within(
@@ -416,6 +433,33 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
+@lru_cache(maxsize=8)
+def _cached_resample_up_down(sfreq_from_str: str, sfreq_to_str: str) -> tuple[int, int]:
+    ratio = Fraction(sfreq_to_str) / Fraction(sfreq_from_str)
+    up = ratio.numerator
+    down = ratio.denominator
+    g = math.gcd(up, down)
+    # resample_poly reduces by gcd as well, so we mirror that here.
+    return up // g, down // g
+
+
+@lru_cache(maxsize=16)
+def _cached_resample_window_taps(
+    up: int, down: int, dtype_name: str
+) -> np.ndarray:
+    """
+    Unscaled FIR taps for resample_poly's default window ('kaiser', 5.0).
+
+    Note: resample_poly applies `h *= up` internally after designing/accepting the taps.
+    """
+    max_rate = max(up, down)
+    f_c = 1.0 / max_rate  # cutoff (relative to Nyquist)
+    half_len = 10 * max_rate  # filter half-length
+    taps_len = 2 * half_len + 1
+    dtype = np.dtype(dtype_name)
+    return firwin(taps_len, f_c, window=("kaiser", 5.0)).astype(dtype)
+
+
 def _resample_buffer_polyphase(
     data: np.ndarray,
     sfreq_from: float,
@@ -424,12 +468,18 @@ def _resample_buffer_polyphase(
     """Resample (n_samples, n_channels) using scipy polyphase."""
     if abs(sfreq_from - sfreq_to) < 1e-9:
         return data
-    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
+
+    up, down = _cached_resample_up_down(str(sfreq_from), str(sfreq_to))
+    if up == down == 1:
+        return data.copy()
+
+    window_taps = _cached_resample_window_taps(up, down, data.dtype.name)
     return resample_poly(
         data,
-        up=ratio.numerator,
-        down=ratio.denominator,
+        up=up,
+        down=down,
         axis=0,
+        window=window_taps,
     )
 
 
@@ -897,7 +947,7 @@ class Preprocessor:
 
         # Global MAD check.
         with _profile("preprocess_pre: global_mad_check"):
-            mad_val = median_abs_deviation(data, axis=(1, 2))[0]
+            mad_val = _median_abs_deviation_np(data, axis=(1, 2))[0]
             z_mad = (
                 mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
             ) / self._calibration_params['good_trial_stats_pre']['mads_std']
@@ -907,8 +957,8 @@ class Preprocessor:
 
         # Local MAD check.
         with _profile("preprocess_pre: local_mad_check"):
-            local_mad = median_abs_deviation(data, axis=2)
-            z_local = zscore(local_mad, axis=1)
+            local_mad = _median_abs_deviation_np(data, axis=2)
+            z_local = _zscore_np(local_mad, axis=1)
             if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
                 return None
 
