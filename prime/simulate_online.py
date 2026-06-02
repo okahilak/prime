@@ -160,18 +160,10 @@ def main():
         with profile("preprocess_pre_total"):
             processed_pre = preprocessor.preprocess_pre(raw_pre)
 
-        # Array shape
-        if processed_pre is not None:
-            print(f"Trial {trial_idx + 1}: processed_pre array shape={processed_pre.shape}")
-            sha256 = hashlib.sha256(processed_pre.tobytes()).hexdigest()
-            print(f"Trial {trial_idx + 1}: processed_pre sha256={sha256}")
-
-        continue
         processed_post = preprocessor.preprocess_post(raw_post)
 
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
-            continue
 
         with profile("predict"):
             probability = predictor.predict(processed_pre)
