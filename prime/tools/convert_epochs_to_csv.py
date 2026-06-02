@@ -6,7 +6,7 @@ epochs at their original positions and filling gaps with reproducible random
 noise. The output is a JSON metadata file, a CSV data file, and an event file.
 
 Usage:
-    python convert_epochs_to_csv.py <subject_id> [--short] [--break]
+    python convert_epochs_to_csv.py <subject_id> [--short]
 
 Example:
     python convert_epochs_to_csv.py sub-021
@@ -34,8 +34,6 @@ COMMON_CHANNELS = [
 ]
 
 RANDOM_SEED = 42
-CALIBRATION_TRIALS = 125
-BREAK_DURATION_SEC = 60
 
 
 def load_and_prepare_epochs(subject_id):
@@ -115,45 +113,6 @@ def epochs_to_continuous(epochs):
             raw_data[epoch_start:epoch_end, :] = data[i, :, :].T
 
     event_samples = events[:, 0]
-    return raw_data, event_samples, start_offset, n_times
-
-
-def insert_break_after_calibration(raw_data, event_samples, sfreq, start_offset, n_times):
-    """Insert a one-minute random-noise gap starting at the midpoint between trials 125 and 126.
-
-    Trials are 1-indexed. The break extends forward from that point; events from trial 126
-    onward are shifted by the break length.
-    """
-    if len(event_samples) <= CALIBRATION_TRIALS:
-        raise ValueError(
-            f"--break requires more than {CALIBRATION_TRIALS} trials; "
-            f"got {len(event_samples)}"
-        )
-
-    break_samples = int(round(BREAK_DURATION_SEC * sfreq))
-    end_trial_125 = event_samples[CALIBRATION_TRIALS - 1] + start_offset + n_times
-    start_trial_126 = event_samples[CALIBRATION_TRIALS] + start_offset
-    midpoint = (end_trial_125 + start_trial_126) / 2
-    break_start = int(round(midpoint))
-
-    rng = np.random.default_rng(RANDOM_SEED + 1)
-    noise_scale = np.std(raw_data) * 0.1
-    break_data = rng.normal(0, noise_scale, size=(break_samples, raw_data.shape[1]))
-
-    raw_data = np.concatenate(
-        [raw_data[:break_start], break_data, raw_data[break_start:]],
-        axis=0,
-    )
-
-    event_samples = event_samples.copy()
-    event_samples[CALIBRATION_TRIALS:] += break_samples
-
-    n_postponed = len(event_samples) - CALIBRATION_TRIALS
-    print(
-        f"Inserted {BREAK_DURATION_SEC}s break ({break_samples} samples) at sample "
-        f"{break_start} (from midpoint between trials {CALIBRATION_TRIALS} and "
-        f"{CALIBRATION_TRIALS + 1}); {n_postponed} events postponed"
-    )
     return raw_data, event_samples
 
 
@@ -221,16 +180,6 @@ def main():
         action="store_true",
         help="Only use the first 200 trials; output files are named <subject_id>-short_*",
     )
-    parser.add_argument(
-        "--break",
-        dest="with_break",
-        action="store_true",
-        help=(
-            f"After trial {CALIBRATION_TRIALS}, insert a {BREAK_DURATION_SEC}s random-noise "
-            "gap at the midpoint before the next trial; postpone later events. "
-            "Output uses the <subject_id>-break prefix."
-        ),
-    )
     args = parser.parse_args()
 
     mne.set_log_level("WARNING")
@@ -246,18 +195,10 @@ def main():
         output_subject_id = f"{args.subject_id}-short"
         print(f"--short: using first {len(epochs)} epochs, output prefix: {output_subject_id}")
 
-    if args.with_break:
-        output_subject_id = f"{output_subject_id}-break"
-
     print(f"Epochs: {epochs.get_data().shape}")
     print(f"  sfreq={epochs.info['sfreq']}, tmin={epochs.tmin}, tmax={epochs.tmax}")
 
-    raw_data, event_samples, start_offset, n_times = epochs_to_continuous(epochs)
-
-    if args.with_break:
-        raw_data, event_samples = insert_break_after_calibration(
-            raw_data, event_samples, epochs.info['sfreq'], start_offset, n_times
-        )
+    raw_data, event_samples = epochs_to_continuous(epochs)
 
     json_path = write_dataset(
         output_dir,
