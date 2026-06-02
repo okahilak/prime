@@ -18,14 +18,10 @@ Requires:
 See simulate_online.py for the offline simulation equivalent.
 """
 
-import hashlib
 import time
-import sys
-import warnings
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-import mne
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
@@ -128,13 +124,6 @@ class Decider:
         raw_post = crop_eeg_buffer(
             eeg_buffer, time_offsets, self.raw_post_tmin, self.raw_post_tmax,
         )
-
-        pre_checksum = hashlib.sha256(raw_pre.tobytes()).hexdigest()
-        print(f"Pre-epoch sha256={pre_checksum}")
-        post_checksum = hashlib.sha256(raw_post.tobytes()).hexdigest()
-        print(f"Post-epoch sha256={post_checksum}")
-
-
         if not self.is_calibrated:
             # --- Calibration phase ---
             self.preprocessor.add_raw_pre_epoch(raw_pre)

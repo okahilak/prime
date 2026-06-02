@@ -16,15 +16,11 @@ Requires:
 See simulate_online.py for the offline simulation equivalent.
 """
 
-import hashlib
-import sys
 import time
-import warnings
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-import mne
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
@@ -153,9 +149,6 @@ class Decider:
         if not self.event_upcoming(reference_time):
             return None
 
-        pre_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
-        print(f"Pre-epoch sha256={pre_checksum}")
-
         if not self.is_calibrated:
             with profile("add_raw_pre_epoch"):
                 self.preprocessor.add_raw_pre_epoch(eeg_buffer)
@@ -182,9 +175,6 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-
-        post_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()
-        print(f"Post-epoch sha256={post_checksum}")
 
         if not self.is_calibrated:
             with profile("add_raw_post_epoch"):
