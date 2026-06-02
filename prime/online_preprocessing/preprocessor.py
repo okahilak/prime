@@ -19,11 +19,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, resample_poly
 
 
 from prime.prime_config import (
@@ -418,6 +419,23 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
+def _resample_buffer_polyphase(
+    data: np.ndarray,
+    sfreq_from: float,
+    sfreq_to: float,
+) -> np.ndarray:
+    """Resample (n_samples, n_channels) using scipy polyphase."""
+    if abs(sfreq_from - sfreq_to) < 1e-9:
+        return data
+    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
+    return resample_poly(
+        data,
+        up=ratio.numerator,
+        down=ratio.denominator,
+        axis=0,
+    )
+
+
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -442,6 +460,7 @@ def append_calibration_epochs(
     raw_pre: np.ndarray,
     raw_post: np.ndarray,
     info: mne.Info,
+    info_processed: mne.Info,
     cfg,
     raw_pre_epoch_tmin: float,
     raw_pre_epoch_tmax: float,
@@ -449,15 +468,37 @@ def append_calibration_epochs(
     raw_post_epoch_tmax: float,
 ):
     """Append one raw pre/post pair (resampled) to calibration epoch structs."""
-    trial_full_pre = _numpy_to_epochs_array(raw_pre, info, raw_pre_epoch_tmin)
-    trial_post = _numpy_to_epochs_array(raw_post, info, raw_post_epoch_tmin)
-    trial_pre = trial_full_pre.copy().crop(cfg.pre_stim_timerange[0], cfg.pre_stim_timerange[1])
-    trial_pre_ica = trial_full_pre.copy().crop(
-        cfg.ica_opts.pre_timerange[0], cfg.ica_opts.pre_timerange[1],
+    raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
+    raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
+    processed_sfreq = float(info_processed["sfreq"])
+    raw_sfreq = float(info["sfreq"])
+
+    pre_buf = crop_eeg_buffer(
+        raw_pre,
+        raw_pre_time_offsets,
+        cfg.pre_stim_timerange[0],
+        cfg.pre_stim_timerange[1],
     )
-    processed_sfreq = get_processed_sfreq()
-    for segment in (trial_pre, trial_pre_ica, trial_post):
-        segment.resample(processed_sfreq, method='polyphase')
+    pre_ica_buf = crop_eeg_buffer(
+        raw_pre,
+        raw_pre_time_offsets,
+        cfg.ica_opts.pre_timerange[0],
+        cfg.ica_opts.pre_timerange[1],
+    )
+    post_buf = crop_eeg_buffer(
+        raw_post,
+        raw_post_time_offsets,
+        raw_post_epoch_tmin,
+        raw_post_epoch_tmax,
+    )
+
+    pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+
+    trial_pre = _numpy_to_epochs_array(pre_buf, info_processed, cfg.pre_stim_timerange[0])
+    trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, info_processed, cfg.ica_opts.pre_timerange[0])
+    trial_post = _numpy_to_epochs_array(post_buf, info_processed, raw_post_epoch_tmin)
     if epochs_pre is None:
         return trial_pre, trial_pre_ica, trial_post
     epochs_pre = mne.concatenate_epochs([epochs_pre, trial_pre])
@@ -785,6 +826,11 @@ class Preprocessor:
         self._post_epoch_tmax = post_epoch_tmax
         self._opts = cfg.to_dicts()
         self._processed_sfreq = get_processed_sfreq()
+        self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
+        self._raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
+        self._info_processed = self._info.copy()
+        with self._info_processed._unlock():
+            self._info_processed["sfreq"] = self._processed_sfreq
 
         self._epochs_pre = None
         self._epochs_pre_ica = None
@@ -849,7 +895,7 @@ class Preprocessor:
         self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_epochs(
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
             self._pending_pre, raw_post,
-            self._info, self._cfg,
+            self._info, self._info_processed, self._cfg,
             self._raw_pre_epoch_tmin, self._raw_pre_epoch_tmax,
             self._raw_post_epoch_tmin, self._raw_post_epoch_tmax,
         )
@@ -923,9 +969,18 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
-        epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
-        epoch_pre = epoch_pre.crop(self._pre_stim_tmin, self._pre_stim_tmax)
-        epoch_pre.resample(self._processed_sfreq, method='polyphase')
+        pre_stim = crop_eeg_buffer(
+            raw_pre,
+            self._raw_pre_time_offsets,
+            self._pre_stim_tmin,
+            self._pre_stim_tmax,
+        )
+        pre_stim = _resample_buffer_polyphase(
+            pre_stim,
+            sfreq_from=self._info["sfreq"],
+            sfreq_to=self._processed_sfreq,
+        )
+        epoch_pre = _numpy_to_epochs_array(pre_stim, self._info_processed, self._pre_stim_tmin)
         result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
@@ -942,9 +997,18 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_post_shape(raw_post)
-
-        epoch_post = _numpy_to_epochs_array(raw_post, self._info, self._raw_post_epoch_tmin)
-        epoch_post.resample(get_processed_sfreq(), method='polyphase')
+        post_buf = crop_eeg_buffer(
+            raw_post,
+            self._raw_post_time_offsets,
+            self._raw_post_epoch_tmin,
+            self._raw_post_epoch_tmax,
+        )
+        post_buf = _resample_buffer_polyphase(
+            post_buf,
+            sfreq_from=self._info["sfreq"],
+            sfreq_to=self._processed_sfreq,
+        )
+        epoch_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._raw_post_epoch_tmin)
         result_post = preprocess_post_trial(epoch_post, self._calibration_params, self._cfg)
         if result_post is False:
             return None
