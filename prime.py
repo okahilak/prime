@@ -124,7 +124,7 @@ class Decider:
             "periodic_processing_interval": 1.0 / self.sampling_frequency,
             "sample_window": sample_window,
             "event_sample_window": event_sample_window,
-            "warm_up_rounds": 3,
+            "warm_up_rounds": 0,
         }
 
     # ==================================================================
@@ -149,7 +149,8 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
-        if is_warm_up or not self.event_upcoming(reference_time):
+
+        if not self.event_upcoming(reference_time):
             return None
 
         pre_checksum = hashlib.sha256(eeg_buffer.tobytes()).hexdigest()

@@ -102,7 +102,7 @@ class Decider:
         return {
             "event_sample_window": EVENT_SAMPLE_WINDOW,
             "sample_window": [-0.5, 0.0],
-            "warm_up_rounds": 3,
+            "warm_up_rounds": 0,
         }
 
     def process_periodic(
