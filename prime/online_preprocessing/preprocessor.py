@@ -19,12 +19,11 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
-from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt, resample_poly
+from scipy.signal import butter, filtfilt
 
 
 from prime.prime_config import (
@@ -419,20 +418,6 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
-def _resample_buffer_polyphase(
-    data: np.ndarray,
-    sfreq_from: float,
-    sfreq_to: float,
-) -> np.ndarray:
-    """Resample (n_samples, n_channels) using scipy polyphase."""
-    if abs(sfreq_from - sfreq_to) < 1e-9:
-        return data
-    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
-    up = ratio.numerator
-    down = ratio.denominator
-    return resample_poly(data, up=up, down=down, axis=0)
-
-
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -800,10 +785,6 @@ class Preprocessor:
         self._post_epoch_tmax = post_epoch_tmax
         self._opts = cfg.to_dicts()
         self._processed_sfreq = get_processed_sfreq()
-        self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
-        self._info_processed = self._info.copy()
-        with self._info_processed._unlock():
-            self._info_processed["sfreq"] = self._processed_sfreq
 
         self._epochs_pre = None
         self._epochs_pre_ica = None
@@ -947,21 +928,12 @@ class Preprocessor:
         with _profile("preprocess_pre.validate_shape", enabled=verbose):
             self._validate_raw_pre_shape(raw_pre)
 
-        with _profile("preprocess_pre.crop_to_pre_stim", enabled=verbose):
-            pre_stim = crop_eeg_buffer(
-                raw_pre,
-                self._raw_pre_time_offsets,
-                self._pre_stim_tmin,
-                self._pre_stim_tmax,
-            )
-        with _profile("preprocess_pre.resample", enabled=verbose):
-            pre_stim = _resample_buffer_polyphase(
-                pre_stim,
-                sfreq_from=self._info["sfreq"],
-                sfreq_to=self._processed_sfreq,
-            )
         with _profile("preprocess_pre.numpy_to_epochs", enabled=verbose):
-            epoch_pre = _numpy_to_epochs_array(pre_stim, self._info_processed, self._pre_stim_tmin)
+            epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
+        with _profile("preprocess_pre.crop_to_pre_stim", enabled=verbose):
+            epoch_pre = epoch_pre.crop(self._pre_stim_tmin, self._pre_stim_tmax)
+        with _profile("preprocess_pre.resample", enabled=verbose):
+            epoch_pre.resample(self._processed_sfreq, method='polyphase')
         with _profile("preprocess_pre.trial_pipeline", enabled=verbose):
             result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
