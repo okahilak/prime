@@ -25,13 +25,13 @@ def get_post_epoch_time_range() -> tuple[float, float]:
     return float(cfg.post_epoch_tmin), float(cfg.post_epoch_tmax)
 
 
-def get_raw_pre_epoch_time_range() -> tuple[float, float]:
+def get_raw_pre_time_range() -> tuple[float, float]:
     """Pre-stimulus crop window covering all online preprocessing steps (ICA, filtering, etc.)."""
     cfg = load_prime_config()
     return float(cfg.raw_pre_epoch_tmin), float(cfg.raw_pre_epoch_tmax)
 
 
-def get_raw_post_epoch_time_range() -> tuple[float, float]:
+def get_raw_post_time_range() -> tuple[float, float]:
     """Raw post-stimulus crop window [raw_post_epoch_tmin, raw_post_epoch_tmax] in seconds."""
     cfg = load_prime_config()
     return float(cfg.raw_post_epoch_tmin), float(cfg.raw_post_epoch_tmax)

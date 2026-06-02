@@ -39,7 +39,7 @@ mne.set_log_level("ERROR")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
-from prime.prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from prime.prime_config import get_raw_post_time_range, get_raw_pre_time_range
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
@@ -104,8 +104,8 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    raw_pre_tmin, raw_pre_tmax = get_raw_pre_epoch_time_range()
-    raw_post_tmin, raw_post_tmax = get_raw_post_epoch_time_range()
+    raw_pre_tmin, raw_pre_tmax = get_raw_pre_time_range()
+    raw_post_tmin, raw_post_tmax = get_raw_post_time_range()
     preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()
@@ -115,8 +115,8 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        preprocessor.add_raw_pre_epoch(raw_pre)
-        preprocessor.add_raw_post_epoch(raw_post)
+        preprocessor.add_raw_pre(raw_pre)
+        preprocessor.add_raw_post(raw_post)
 
     cal_pre, cal_post = preprocessor.calibrate()
     amplitudes = dipole_fitter.calibrate(cal_post)

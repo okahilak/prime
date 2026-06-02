@@ -5,8 +5,8 @@ preprocesses individual trials using the resulting calibration parameters.
 Usage
 -----
     preprocessor = Preprocessor(forward_path)
-    preprocessor.add_raw_pre_epoch(raw_pre)   # (n_samples, n_channels)
-    preprocessor.add_raw_post_epoch(raw_post)
+    preprocessor.add_raw_pre(raw_pre)   # (n_samples, n_channels)
+    preprocessor.add_raw_post(raw_post)
 
     cal_pre, cal_post = preprocessor.calibrate()
 
@@ -28,8 +28,8 @@ from prime.prime_config import (
     get_post_epoch_time_range,
     get_pre_epoch_time_range,
     get_processed_sfreq,
-    get_raw_post_epoch_time_range,
-    get_raw_pre_epoch_time_range,
+    get_raw_post_time_range,
+    get_raw_pre_time_range,
     get_raw_sfreq,
     time_to_sample,
 )
@@ -725,8 +725,8 @@ class Preprocessor:
         raw_sfreq = get_raw_sfreq()
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
         info = _mne_info_from_forward(self._forward)
-        raw_pre_epoch_tmin, raw_pre_epoch_tmax = get_raw_pre_epoch_time_range()
-        raw_post_epoch_tmin, raw_post_epoch_tmax = get_raw_post_epoch_time_range()
+        raw_pre_epoch_tmin, raw_pre_epoch_tmax = get_raw_pre_time_range()
+        raw_post_epoch_tmin, raw_post_epoch_tmax = get_raw_post_time_range()
         pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
         post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
         _validate_time_range_within(
@@ -802,7 +802,7 @@ class Preprocessor:
     # Public API
     # ------------------------------------------------------------------
 
-    def add_raw_pre_epoch(self, raw_pre: np.ndarray) -> None:
+    def add_raw_pre(self, raw_pre: np.ndarray) -> None:
         """Buffer one raw pre-stimulus epoch for calibration.
 
         Parameters
@@ -812,13 +812,13 @@ class Preprocessor:
         """
         if self._awaiting_post:
             raise RuntimeError(
-                "add_raw_post_epoch must be called before the next add_raw_pre_epoch"
+                "add_raw_post must be called before the next add_raw_pre"
             )
         self._validate_raw_pre_shape(raw_pre)
         self._pending_pre = np.asarray(raw_pre, dtype=np.float64)
         self._awaiting_post = True
 
-    def add_raw_post_epoch(self, raw_post: np.ndarray) -> None:
+    def add_raw_post(self, raw_post: np.ndarray) -> None:
         """Append the paired pre/post epochs to the calibration buffers.
 
         Parameters
@@ -827,7 +827,7 @@ class Preprocessor:
             EEG for ``[raw_post_epoch_tmin, raw_post_epoch_tmax]`` at ``raw_sfreq``.
         """
         if not self._awaiting_post:
-            raise RuntimeError("add_raw_pre_epoch must be called before add_raw_post_epoch")
+            raise RuntimeError("add_raw_pre must be called before add_raw_post")
         self._validate_raw_post_shape(raw_post)
         self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_epochs(
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
@@ -851,7 +851,7 @@ class Preprocessor:
             Pre- and post-stimulus calibration epochs that survived rejection.
         """
         if self._awaiting_post:
-            raise RuntimeError("add_raw_post_epoch was not called for the last pre epoch")
+            raise RuntimeError("add_raw_post was not called for the last pre epoch")
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
 

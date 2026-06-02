@@ -21,12 +21,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+import mne
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from prime.prime_config import get_raw_post_time_range, get_raw_pre_time_range
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -77,8 +78,8 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_epoch_time_range()
-        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_epoch_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_time_range()
+        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"
 
@@ -150,8 +151,8 @@ class Decider:
             return None
 
         if not self.is_calibrated:
-            with profile("add_raw_pre_epoch"):
-                self.preprocessor.add_raw_pre_epoch(eeg_buffer)
+            with profile("add_raw_pre"):
+                self.preprocessor.add_raw_pre(eeg_buffer)
             print(f"Calibration pre epoch queued for trial {self.trial_count + 1}/{N_CALIBRATION_TRIALS}")
             return None
 
@@ -177,8 +178,8 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
         if not self.is_calibrated:
-            with profile("add_raw_post_epoch"):
-                self.preprocessor.add_raw_post_epoch(eeg_buffer)
+            with profile("add_raw_post"):
+                self.preprocessor.add_raw_post(eeg_buffer)
 
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")

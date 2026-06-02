@@ -28,8 +28,8 @@ from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.prime_config import (
-    get_raw_post_epoch_time_range,
-    get_raw_pre_epoch_time_range,
+    get_raw_post_time_range,
+    get_raw_pre_time_range,
 )
 from prime.tep_normalizer import TEPNormalizer
 
@@ -73,8 +73,8 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_epoch_time_range()
-        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_epoch_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_time_range()
+        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_time_range()
 
         self.preprocessor = Preprocessor(str(FORWARD_PATH))
         self.dipole_fitter = DipoleFitter(str(FORWARD_PATH))
@@ -126,8 +126,8 @@ class Decider:
         )
         if not self.is_calibrated:
             # --- Calibration phase ---
-            self.preprocessor.add_raw_pre_epoch(raw_pre)
-            self.preprocessor.add_raw_post_epoch(raw_post)
+            self.preprocessor.add_raw_pre(raw_pre)
+            self.preprocessor.add_raw_post(raw_post)
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 
