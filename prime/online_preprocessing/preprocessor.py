@@ -24,8 +24,14 @@ import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
 
-from prime.online_preprocessing.utils.filtering import butter_filter, apply_filter
-from prime.online_preprocessing.utils.resampling import resample_buffer_polyphase
+from prime.online_preprocessing.utils.filtering import butter_filter, apply_filter, apply_filter_2d
+from scipy.signal import resample_poly
+
+from prime.online_preprocessing.utils.resampling import (
+    _cached_resample_up_down,
+    _cached_resample_window_taps,
+    resample_buffer_polyphase,
+)
 
 
 from prime.prime_config import (
@@ -77,6 +83,18 @@ def _zscore_np(a: np.ndarray, axis) -> np.ndarray:
     mean = np.mean(a, axis=axis, keepdims=True)
     std = np.std(a, axis=axis, ddof=0, keepdims=True)
     return (a - mean) / std
+
+
+def _mad_scalar_2d(a: np.ndarray) -> float:
+    """Global MAD for one trial shaped (n_channels, n_times)."""
+    median = np.median(a)
+    return float(np.median(np.abs(a - median)))
+
+
+def _mad_per_channel_2d(a: np.ndarray) -> np.ndarray:
+    """Per-channel MAD over time for one trial shaped (n_channels, n_times)."""
+    median = np.median(a, axis=1, keepdims=True)
+    return np.median(np.abs(a - median), axis=1)
 
 
 def _validate_time_range_within(
@@ -697,6 +715,32 @@ class Preprocessor:
         self._processed_sfreq = get_processed_sfreq()
         self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
         self._raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
+        pre_stim_start = time_to_sample(
+            self._pre_stim_tmin, raw_pre_epoch_tmin, raw_sfreq,
+        )
+        pre_stim_stop = pre_stim_start + epoch_n_times(
+            self._pre_stim_tmin, self._pre_stim_tmax, raw_sfreq,
+        )
+        self._pre_stim_crop_slice = slice(pre_stim_start, pre_stim_stop)
+        model_start = time_to_sample(
+            self._pre_epoch_tmin, self._pre_stim_tmin, self._processed_sfreq,
+        )
+        model_stop = model_start + epoch_n_times(
+            self._pre_epoch_tmin, self._pre_epoch_tmax, self._processed_sfreq,
+        )
+        self._pre_model_window_slice = slice(model_start, model_stop)
+        self._filter_n_pad = int(self._opts['filter_opts']['pad_time'] * self._processed_sfreq)
+        self._resample_up, self._resample_down = _cached_resample_up_down(
+            str(raw_sfreq), str(self._processed_sfreq),
+        )
+        self._resample_window_taps = _cached_resample_window_taps(
+            self._resample_up, self._resample_down, 'float64',
+        )
+        self._pre_mads_mean = None
+        self._pre_mads_std = None
+        self._pre_global_z_thresh = None
+        self._pre_local_z_thresh = None
+        self._pre_filter_workspace = None
         self._info_processed = self._info.copy()
         with self._info_processed._unlock():
             self._info_processed["sfreq"] = self._processed_sfreq
@@ -729,6 +773,14 @@ class Preprocessor:
 
     def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
         return epoch_post.crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
+
+    def _bind_pre_trial_reject_constants(self) -> None:
+        stats = self._calibration_params['good_trial_stats_pre']
+        pre_reject = self._opts['trial_reject_opts']['pre']
+        self._pre_mads_mean = stats['mads_mean']
+        self._pre_mads_std = stats['mads_std']
+        self._pre_global_z_thresh = pre_reject['global_zscore_threshold']
+        self._pre_local_z_thresh = pre_reject['local_zscore_threshold']
 
     # ------------------------------------------------------------------
     # Public API
@@ -796,6 +848,7 @@ class Preprocessor:
             self._forward,
         )
         self._calibration_params = calibration_params
+        self._bind_pre_trial_reject_constants()
 
         if n_successful_trials != pre_data.shape[0] or n_successful_trials != post_data.shape[0]:
             raise RuntimeError(
@@ -809,6 +862,7 @@ class Preprocessor:
         """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
         instance = cls(forward_path)
         instance._calibration_params = calibration_params
+        instance._bind_pre_trial_reject_constants()
         return instance
 
     def preprocess_pre(
@@ -831,80 +885,51 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
+        cal = self._calibration_params
         with _profile("preprocess_pre: crop_eeg_buffer"):
-            pre_stim = crop_eeg_buffer(
-                raw_pre,
-                self._raw_pre_time_offsets,
-                self._pre_stim_tmin,
-                self._pre_stim_tmax,
-            )
+            pre_stim = raw_pre[self._pre_stim_crop_slice]
         with _profile("preprocess_pre: resample_polyphase"):
-            pre_stim = resample_buffer_polyphase(
-                pre_stim,
-                sfreq_from=self._info["sfreq"],
-                sfreq_to=self._processed_sfreq,
-            )
-        # Keep pre-stim single-trial preprocessing fully in NumPy.
-        with _profile("preprocess_pre: to_numpy_float64"):
-            data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
-
-        if self._calibration_params['bad_channels']:
-            with _profile("preprocess_pre: interpolate_bad_channels"):
-                interpolation_info = self._calibration_params['channel_interpolation_info']
-                data[..., interpolation_info['bads_idx'], :] = np.matmul(
-                    interpolation_info['interpolation_matrix'],
-                    data[..., interpolation_info['goods_idx'], :],
+            if self._resample_up != self._resample_down:
+                pre_stim = resample_poly(
+                    pre_stim,
+                    up=self._resample_up,
+                    down=self._resample_down,
+                    axis=0,
+                    window=self._resample_window_taps,
                 )
+        with _profile("preprocess_pre: to_numpy_float64"):
+            data = np.ascontiguousarray(pre_stim.T, dtype=np.float64)
 
-        filter_opts = self._opts['filter_opts']
+        if cal['bad_channels']:
+            with _profile("preprocess_pre: interpolate_bad_channels"):
+                ii = cal['channel_interpolation_info']
+                data[ii['bads_idx'], :] = ii['interpolation_matrix'] @ data[ii['goods_idx'], :]
+
         with _profile("preprocess_pre: apply_filter"):
-            data = apply_filter(
+            data, self._pre_filter_workspace = apply_filter_2d(
                 data,
-                self._calibration_params['pre_stim_filter'],
-                filter_opts['pad_time'],
-                self._processed_sfreq,
+                cal['pre_stim_filter'],
+                self._filter_n_pad,
+                self._pre_filter_workspace,
             )
 
-        # Mean subtraction (average reference).
         with _profile("preprocess_pre: mean_subtraction"):
-            data -= np.mean(data, axis=1, keepdims=True)
+            data -= data.mean(axis=0, keepdims=True)
 
-        trial_reject_opts = self._opts['trial_reject_opts']
-
-        # Global MAD check.
         with _profile("preprocess_pre: global_mad_check"):
-            mad_val = _median_abs_deviation_np(data, axis=(1, 2))[0]
-            z_mad = (
-                mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
-            ) / self._calibration_params['good_trial_stats_pre']['mads_std']
-            threshold = trial_reject_opts['pre']['global_zscore_threshold']
-            if z_mad < threshold[0] or z_mad > threshold[1]:
+            z_mad = (_mad_scalar_2d(data) - self._pre_mads_mean) / self._pre_mads_std
+            thr = self._pre_global_z_thresh
+            if z_mad < thr[0] or z_mad > thr[1]:
                 return None
 
-        # Local MAD check.
         with _profile("preprocess_pre: local_mad_check"):
-            local_mad = _median_abs_deviation_np(data, axis=2)
-            z_local = _zscore_np(local_mad, axis=1)
-            if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
+            local_mad = _mad_per_channel_2d(data)
+            z_local = (local_mad - local_mad.mean()) / local_mad.std(ddof=0)
+            if np.any(np.abs(z_local) > self._pre_local_z_thresh):
                 return None
 
         with _profile("preprocess_pre: crop_to_model_window"):
-            start = time_to_sample(
-                self._pre_epoch_tmin,
-                self._pre_stim_tmin,
-                self._processed_sfreq,
-            )
-            stop = start + epoch_n_times(
-                self._pre_epoch_tmin,
-                self._pre_epoch_tmax,
-                self._processed_sfreq,
-            )
-            if start < 0 or stop > data.shape[2]:
-                raise ValueError(
-                    f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
-                    f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
-                )
-            return data[:, :, start:stop]
+            return data[:, self._pre_model_window_slice][np.newaxis, :, :]
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.

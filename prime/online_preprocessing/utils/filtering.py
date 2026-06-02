@@ -23,3 +23,25 @@ def apply_filter(data, coeffs, pad_time, fs):
     padded = np.pad(data, ((0, 0), (0, 0), (n_pad, n_pad)), mode='reflect')
     filtered = filtfilt(coeffs[0], coeffs[1], padded, padlen=None)
     return filtered[:, :, n_pad:-n_pad]
+
+
+def apply_filter_2d(
+    data: np.ndarray,
+    coeffs,
+    n_pad: int,
+    workspace: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``apply_filter`` for a single trial shaped (n_channels, n_times).
+
+    Returns ``(filtered, workspace)`` so callers can reuse the reflect-pad buffer.
+    """
+    n_ch, n_times = data.shape
+    padded_len = n_times + 2 * n_pad
+    if workspace is None or workspace.shape != (n_ch, padded_len):
+        workspace = np.empty((n_ch, padded_len), dtype=np.float64)
+    workspace[:, n_pad:n_pad + n_times] = data
+    if n_pad:
+        workspace[:, :n_pad] = data[:, 1:n_pad + 1][:, ::-1]
+        workspace[:, n_pad + n_times:] = data[:, -(n_pad + 1):-1][:, ::-1]
+    filtered = filtfilt(coeffs[0], coeffs[1], workspace, axis=-1, padlen=None)
+    return filtered[:, n_pad:-n_pad], workspace
