@@ -907,7 +907,6 @@ class Preprocessor:
     def preprocess_pre(
         self,
         raw_pre: np.ndarray,
-        verbose: bool = False,
     ) -> mne.EpochsArray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
@@ -917,29 +916,20 @@ class Preprocessor:
         ----------
         raw_pre : np.ndarray
             Raw pre-stimulus trial with shape (n_samples, n_channels).
-        verbose : bool, default=False
-            If ``True``, print per-step preprocessing timings.
 
         Returns ``None`` if the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        with _profile("preprocess_pre.validate_shape", enabled=verbose):
-            self._validate_raw_pre_shape(raw_pre)
-
-        with _profile("preprocess_pre.numpy_to_epochs", enabled=verbose):
-            epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
-        with _profile("preprocess_pre.crop_to_pre_stim", enabled=verbose):
-            epoch_pre = epoch_pre.crop(self._pre_stim_tmin, self._pre_stim_tmax)
-        with _profile("preprocess_pre.resample", enabled=verbose):
-            epoch_pre.resample(self._processed_sfreq, method='polyphase')
-        with _profile("preprocess_pre.trial_pipeline", enabled=verbose):
-            result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
+        self._validate_raw_pre_shape(raw_pre)
+        epoch_pre = _numpy_to_epochs_array(raw_pre, self._info, self._raw_pre_epoch_tmin)
+        epoch_pre = epoch_pre.crop(self._pre_stim_tmin, self._pre_stim_tmax)
+        epoch_pre.resample(self._processed_sfreq, method='polyphase')
+        result_pre = preprocess_pre_trial(epoch_pre, self._calibration_params, self._cfg)
         if result_pre is False:
             return None
-        with _profile("preprocess_pre.crop_to_model_window", enabled=verbose):
-            return self._crop_pre_to_model_window(result_pre)
+        return self._crop_pre_to_model_window(result_pre)
 
     def preprocess_post(self, raw_post: np.ndarray) -> mne.EpochsArray | None:
         """Resample and preprocess a single post-stimulus trial.

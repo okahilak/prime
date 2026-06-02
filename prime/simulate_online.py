@@ -121,10 +121,8 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        with profile("add_raw_pre"):
-            preprocessor.add_raw_pre(raw_pre)
-        with profile("add_raw_post"):
-            preprocessor.add_raw_post(raw_post)
+        preprocessor.add_raw_pre(raw_pre)
+        preprocessor.add_raw_post(raw_post)
 
     cal_pre, cal_post = preprocessor.calibrate()
     amplitudes = dipole_fitter.calibrate(cal_post)
@@ -145,25 +143,20 @@ def main():
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
         with profile("preprocess_pre"):
-            processed_pre = preprocessor.preprocess_pre(raw_pre, verbose=True)
-        with profile("preprocess_post"):
-            processed_post = preprocessor.preprocess_post(raw_post)
+            processed_pre = preprocessor.preprocess_pre(raw_pre)
+
+        processed_post = preprocessor.preprocess_post(raw_post)
 
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
-        processed_pre_buffer = np.ascontiguousarray(processed_pre.get_data())
-        processed_pre_sha256 = hashlib.sha256(processed_pre_buffer.tobytes()).hexdigest()
-        print(f"Trial {trial_idx + 1}: processed_pre sha256={processed_pre_sha256}")
-
         with profile("predict"):
             probability = predictor.predict(processed_pre)
 
-        with profile("finetune"):
-            amplitude = dipole_fitter.fit_trial(processed_post)
-            label = normalizer.transform(amplitude)
-            predictor.finetune(processed_pre, label)
+        amplitude = dipole_fitter.fit_trial(processed_post)
+        label = normalizer.transform(amplitude)
+        predictor.finetune(processed_pre, label)
 
         intervention_labels.append(label)
         predictions.append(probability)
