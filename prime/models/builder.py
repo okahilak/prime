@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict
 import torch
 import torch.nn as nn
-from models.models import MODEL_CLASS
+from prime.models.models import MODEL_CLASS
 
 
 def build_model(model_name: str, n_channels: int, n_times: int, n_outputs: int,

@@ -23,7 +23,7 @@ from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
 
 
-from prime_config import (
+from prime.prime_config import (
     epoch_n_times,
     get_post_epoch_time_range,
     get_pre_epoch_time_range,
@@ -33,18 +33,18 @@ from prime_config import (
     get_raw_sfreq,
     time_to_sample,
 )
-from online_preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
-from online_preprocessing.utils.ssp_sir_python import (
+from prime.online_preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
+from prime.online_preprocessing.utils.ssp_sir_python import (
     ssp_sir_to_average,
     ssp_sir_trials,
     ssp_sir_single_trial,
 )
-from online_preprocessing.utils.sound_modified import sound
-from online_preprocessing.utils.channel_interpolations import (
+from prime.online_preprocessing.utils.sound_modified import sound
+from prime.online_preprocessing.utils.channel_interpolations import (
     custom_get_interpolation_matrix,
     apply_channel_interpolation,
 )
-from online_preprocessing.config import get_default_config
+from prime.online_preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 

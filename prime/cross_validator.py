@@ -21,16 +21,16 @@ from torchinfo import summary
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from datasets import (
+from prime.datasets import (
     TEPDataset,
     TEPParadigm,
     get_subject_list,
     load_pretrain_data,
 )
-from models.builder import build_model
-from online_predictor import OnlinePredictor, score_predictions
-from prime_config import get_processed_sfreq
-from utils import (
+from prime.models.builder import build_model
+from prime.online_predictor import OnlinePredictor, score_predictions
+from prime.prime_config import get_processed_sfreq
+from prime.utils import (
     RegressionMetricsTracker,
     filter_args_for_model,
     get_checkpoint_dir,

@@ -26,8 +26,8 @@ from moabb.paradigms.base import BaseParadigm
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from tep_normalizer import TEPNormalizer
-from tta_wrapper import (
+from prime.tep_normalizer import TEPNormalizer
+from prime.tta_wrapper import (
     PYRIEMANN_AVAILABLE,
     _apply_alignment_transform_np,
     _compute_alignment_transform_np,

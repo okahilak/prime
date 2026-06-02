@@ -52,10 +52,10 @@ from sklearn.metrics import roc_auc_score
 from statsmodels.stats.multitest import fdrcorrection
 
 # Project-specific imports (ensure these are in your PYTHONPATH)
-from models.deep_tepnet import PRIME
-from tta_wrapper import TTAWrapper
-from datasets import TEPParadigm, TEPDataset
-from utils import run_timestamp
+from prime.models.deep_tepnet import PRIME
+from prime.tta_wrapper import TTAWrapper
+from prime.datasets import TEPParadigm, TEPDataset
+from prime.utils import run_timestamp
 
 
 # 1. CONFIGURATION

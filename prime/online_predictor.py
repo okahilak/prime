@@ -19,9 +19,9 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
-from models.builder import build_model
-from prime_config import epoch_n_times, get_pre_epoch_time_range, get_processed_sfreq
-from tta_wrapper import TTAWrapper, _apply_alignment_transform_np
+from prime.models.builder import build_model
+from prime.prime_config import epoch_n_times, get_pre_epoch_time_range, get_processed_sfreq
+from prime.tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
 

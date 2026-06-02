@@ -31,16 +31,11 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 mne.set_log_level("ERROR")
 
-# Add the prime/ subdirectory to path for imports
-PRIME_DIR = Path(__file__).parent / "prime"
-sys.path.insert(0, str(PRIME_DIR))
-sys.path.insert(0, str(PRIME_DIR / "online_preprocessing"))
-
-from online_predictor import OnlinePredictor
-from online_preprocessing.preprocessor import Preprocessor
-from online_preprocessing.dipole_fitter import DipoleFitter
-from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
-from tep_normalizer import TEPNormalizer
+from prime.online_predictor import OnlinePredictor
+from prime.online_preprocessing.preprocessor import Preprocessor
+from prime.online_preprocessing.dipole_fitter import DipoleFitter
+from prime.prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup

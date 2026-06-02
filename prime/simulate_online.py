@@ -39,13 +39,13 @@ mne.set_log_level("ERROR")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "online_preprocessing"))
 
-from prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
-from online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
-from online_preprocessing.dipole_fitter import DipoleFitter
-from tep_normalizer import TEPNormalizer
-from online_predictor import OnlinePredictor
-from online_preprocessing.trial_loader import TrialLoader
-from online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
+from prime.prime_config import get_raw_post_epoch_time_range, get_raw_pre_epoch_time_range
+from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
+from prime.online_preprocessing.dipole_fitter import DipoleFitter
+from prime.tep_normalizer import TEPNormalizer
+from prime.online_predictor import OnlinePredictor
+from prime.online_preprocessing.trial_loader import TrialLoader
+from prime.online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 
 # =============================================================================
 # Hard-coded constants
