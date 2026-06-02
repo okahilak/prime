@@ -26,7 +26,9 @@ import argparse
 import sys
 import time
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import mne
 import numpy as np
@@ -57,6 +59,17 @@ PRETRAINED_MODEL_PATH = "results/train/pretrained.pt"
 GLOBAL_BACKROTATION_PATH = "results/train/global_backrotation.npy"
 
 SEED = 42
+
+
+@contextmanager
+def profile(label: str) -> Iterator[None]:
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
+
 
 def print_summary(summary_text):
     print("\n" + "=" * 70)
@@ -115,8 +128,10 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        preprocessor.add_raw_pre(raw_pre)
-        preprocessor.add_raw_post(raw_post)
+        with profile("add_raw_pre"):
+            preprocessor.add_raw_pre(raw_pre)
+        with profile("add_raw_post"):
+            preprocessor.add_raw_post(raw_post)
 
     cal_pre, cal_post = preprocessor.calibrate()
     amplitudes = dipole_fitter.calibrate(cal_post)
@@ -136,17 +151,22 @@ def main():
             trial_loader.get_trial(trial_idx),
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
-        processed_pre = preprocessor.preprocess_pre(raw_pre)
-        processed_post = preprocessor.preprocess_post(raw_post)
+        with profile("preprocess_pre"):
+            processed_pre = preprocessor.preprocess_pre(raw_pre)
+        with profile("preprocess_post"):
+            processed_post = preprocessor.preprocess_post(raw_post)
 
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
-        amplitude = dipole_fitter.fit_trial(processed_post)
-        label = normalizer.transform(amplitude)
-        probability = predictor.predict(processed_pre)
-        predictor.finetune(processed_pre, label)
+        with profile("predict"):
+            probability = predictor.predict(processed_pre)
+
+        with profile("finetune"):
+            amplitude = dipole_fitter.fit_trial(processed_post)
+            label = normalizer.transform(amplitude)
+            predictor.finetune(processed_pre, label)
 
         intervention_labels.append(label)
         predictions.append(probability)
