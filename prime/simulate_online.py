@@ -145,7 +145,7 @@ def main():
             raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
         )
         with profile("preprocess_pre"):
-            processed_pre = preprocessor.preprocess_pre(raw_pre)
+            processed_pre = preprocessor.preprocess_pre(raw_pre, verbose=True)
         with profile("preprocess_post"):
             processed_post = preprocessor.preprocess_post(raw_post)
 
