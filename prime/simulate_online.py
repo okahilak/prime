@@ -33,10 +33,6 @@ from typing import Iterator
 import mne
 import numpy as np
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-mne.set_log_level("ERROR")
-
 # --- Local imports ---
 from prime.prime_config import get_raw_post_time_range, get_raw_pre_time_range
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
