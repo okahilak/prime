@@ -144,8 +144,9 @@ def fit_dipole_to_single_trial(trial_data, forward, position_index, ori_vector, 
 		leadfield_in_ori = None
 		leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
 
-	_, best_amplitude, _, _, _, _, _ = get_single_trial_dipole(trial_data, ori_vector,
-																leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv)
+	best_amplitude = get_single_trial_dipole(
+		trial_data, ori_vector, leadfield_in_ori, leadfield_at_pos, leadfield_at_pos_pinv
+	)
 
 	return np.abs(best_amplitude) if ori_vector is not None else best_amplitude
 
@@ -181,7 +182,7 @@ def get_single_trial_dipole(trial_data, ori_vector, leadfield_in_ori, leadfield_
 	if best_r2 == best_r2_default:
 		raise ValueError("Did not find a sufficient R2 for trial")
 
-	return best_y_predicted, best_amplitude, ori, best_dipole_moment, best_r2, best_data_measured
+	return best_amplitude
 
 
 # ==================== DipoleFitter class ====================
