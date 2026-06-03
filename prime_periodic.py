@@ -16,9 +16,8 @@ See simulate_online.py for the offline simulation equivalent.
 """
 
 import time
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -48,14 +47,10 @@ N_CALIBRATION_TRIALS = 125
 SEED = 42
 
 
-@contextmanager
-def profile(label: str) -> Iterator[None]:
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = time.perf_counter() - start
-        print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
+def timed_ms(fn, /, *args, **kwargs):
+    t0 = time.perf_counter()
+    result = fn(*args, **kwargs)
+    return result, (time.perf_counter() - t0) * 1000
 
 
 class Decider:
@@ -145,7 +140,7 @@ class Decider:
         time_to_event = self.time_to_next_event(reference_time)
         if time_to_event is None:
             return None
-    
+
         if abs(time_to_event - self.event_lookahead) > self.dt / 2:
             return None
 
@@ -154,17 +149,19 @@ class Decider:
         # time_offsets are relative to reference_time; preprocessor expects TMS-event-relative.
         event_timestamps = time_offsets - time_to_event
 
-        with profile("preprocess_pre"):
-            pre = self.preprocessor.preprocess_pre(eeg_buffer, event_timestamps)
+        pre, preprocess_ms = timed_ms(
+            self.preprocessor.preprocess_pre, eeg_buffer, event_timestamps
+        )
 
         self.pending_pre = pre
         if pre is None:
-            print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
             return None
 
-        with profile("predict"):
-            probability = self.predictor.predict(pre)
-        print(f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)")
+        probability, predict_ms = timed_ms(self.predictor.predict, pre)
+        print(
+            f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)  "
+            f"preprocess={preprocess_ms:.1f}ms  predict={predict_ms:.1f}ms"
+        )
         return None
 
     # ==================================================================
@@ -199,8 +196,12 @@ class Decider:
         )
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
 
-        if pre is None or post is None:
-            print(f"Trial {self.trial_count}: REJECTED by preprocessing")
+        if pre is None:
+            print(f"Trial {self.trial_count}: REJECTED by pre-stimulus preprocessing")
+            return None
+
+        if post is None:
+            print(f"Trial {self.trial_count}: REJECTED by post-stimulus preprocessing")
             return None
 
         amplitude = self.dipole_fitter.fit_trial(post)
