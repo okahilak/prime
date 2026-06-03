@@ -24,13 +24,16 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
+BUFFER_KEYS = ('qc', 'model', 'post', 'dipole')
+
+
 def process_single_trial(eeg_buffer, relative_timestamps, preprocessor):
-    """Process a single trial. Returns (epoch_pre, epoch_post) or None if rejected."""
-    epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
-    epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
-    if epoch_pre is None or epoch_post is None:
+    """Process a single trial. Returns a buffers dict or None if rejected."""
+    buffers_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
+    buffers_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
+    if buffers_pre is None or buffers_post is None:
         return None
-    return epoch_pre, epoch_post
+    return {**buffers_pre, **buffers_post}
 
 
 _online_trial_worker_state = {}
@@ -91,24 +94,35 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     print("Calibrating...")
 
     start_time = time.time()
-    model_buffers, dipole_buffers = preprocessor.calibrate()
+    buffers = preprocessor.calibrate()
 
     _save_calibration_bundle(calibration_bundle_path, preprocessor.calibration_params)
 
-    print(f"Used {len(model_buffers)} trials for calibration")
+    subject_output = Path(calibration_bundle_path).parent
+    subject_id = Path(calibration_bundle_path).stem.removesuffix('_calibration_bundle')
+    _save_buffers(subject_output, subject_id, 'calibration', buffers)
+
+    print(f"Used {len(buffers['model'])} trials for calibration")
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")
+
+
+def _save_buffers(subject_output, subject_id, label, buffers):
+    for key, data in buffers.items():
+        np.save(
+            os.path.join(subject_output, f"{subject_id}_{label}_{key}_buffer.npy"),
+            data,
+        )
 
 
 def _process_and_save_trial_group(
     epochs_data, events, info, tmin, preprocessor, subject_output, subject_id, label,
     trial_tmin, trial_tmax,
 ):
-    """Batch-process a pre-indexed group of trials and save pre/post arrays to disk."""
+    """Batch-process a pre-indexed group of trials and save buffer arrays to disk."""
     n_trials = epochs_data.shape[0]
-    pre_list = []
-    post_list = []
+    buffer_lists = {key: [] for key in BUFFER_KEYS}
     bad_trials = []
 
     initargs = (
@@ -124,27 +138,18 @@ def _process_and_save_trial_group(
 
     for i, (_, processed) in enumerate(results):
         if processed is not None:
-            epoch_pre, epoch_post = processed
-            pre_list.append(epoch_pre)
-            post_list.append(epoch_post)
+            for key in BUFFER_KEYS:
+                buffer_lists[key].append(processed[key])
         else:
             bad_trials.append(i)
 
-    if pre_list:
-        epochs_pre_final = np.concatenate(pre_list, axis=0)
-        epochs_post_final = np.concatenate(post_list, axis=0)
-    else:
-        epochs_pre_final = np.empty((0, 0, 0), dtype=np.float64)
-        epochs_post_final = np.empty((0, 0, 0), dtype=np.float64)
-
-    np.save(
-        os.path.join(subject_output, f"{subject_id}_{label}_pre.npy"),
-        epochs_pre_final,
-    )
-    np.save(
-        os.path.join(subject_output, f"{subject_id}_{label}_post.npy"),
-        epochs_post_final,
-    )
+    buffers = {}
+    for key in BUFFER_KEYS:
+        if buffer_lists[key]:
+            buffers[key] = np.concatenate(buffer_lists[key], axis=0)
+        else:
+            buffers[key] = np.empty((0, 0, 0), dtype=np.float64)
+    _save_buffers(subject_output, subject_id, label, buffers)
 
 
 def _run_online_processing_stage(

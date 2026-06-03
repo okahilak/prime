@@ -100,7 +100,7 @@ class TEPDataset(BaseDataset):
             if not match:
                 continue
             subject_id = int(match.group(1))
-            cal_file = subject_dir / f"sub-{subject_id:03d}_calibration_pre.npy"
+            cal_file = subject_dir / f"sub-{subject_id:03d}_calibration_model_buffer.npy"
             if cal_file.is_file():
                 subjects.add(subject_id)
         return sorted(subjects)
@@ -109,8 +109,8 @@ class TEPDataset(BaseDataset):
         subject_id_str = f"{subject:03d}"
         subj_dir = self.data_path_root / f"sub-{subject_id_str}"
 
-        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_pre.npy"
-        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_pre.npy"
+        eeg_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_model_buffer.npy"
+        eeg_int_file = subj_dir / f"sub-{subject_id_str}_intervention_model_buffer.npy"
         tep_cal_file = subj_dir / f"sub-{subject_id_str}_calibration_amplitudes.npy"
         tep_int_file = subj_dir / f"sub-{subject_id_str}_intervention_amplitudes.npy"
 
@@ -153,8 +153,8 @@ class TEPDataset(BaseDataset):
     def data_path(self, subject: int, **kwargs) -> List[str]:
         subject_id_str = f"{subject:03d}"
         paths = [
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_pre.npy",
-            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_pre.npy",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_calibration_model_buffer.npy",
+            self.data_path_root / f"sub-{subject_id_str}" / f"sub-{subject_id_str}_intervention_model_buffer.npy",
         ]
         return [str(p) for p in paths if p.exists()]
 

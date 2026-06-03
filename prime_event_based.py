@@ -120,17 +120,20 @@ class Decider:
         else:
             # --- Intervention phase ---
             self.trial_count += 1
-            processed_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets)
-            processed_post = self.preprocessor.preprocess_post(eeg_buffer, time_offsets)
+            buffers_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets)
+            buffers_post = self.preprocessor.preprocess_post(eeg_buffer, time_offsets)
 
-            if processed_pre is None or processed_post is None:
+            if buffers_pre is None or buffers_post is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
                 return None
 
-            amplitude = self.dipole_fitter.fit_trial(processed_post)
+            dipole_buffer = buffers_post['dipole']
+            model_buffer = buffers_pre['model']
+
+            amplitude = self.dipole_fitter.fit_trial(dipole_buffer)
             label = self.normalizer.transform(amplitude)
-            probability = self.predictor.predict(processed_pre)
-            self.predictor.finetune(processed_pre, label)
+            probability = self.predictor.predict(model_buffer)
+            self.predictor.finetune(model_buffer, label)
 
             print(f"Trial {self.trial_count}: prediction={probability:.6f}  label={label:.6f}")
 
@@ -145,7 +148,11 @@ class Decider:
 
         t0 = time.perf_counter()
 
-        model_buffers, dipole_buffers = self.preprocessor.calibrate()
+        buffers = self.preprocessor.calibrate()
+
+        model_buffers = buffers['model']
+        dipole_buffers = buffers['dipole']
+
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         labels = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, labels)

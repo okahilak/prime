@@ -154,14 +154,14 @@ class Decider:
             return None
 
         with profile("preprocess_pre"):
-            pre = self.preprocessor.preprocess_pre(eeg_buffer)
-        self.pending_pre = pre
-        if pre is None:
+            buffers_pre = self.preprocessor.preprocess_pre(eeg_buffer)
+        self.pending_pre = buffers_pre
+        if buffers_pre is None:
             print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
             return None
 
         with profile("predict"):
-            probability = self.predictor.predict(pre)
+            probability = self.predictor.predict(buffers_pre['model'])
         print(f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)")
         return None
 
@@ -186,20 +186,23 @@ class Decider:
 
         else:
             self.trial_count += 1
-            pre = self.pending_pre
+            buffers_pre = self.pending_pre
             self.pending_pre = None
 
             with profile("preprocess_post"):
-                post = self.preprocessor.preprocess_post(eeg_buffer)
+                buffers_post = self.preprocessor.preprocess_post(eeg_buffer)
 
-            if pre is None or post is None:
+            if buffers_pre is None or buffers_post is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")
                 return None
 
+            model_buffer = buffers_pre['model']
+            dipole_buffer = buffers_post['dipole']
+
             with profile("finetune"):
-                amplitude = self.dipole_fitter.fit_trial(post)
+                amplitude = self.dipole_fitter.fit_trial(dipole_buffer)
                 label = self.normalizer.transform(amplitude)
-                self.predictor.finetune(pre, label)
+                self.predictor.finetune(model_buffer, label)
 
             print(f"Trial {self.trial_count}: label={label:.6f}")
 
@@ -213,8 +216,11 @@ class Decider:
         print("Running calibration...")
 
         t0 = time.perf_counter()
+        buffers = self.preprocessor.calibrate()
 
-        model_buffers, dipole_buffers = self.preprocessor.calibrate()
+        model_buffers = buffers['model']
+        dipole_buffers = buffers['dipole']
+
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         labels = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, labels)
