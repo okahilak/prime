@@ -459,60 +459,6 @@ def crop_mne_trial_to_buffer(
     return _epochs_to_buffer(cropped), cropped.times.astype(np.float64)
 
 
-def append_calibration_epochs(
-    epochs_pre,
-    epochs_pre_ica,
-    epochs_post,
-    raw_pre: np.ndarray,
-    raw_post: np.ndarray,
-    info: mne.Info,
-    info_processed: mne.Info,
-    cfg,
-    calibration_tmin: float,
-    calibration_tmax: float,
-    post_tmin: float,
-    post_tmax: float,
-):
-    """Append one raw pre/post pair (resampled) to calibration epoch structs."""
-    raw_pre_time_offsets = np.array([calibration_tmin], dtype=np.float64)
-    raw_post_time_offsets = np.array([post_tmin], dtype=np.float64)
-    processed_sfreq = float(info_processed["sfreq"])
-    raw_sfreq = float(info["sfreq"])
-
-    pre_buf = crop_eeg_buffer(
-        raw_pre,
-        raw_pre_time_offsets,
-        cfg.pre_stim_timerange[0],
-        cfg.pre_stim_timerange[1],
-    )
-    pre_ica_buf = crop_eeg_buffer(
-        raw_pre,
-        raw_pre_time_offsets,
-        cfg.ica_opts.pre_timerange[0],
-        cfg.ica_opts.pre_timerange[1],
-    )
-    post_buf = crop_eeg_buffer(
-        raw_post,
-        raw_post_time_offsets,
-        post_tmin,
-        post_tmax,
-    )
-
-    pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-
-    trial_pre = _numpy_to_epochs_array(pre_buf, info_processed, cfg.pre_stim_timerange[0])
-    trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, info_processed, cfg.ica_opts.pre_timerange[0])
-    trial_post = _numpy_to_epochs_array(post_buf, info_processed, post_tmin)
-    if epochs_pre is None:
-        return trial_pre, trial_pre_ica, trial_post
-    epochs_pre = mne.concatenate_epochs([epochs_pre, trial_pre])
-    epochs_pre_ica = mne.concatenate_epochs([epochs_pre_ica, trial_pre_ica])
-    epochs_post = mne.concatenate_epochs([epochs_post, trial_post])
-    return epochs_pre, epochs_pre_ica, epochs_post
-
-
 # ==================== Calibration pipeline ====================
 
 
@@ -823,13 +769,45 @@ class Preprocessor:
             self._post_tmin,
             self._post_tmax,
         )
-        self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_epochs(
-            self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
-            raw_pre, raw_post,
-            self._info, self._info_processed, self._cfg,
-            self._calibration_tmin, self._calibration_tmax,
-            self._post_tmin, self._post_tmax,
+        raw_pre_time_offsets = np.array([self._calibration_tmin], dtype=np.float64)
+        raw_post_time_offsets = np.array([self._post_tmin], dtype=np.float64)
+        processed_sfreq = float(self._info_processed["sfreq"])
+        raw_sfreq = float(self._info["sfreq"])
+
+        pre_buf = crop_eeg_buffer(
+            raw_pre,
+            raw_pre_time_offsets,
+            self._cfg.pre_stim_timerange[0],
+            self._cfg.pre_stim_timerange[1],
         )
+        pre_ica_buf = crop_eeg_buffer(
+            raw_pre,
+            raw_pre_time_offsets,
+            self._cfg.ica_opts.pre_timerange[0],
+            self._cfg.ica_opts.pre_timerange[1],
+        )
+        post_buf = crop_eeg_buffer(
+            raw_post,
+            raw_post_time_offsets,
+            self._post_tmin,
+            self._post_tmax,
+        )
+
+        pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+
+        trial_pre = _numpy_to_epochs_array(pre_buf, self._info_processed, self._cfg.pre_stim_timerange[0])
+        trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, self._info_processed, self._cfg.ica_opts.pre_timerange[0])
+        trial_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
+        if self._epochs_pre is None:
+            self._epochs_pre = trial_pre
+            self._epochs_pre_ica = trial_pre_ica
+            self._epochs_post = trial_post
+        else:
+            self._epochs_pre = mne.concatenate_epochs([self._epochs_pre, trial_pre])
+            self._epochs_pre_ica = mne.concatenate_epochs([self._epochs_pre_ica, trial_pre_ica])
+            self._epochs_post = mne.concatenate_epochs([self._epochs_post, trial_post])
 
     def calibrate(self):
         """Run calibration on the accumulated trials.
