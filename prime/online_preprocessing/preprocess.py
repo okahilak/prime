@@ -110,10 +110,6 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
 
 def _save_buffers(subject_output, subject_id, label, buffers):
     for key, data in buffers.items():
-        if data.ndim != 3:
-            raise ValueError(
-                f"expected 3D buffer '{key}' (n_trials, n_channels, n_times), got shape {data.shape}"
-            )
         np.save(
             os.path.join(subject_output, f"{subject_id}_{label}_{key}_buffer.npy"),
             data,
@@ -150,7 +146,7 @@ def _process_and_save_trial_group(
     buffers = {}
     for key in BUFFER_KEYS:
         if buffer_lists[key]:
-            buffers[key] = np.stack(buffer_lists[key], axis=0)
+            buffers[key] = np.concatenate(buffer_lists[key], axis=0)
         else:
             buffers[key] = np.empty((0, 0, 0), dtype=np.float64)
     _save_buffers(subject_output, subject_id, label, buffers)
