@@ -30,6 +30,7 @@ from prime.prime_config import (
     epoch_n_times,
     get_dipole_time_range,
     get_gc_time_range,
+    get_ica_time_range,
     get_model_time_range,
     get_processed_sfreq,
     get_post_time_range,
@@ -632,6 +633,7 @@ class Preprocessor:
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
         info = _mne_info_from_forward(self._forward)
         calibration_tmin, calibration_tmax = get_calibration_time_range()
+        ica_tmin, ica_tmax = get_ica_time_range()
         post_tmin, post_tmax = get_post_time_range()
         gc_tmin, gc_tmax = get_gc_time_range()
         model_tmin, model_tmax = get_model_time_range()
@@ -645,8 +647,8 @@ class Preprocessor:
         )
         _validate_time_range_within(
             "ICA",
-            cfg.ica_opts.pre_timerange[0],
-            cfg.ica_opts.pre_timerange[1],
+            ica_tmin,
+            ica_tmax,
             calibration_tmin,
             calibration_tmax,
         )
@@ -660,6 +662,8 @@ class Preprocessor:
         self._info = info
         self._calibration_tmin = calibration_tmin
         self._calibration_tmax = calibration_tmax
+        self._ica_tmin = ica_tmin
+        self._ica_tmax = ica_tmax
         self._post_tmin = post_tmin
         self._post_tmax = post_tmax
         self._raw_pre_n_times = epoch_n_times(
@@ -739,8 +743,8 @@ class Preprocessor:
         pre_ica_buf = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
-            self._cfg.ica_opts.pre_timerange[0],
-            self._cfg.ica_opts.pre_timerange[1],
+            self._ica_tmin,
+            self._ica_tmax,
         )
         post_buf = crop_eeg_buffer(
             eeg_buffer,
@@ -754,7 +758,7 @@ class Preprocessor:
         post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
         trial_pre = _numpy_to_epochs_array(pre_buf, self._info_processed, self._gc_tmin)
-        trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, self._info_processed, self._cfg.ica_opts.pre_timerange[0])
+        trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, self._info_processed, self._ica_tmin)
         trial_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
         if self._epochs_pre is None:
             self._epochs_pre = trial_pre

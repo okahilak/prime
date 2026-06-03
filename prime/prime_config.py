@@ -31,6 +31,12 @@ def get_calibration_time_range() -> tuple[float, float]:
     return float(cfg.calibration_tmin), float(cfg.calibration_tmax)
 
 
+def get_ica_time_range() -> tuple[float, float]:
+    """Pre-stimulus epoch window [ica_tmin, ica_tmax] used for ICA calibration."""
+    cfg = load_prime_config()
+    return float(cfg.ica_tmin), float(cfg.ica_tmax)
+
+
 def get_gc_time_range() -> tuple[float, float]:
     """Pre-stimulus global-correction window [gc_tmin, gc_tmax] in seconds."""
     cfg = load_prime_config()

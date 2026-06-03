@@ -44,7 +44,6 @@ class ICAOpts:
     bad_component_thresholds: dict
     n_min_comps_to_reject: dict
     threshold_min_components_to_reject: dict
-    pre_timerange: List[float]
     filtering: ICAFiltering
 
 
@@ -137,7 +136,6 @@ class PreprocConfig:
             'bad_component_thresholds': self.ica_opts.bad_component_thresholds,
             'n_min_comps_to_reject': self.ica_opts.n_min_comps_to_reject,
             'threshold_min_components_to_reject': self.ica_opts.threshold_min_components_to_reject,
-            'pre_timerange': self.ica_opts.pre_timerange,
             'filtering': {
                 'order_bandpass': self.ica_opts.filtering.order_bandpass,
                 'order_bandstop': self.ica_opts.filtering.order_bandstop,
@@ -216,7 +214,6 @@ def get_default_config() -> PreprocConfig:
             bad_component_thresholds={'eye blink': 0.9},
             n_min_comps_to_reject={'eye blink': 2},
             threshold_min_components_to_reject={'eye blink': 0.7},
-            pre_timerange=[-1.1, -0.005],
             filtering=ICAFiltering(
                 order_bandpass=2,
                 order_bandstop=2,

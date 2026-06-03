@@ -48,6 +48,10 @@ processed_sfreq: 1000  # after online preprocessing resampling (model input)
 calibration_tmin: -1.1
 calibration_tmax: -0.005
 
+# --- Pre-stim ICA epoch crop ---
+ica_tmin: -1.1
+ica_tmax: -0.005
+
 # --- Raw post-stim epoch crop (calibration / online preprocessing) ---
 post_tmin: -0.030
 post_tmax: 0.100
