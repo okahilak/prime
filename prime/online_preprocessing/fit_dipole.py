@@ -17,8 +17,8 @@ except ImportError:
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
-def _load_dipole_epochs(subject_directory, subject, group_label):
-    epoch_path = os.path.join(subject_directory, f"{subject}_{group_label}_dipole_buffer.npy")
+def _load_post_epochs(subject_directory, subject, group_label):
+    epoch_path = os.path.join(subject_directory, f"{subject}_{group_label}_post.npy")
     epochs = np.load(epoch_path)
     return epochs
 
@@ -32,9 +32,9 @@ def run_fitting(subject, subjects_directory_eeg, forward_path):
 
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
-    calibration_epochs = _load_dipole_epochs(subject_directory, subject, "calibration")
+    calibration_epochs = _load_post_epochs(subject_directory, subject, "calibration")
     if calibration_epochs is None:
-        print(f"ERROR: Could not load calibration dipole epochs for subject {subject}. Skipping.")
+        print(f"ERROR: Could not load calibration post-stimulus epochs for subject {subject}. Skipping.")
         return None
 
     fitter = DipoleFitter(forward_path)
@@ -43,7 +43,7 @@ def run_fitting(subject, subjects_directory_eeg, forward_path):
     subject_directory = os.path.join(subjects_directory_eeg, subject)
 
     for group_label in ('calibration', 'intervention'):
-        epoch_data = _load_dipole_epochs(subject_directory, subject, group_label)
+        epoch_data = _load_post_epochs(subject_directory, subject, group_label)
         if epoch_data is None:
             continue
 

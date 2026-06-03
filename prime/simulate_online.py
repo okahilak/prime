@@ -137,10 +137,10 @@ def main():
         )
         preprocessor.add_trial(eeg_buffer, relative_timestamps)
 
-    buffers = preprocessor.calibrate()
-    amplitudes = dipole_fitter.calibrate(buffers['dipole'])
+    model_buffers, dipole_buffers = preprocessor.calibrate()
+    amplitudes = dipole_fitter.calibrate(dipole_buffers)
     labels = normalizer.calibrate(amplitudes)
-    predictor.calibrate(buffers['model'], labels)
+    predictor.calibrate(model_buffers, labels)
 
     # Intervention phase
     print_summary("INTERVENTION PHASE")
@@ -157,25 +157,22 @@ def main():
             trial_tmin, trial_tmax,
         )
         t0 = time.perf_counter()
-        buffers_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
+        processed_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
         preprocess_pre_times.append(time.perf_counter() - t0)
 
-        buffers_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
+        processed_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 
-        if buffers_pre is None or buffers_post is None:
+        if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
         continue
-        model_buffer = buffers_pre['model']
-        dipole_buffer = buffers_post['dipole']
-
         with profile("predict"):
-            probability = predictor.predict(model_buffer)
+            probability = predictor.predict(processed_pre)
 
-        amplitude = dipole_fitter.fit_trial(dipole_buffer)
+        amplitude = dipole_fitter.fit_trial(processed_post)
         label = normalizer.transform(amplitude)
-        predictor.finetune(model_buffer, label)
+        predictor.finetune(processed_pre, label)
 
         intervention_labels.append(label)
         predictions.append(probability)

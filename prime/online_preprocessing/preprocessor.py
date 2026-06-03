@@ -7,10 +7,10 @@ Usage
     preprocessor = Preprocessor(forward_path)
     preprocessor.add_trial(eeg_buffer, relative_timestamps)  # (n_samples, n_channels)
 
-    buffers = preprocessor.calibrate()
+    model_buffers, dipole_buffers = preprocessor.calibrate()
 
-    buffers_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)   # None if rejected
-    buffers_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
+    epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)   # None if rejected
+    epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 """
 
 import warnings
@@ -416,8 +416,8 @@ def crop_mne_trial_to_buffer(
 def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forward):
     """Full calibration preprocessing pipeline for qc, ica, and post epochs.
 
-    Returns ``(calibration_params, n_successful_trials, buffers)`` where ``buffers`` maps
-    ``'qc'``, ``'post'``, ``'model'``, and ``'dipole'`` to preprocessed trial arrays.
+    Returns ``(calibration_params, n_successful_trials, model_buffers, dipole_buffers)``
+    where the last two arrays are cropped to the model and dipole time windows.
     """
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
@@ -569,14 +569,13 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     model_tmin, model_tmax = get_model_time_range()
     dipole_tmin, dipole_tmax = get_dipole_time_range()
 
+    model_epochs = qc_epochs.crop(model_tmin, model_tmax, include_tmax=True)
+    dipole_epochs = post_epochs.crop(dipole_tmin, dipole_tmax, include_tmax=True)
+
     calibration_params['ica'] = ica
-    buffers = {
-        'qc': qc_epochs.get_data(copy=False),
-        'post': post_epochs.get_data(copy=False),
-        'model': qc_epochs.crop(model_tmin, model_tmax, include_tmax=True).get_data(copy=False),
-        'dipole': post_epochs.crop(dipole_tmin, dipole_tmax, include_tmax=True).get_data(copy=False),
-    }
-    return calibration_params, n_successful_trials, buffers
+    model_buffers = model_epochs.get_data(copy=False)
+    dipole_buffers = dipole_epochs.get_data(copy=False)
+    return calibration_params, n_successful_trials, model_buffers, dipole_buffers
 
 
 # ==================== Preprocessor class ====================
@@ -686,25 +685,36 @@ class Preprocessor:
 
         Returns
         -------
-        dict[str, np.ndarray]
-            Keys ``'qc'``, ``'post'``, ``'model'``, ``'dipole'`` — preprocessed calibration trials.
+        tuple[np.ndarray, np.ndarray]
+            ``(model_buffers, dipole_buffers)`` — preprocessed calibration trials cropped
+            to the model and dipole time windows, respectively.
         """
         if self.qc_epochs is None:
             raise RuntimeError("No trials have been added yet.")
 
-        calibration_params, n_successful_trials, buffers = preprocess_calibration(
-            self.qc_epochs.copy(),
-            self.ica_epochs.copy(),
-            self.post_epochs.copy(),
-            self._cfg,
-            self._opts,
-            self._forward,
+        calibration_params, n_successful_trials, model_buffers, dipole_buffers = (
+            preprocess_calibration(
+                self.qc_epochs.copy(),
+                self.ica_epochs.copy(),
+                self.post_epochs.copy(),
+                self._cfg,
+                self._opts,
+                self._forward,
+            )
         )
         self._calibration_params = calibration_params
         qc_shape = self.qc_epochs.get_data(copy=False).shape
         self._mad_workspace = SingleTrialMadWorkspace(qc_shape[1], qc_shape[2])
 
-        return buffers
+        if (
+            n_successful_trials != model_buffers.shape[0]
+            or n_successful_trials != dipole_buffers.shape[0]
+        ):
+            raise RuntimeError(
+                "mismatch between successful trial count and calibration epoch arrays"
+            )
+
+        return model_buffers, dipole_buffers
 
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):
@@ -720,7 +730,7 @@ class Preprocessor:
         self,
         eeg_buffer: np.ndarray,
         relative_timestamps: np.ndarray,
-    ) -> dict[str, np.ndarray] | None:
+    ) -> np.ndarray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
         Must be called after ``calibrate()``.
@@ -732,8 +742,8 @@ class Preprocessor:
         relative_timestamps : np.ndarray, shape (n_samples,)
             Time of each sample in seconds relative to the TMS event.
 
-        Returns a dict with keys ``'qc'`` and ``'model'`` (each ``(n_channels, n_times)``),
-        or ``None`` if the trial was rejected.
+        Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
+        the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
@@ -820,16 +830,13 @@ class Preprocessor:
             # Slicing can produce non-contiguous views; force contiguous layout
             # so torch.from_numpy() never sees negative/unsupported strides.
             model_window = data[0, :, start:stop]
-            return {
-                'qc': np.ascontiguousarray(data[0], dtype=np.float64),
-                'model': np.ascontiguousarray(model_window, dtype=np.float64),
-            }
+            return np.ascontiguousarray(model_window, dtype=np.float64)
 
     def preprocess_post(
         self,
         eeg_buffer: np.ndarray,
         relative_timestamps: np.ndarray,
-    ) -> dict[str, np.ndarray] | None:
+    ) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
 
         Must be called after ``calibrate()``.
@@ -841,8 +848,8 @@ class Preprocessor:
         relative_timestamps : np.ndarray, shape (n_samples,)
             Time of each sample in seconds relative to the TMS event.
 
-        Returns a dict with keys ``'post'`` and ``'dipole'`` (each ``(n_channels, n_times)``),
-        or ``None`` if the trial was rejected.
+        Returns a NumPy array with shape (1, n_channels, n_samples), or ``None`` if
+        the trial was rejected.
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
@@ -961,14 +968,8 @@ class Preprocessor:
         if np.any(np.abs(z_local) > trial_reject_opts["post"]["local_zscore_threshold"]):
             return None
 
-        post_data = epoch_post.get_data(copy=False)[0]
-        dipole_data = epoch_post.crop(
-            self._dipole_tmin, self._dipole_tmax, include_tmax=True,
-        ).get_data(copy=False)[0]
-        return {
-            'post': np.ascontiguousarray(post_data, dtype=np.float64),
-            'dipole': np.ascontiguousarray(dipole_data, dtype=np.float64),
-        }
+        cropped = epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True).get_data(copy=False)
+        return cropped
 
     # ------------------------------------------------------------------
     # Convenience helpers
