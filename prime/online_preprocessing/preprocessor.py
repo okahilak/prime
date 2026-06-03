@@ -48,6 +48,11 @@ from prime.online_preprocessing.utils.channel_interpolations import (
     custom_get_interpolation_matrix,
     apply_channel_interpolation,
 )
+from prime.online_preprocessing.utils.mad import (
+    SingleTrialMadWorkspace,
+    global_mad_zscore_rejected,
+    local_mad_zscore_rejected,
+)
 from prime.online_preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
@@ -714,6 +719,8 @@ class Preprocessor:
             )
         )
         self._calibration_params = calibration_params
+        qc_shape = self.qc_epochs.get_data(copy=False).shape
+        self._mad_workspace = SingleTrialMadWorkspace(qc_shape[1], qc_shape[2])
 
         if (
             n_successful_trials != model_buffers.shape[0]
@@ -730,6 +737,9 @@ class Preprocessor:
         """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
         instance = cls(forward_path)
         instance._calibration_params = calibration_params
+        n_channels = len(instance._info["ch_names"])
+        n_times = epoch_n_times(instance._qc_tmin, instance._qc_tmax, instance._processed_sfreq)
+        instance._mad_workspace = SingleTrialMadWorkspace(n_channels, n_times)
         return instance
 
     def preprocess_pre(
@@ -794,21 +804,27 @@ class Preprocessor:
 
         trial_reject_opts = self._opts['trial_reject_opts']
 
-        # Global MAD check.
+        trial = data[0]
+        qc_stats = self._calibration_params['good_trial_stats_qc']
+        pre_reject = trial_reject_opts['pre']
+        workspace = self._mad_workspace
+
         with _profile("preprocess_pre: global_mad_check"):
-            mad_val = median_abs_deviation(data, axis=(1, 2))[0]
-            z_mad = (
-                mad_val - self._calibration_params['good_trial_stats_qc']['mads_mean']
-            ) / self._calibration_params['good_trial_stats_qc']['mads_std']
-            threshold = trial_reject_opts['pre']['global_zscore_threshold']
-            if z_mad < threshold[0] or z_mad > threshold[1]:
+            if global_mad_zscore_rejected(
+                trial,
+                qc_stats['mads_mean'],
+                qc_stats['mads_std'],
+                pre_reject['global_zscore_threshold'],
+                workspace,
+            ):
                 return None
 
-        # Local MAD check.
         with _profile("preprocess_pre: local_mad_check"):
-            local_mad = median_abs_deviation(data, axis=2)
-            z_local = zscore(local_mad, axis=1)
-            if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
+            if local_mad_zscore_rejected(
+                trial,
+                pre_reject['local_zscore_threshold'],
+                workspace,
+            ):
                 return None
 
         with _profile("preprocess_pre: crop_to_model_window"):
