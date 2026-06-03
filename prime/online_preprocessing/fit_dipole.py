@@ -20,6 +20,11 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 def _load_post_epochs(subject_directory, subject, group_label):
     epoch_path = os.path.join(subject_directory, f"{subject}_{group_label}_post.npy")
     epochs = np.load(epoch_path)
+    if epochs.ndim != 3:
+        raise ValueError(
+            f"Expected post epochs with shape (n_trials, n_channels, n_times), "
+            f"got {epochs.shape} at {epoch_path}"
+        )
     return epochs
 
 

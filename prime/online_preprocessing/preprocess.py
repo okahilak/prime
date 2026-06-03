@@ -25,7 +25,11 @@ mne.set_log_level("ERROR")
 # ==================== Single-Trial Worker ====================
 
 def process_single_trial(eeg_buffer, relative_timestamps, preprocessor):
-    """Process a single trial. Returns (epoch_pre, epoch_post) or None if rejected."""
+    """Process a single trial.
+
+    Returns ``(epoch_pre, epoch_post)`` with shape ``(n_channels, n_times)`` each,
+    or ``None`` if rejected.
+    """
     epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
     epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
     if epoch_pre is None or epoch_post is None:
@@ -131,8 +135,8 @@ def _process_and_save_trial_group(
             bad_trials.append(i)
 
     if pre_list:
-        epochs_pre_final = np.concatenate(pre_list, axis=0)
-        epochs_post_final = np.concatenate(post_list, axis=0)
+        epochs_pre_final = np.stack(pre_list, axis=0)
+        epochs_post_final = np.stack(post_list, axis=0)
     else:
         epochs_pre_final = np.empty((0, 0, 0), dtype=np.float64)
         epochs_post_final = np.empty((0, 0, 0), dtype=np.float64)

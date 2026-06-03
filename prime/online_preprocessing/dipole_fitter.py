@@ -285,9 +285,8 @@ class DipoleFitter:
 
         Parameters
         ----------
-        epoch_post : np.ndarray
-            Preprocessed post-stimulus trial. Accepted shapes:
-            (n_channels, n_times) or (1, n_channels, n_times).
+        epoch_post : np.ndarray, shape (n_channels, n_times)
+            Preprocessed post-stimulus trial.
         orientation : 'free' or 'fixed'
             ``'free'`` (default) performs free-orientation fitting.
             ``'fixed'`` uses the orientation stored in ``fitting_info``.
@@ -303,15 +302,9 @@ class DipoleFitter:
             )
 
         epoch = np.asarray(epoch_post)
-        if epoch.ndim == 3:
-            if epoch.shape[0] != 1:
-                raise ValueError(
-                    f"Expected single trial in shape (1, n_channels, n_times), got {epoch.shape}."
-                )
-            epoch = epoch[0]
-        elif epoch.ndim != 2:
+        if epoch.ndim != 2:
             raise ValueError(
-                f"epoch_post must have shape (n_channels, n_times) or (1, n_channels, n_times), got {epoch.shape}."
+                f"epoch_post must have shape (n_channels, n_times), got {epoch.shape}."
             )
 
         if epoch.shape[0] != len(self._forward.ch_names):

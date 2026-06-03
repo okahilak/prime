@@ -826,7 +826,7 @@ class Preprocessor:
         relative_timestamps : np.ndarray, shape (n_samples,)
             Time of each sample in seconds relative to the TMS event.
 
-        Returns a NumPy array with shape (1, n_channels, n_samples), or ``None`` if
+        Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
         the trial was rejected.
         """
         if self._calibration_params is None:
@@ -947,7 +947,7 @@ class Preprocessor:
             return None
 
         cropped = epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True).get_data(copy=False)
-        return cropped
+        return np.ascontiguousarray(cropped[0], dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Convenience helpers
