@@ -2,11 +2,10 @@
 
 Implements the PRIME online pipeline equivalent to simulate_online.py:
   1. Calibration phase (first N_CALIBRATION_TRIALS events):
-     Accumulate raw pre epochs via process_periodic (5 ms before each event)
-     and raw post epochs via process_event, then batch-calibrate.
+     Accumulate full calibration-window trials via process_event, then batch-calibrate.
   2. Intervention phase (remaining events):
      process_periodic: preprocess pre + predict (5 ms before pulse).
-     process_event: preprocess post, fit dipole, label, finetune using stored pre.
+     process_event: crop post_initial window, preprocess post, fit dipole, label, finetune.
 
 Requires:
   - A pretrained PRIME model checkpoint (.pt)
@@ -21,13 +20,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-import mne
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
-from prime.online_preprocessing.preprocessor import Preprocessor
+from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import get_post_initial_time_range, get_ica_time_range
+from prime.prime_config import (
+    get_calibration_time_range,
+    get_ica_time_range,
+    get_post_initial_time_range,
+)
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -75,18 +77,20 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
+        self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
         self.raw_pre_tmin, self.raw_pre_tmax = get_ica_time_range()
-        self.raw_post_initial_tmin, self.raw_post_initial_tmax = get_post_initial_time_range()
+        self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"
 
         events_path = Path("data") / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
-        self.event_times = np.loadtxt(events_path, dtype=np.float64)
+        all_event_times = np.loadtxt(events_path, dtype=np.float64)
+        if all_event_times.ndim == 0:
+            all_event_times = np.array([float(all_event_times)])
+        self.event_times = all_event_times[N_CALIBRATION_TRIALS:]
         self.next_event_idx = 0
-        if self.event_times.ndim == 0:
-            self.event_times = np.array([float(self.event_times)])
 
-        self.pending_pre: Optional[mne.EpochsArray] = None
+        self.pending_pre: Optional[np.ndarray] = None
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)
@@ -102,7 +106,7 @@ class Decider:
         print(
             f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
             f"eeg={num_eeg_channels}  emg={num_emg_channels}  "
-            f"events={len(self.event_times)}"
+            f"events={len(all_event_times)}  intervention_events={len(self.event_times)}"
         )
 
     # ==================================================================
@@ -113,7 +117,7 @@ class Decider:
         # Periodic buffer ends at the current sample; with EVENT_LOOKAHEAD_SEC until the
         # pulse, that sample is raw_pre_tmax relative to the upcoming event.
         sample_window = [self.raw_pre_tmin + EVENT_LOOKAHEAD_SEC, 0.0]
-        event_sample_window = [self.raw_post_initial_tmin, self.raw_post_initial_tmax]
+        event_sample_window = [self.calibration_tmin, self.calibration_tmax]
         return {
             "periodic_processing_interval": 1.0 / self.sampling_frequency,
             "sample_window": sample_window,
@@ -144,17 +148,15 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
+        if not self.is_calibrated:
+            return None
+
         if not self.event_upcoming(reference_time):
             return None
 
-        if not self.is_calibrated:
-            with profile("add_raw_pre"):
-                self.preprocessor.add_raw_pre(eeg_buffer)
-            print(f"Calibration pre epoch queued for trial {self.trial_count + 1}/{N_CALIBRATION_TRIALS}")
-            return None
-
         with profile("preprocess_pre"):
-            pre = self.preprocessor.preprocess_pre(eeg_buffer)
+            pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets)
+
         self.pending_pre = pre
         if pre is None:
             print(f"Trial {self.trial_count + 1}: pre REJECTED by preprocessing")
@@ -175,8 +177,7 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
         if not self.is_calibrated:
-            with profile("add_raw_post"):
-                self.preprocessor.add_raw_post(eeg_buffer)
+            self.preprocessor.add_trial(eeg_buffer, time_offsets)
 
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
@@ -184,24 +185,29 @@ class Decider:
             if self.trial_count == N_CALIBRATION_TRIALS:
                 self.run_calibration()
 
-        else:
-            self.trial_count += 1
-            pre = self.pending_pre
-            self.pending_pre = None
+            return None
 
-            with profile("preprocess_post"):
-                post = self.preprocessor.preprocess_post(eeg_buffer)
+        self.trial_count += 1
+        pre = self.pending_pre
+        self.pending_pre = None
 
-            if pre is None or post is None:
-                print(f"Trial {self.trial_count}: REJECTED by preprocessing")
-                return None
+        post_buffer, post_time_offsets = crop_eeg_buffer(
+            eeg_buffer,
+            time_offsets,
+            self.post_initial_tmin,
+            self.post_initial_tmax,
+        )
+        post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
 
-            with profile("finetune"):
-                amplitude = self.dipole_fitter.fit_trial(post)
-                label = self.normalizer.transform(amplitude)
-                self.predictor.finetune(pre, label)
+        if pre is None or post is None:
+            print(f"Trial {self.trial_count}: REJECTED by preprocessing")
+            return None
 
-            print(f"Trial {self.trial_count}: label={label:.6f}")
+        amplitude = self.dipole_fitter.fit_trial(post)
+        label = self.normalizer.transform(amplitude)
+        self.predictor.finetune(pre, label)
+
+        print(f"Trial {self.trial_count}: label={label:.6f}")
 
         return None
 

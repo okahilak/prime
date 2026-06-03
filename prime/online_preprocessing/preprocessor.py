@@ -351,12 +351,19 @@ def crop_eeg_buffer(
     tmax: float,
     *,
     sfreq: float | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Crop (n_samples, n_channels) to [tmin, tmax] inclusive relative to the event.
 
     Matches ``epoch_n_times`` / MNE ``crop(..., include_tmax=True)`` on an epoch whose
     first sample is at ``time_offsets[0]``. Uses ``raw_sfreq`` from configs/prime.yaml
     unless ``sfreq`` is given (e.g. after resampling to ``processed_sfreq``).
+
+    Returns
+    -------
+    cropped_buffer : np.ndarray
+        EEG samples in the requested window.
+    cropped_time_offsets : np.ndarray
+        Time offset of each cropped sample, sliced from ``time_offsets``.
     """
     time_offsets = np.asarray(time_offsets, dtype=np.float64)
     if time_offsets.size < 1:
@@ -370,7 +377,7 @@ def crop_eeg_buffer(
             f"cannot crop [{tmin}, {tmax}] from buffer "
             f"(start={start}, stop={stop}, buffer_len={eeg_buffer.shape[0]})"
         )
-    return eeg_buffer[start:stop]
+    return eeg_buffer[start:stop], time_offsets[start:stop]
 
 
 def crop_mne_trial_to_raw_epochs(
@@ -631,19 +638,19 @@ class Preprocessor:
         processed_sfreq = get_processed_sfreq()
         raw_sfreq = get_raw_sfreq()
 
-        qc_buffer = crop_eeg_buffer(
+        qc_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._qc_tmin,
             self._qc_tmax,
         )
-        ica_buffer = crop_eeg_buffer(
+        ica_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._ica_tmin,
             self._ica_tmax,
         )
-        post_buffer = crop_eeg_buffer(
+        post_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._post_initial_tmin,
@@ -738,7 +745,7 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        pre_stim = crop_eeg_buffer(
+        pre_stim, _ = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._qc_tmin,
@@ -794,7 +801,7 @@ class Preprocessor:
         ):
             return None
 
-        model_buffer = crop_eeg_buffer(
+        model_buffer, _ = crop_eeg_buffer(
             data[0].T,
             np.asarray([self._qc_tmin], dtype=np.float64),
             self._model_tmin,
@@ -825,7 +832,7 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        post_buffer = crop_eeg_buffer(
+        post_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._post_initial_tmin,
