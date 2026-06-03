@@ -29,11 +29,11 @@ from scipy.signal import butter, filtfilt, resample_poly
 
 from prime.prime_config import (
     epoch_n_times,
-    get_post_epoch_time_range,
-    get_pre_epoch_time_range,
+    get_dipole_time_range,
+    get_model_time_range,
     get_processed_sfreq,
-    get_raw_post_time_range,
-    get_raw_pre_time_range,
+    get_post_time_range,
+    get_calibration_time_range,
     get_raw_sfreq,
     time_to_sample,
 )
@@ -78,13 +78,13 @@ def _validate_time_range_within(
 
 
 def _validate_pre_epoch_window(
-    pre_epoch_tmin: float,
-    pre_epoch_tmax: float,
-    raw_pre_epoch_tmin: float,
-    raw_pre_epoch_tmax: float,
+    model_tmin: float,
+    model_tmax: float,
+    calibration_tmin: float,
+    calibration_tmax: float,
 ) -> None:
     _validate_time_range_within(
-        "Pre epoch", pre_epoch_tmin, pre_epoch_tmax, raw_pre_epoch_tmin, raw_pre_epoch_tmax,
+        "Pre epoch", model_tmin, model_tmax, calibration_tmin, calibration_tmax,
     )
 
 
@@ -109,19 +109,19 @@ def _mne_info_from_forward(forward: mne.Forward) -> mne.Info:
 
 
 def _validate_post_epoch_window(
-    post_epoch_tmin: float,
-    post_epoch_tmax: float,
-    raw_post_epoch_tmin: float,
-    raw_post_epoch_tmax: float,
+    dipole_tmin: float,
+    dipole_tmax: float,
+    post_tmin: float,
+    post_tmax: float,
 ) -> None:
     if not (
-        raw_post_epoch_tmin <= post_epoch_tmin
-        and post_epoch_tmax <= raw_post_epoch_tmax
-        and post_epoch_tmin < post_epoch_tmax
+        post_tmin <= dipole_tmin
+        and dipole_tmax <= post_tmax
+        and dipole_tmin < dipole_tmax
     ):
         raise ValueError(
-            f"Post epoch window [{post_epoch_tmin}, {post_epoch_tmax}] must satisfy "
-            f"{raw_post_epoch_tmin} <= post_epoch_tmin < post_epoch_tmax <= {raw_post_epoch_tmax}"
+            f"Post epoch window [{dipole_tmin}, {dipole_tmax}] must satisfy "
+            f"{post_tmin} <= dipole_tmin < dipole_tmax <= {post_tmax}"
         )
 
 
@@ -459,14 +459,14 @@ def append_calibration_epochs(
     info: mne.Info,
     info_processed: mne.Info,
     cfg,
-    raw_pre_epoch_tmin: float,
-    raw_pre_epoch_tmax: float,
-    raw_post_epoch_tmin: float,
-    raw_post_epoch_tmax: float,
+    calibration_tmin: float,
+    calibration_tmax: float,
+    post_tmin: float,
+    post_tmax: float,
 ):
     """Append one raw pre/post pair (resampled) to calibration epoch structs."""
-    raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
-    raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
+    raw_pre_time_offsets = np.array([calibration_tmin], dtype=np.float64)
+    raw_post_time_offsets = np.array([post_tmin], dtype=np.float64)
     processed_sfreq = float(info_processed["sfreq"])
     raw_sfreq = float(info["sfreq"])
 
@@ -485,8 +485,8 @@ def append_calibration_epochs(
     post_buf = crop_eeg_buffer(
         raw_post,
         raw_post_time_offsets,
-        raw_post_epoch_tmin,
-        raw_post_epoch_tmax,
+        post_tmin,
+        post_tmax,
     )
 
     pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
@@ -495,7 +495,7 @@ def append_calibration_epochs(
 
     trial_pre = _numpy_to_epochs_array(pre_buf, info_processed, cfg.pre_stim_timerange[0])
     trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, info_processed, cfg.ica_opts.pre_timerange[0])
-    trial_post = _numpy_to_epochs_array(post_buf, info_processed, raw_post_epoch_tmin)
+    trial_post = _numpy_to_epochs_array(post_buf, info_processed, post_tmin)
     if epochs_pre is None:
         return trial_pre, trial_pre_ica, trial_post
     epochs_pre = mne.concatenate_epochs([epochs_pre, trial_pre])
@@ -650,11 +650,11 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     n_successful_trials = epochs_pre.get_data(copy=True).shape[0]
 
-    pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
-    post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
+    model_tmin, model_tmax = get_model_time_range()
+    dipole_tmin, dipole_tmax = get_dipole_time_range()
 
-    epochs_pre = epochs_pre.crop(pre_epoch_tmin, pre_epoch_tmax, include_tmax=True)
-    epochs_post = epochs_post.crop(post_epoch_tmin, post_epoch_tmax, include_tmax=True)
+    epochs_pre = epochs_pre.crop(model_tmin, model_tmax, include_tmax=True)
+    epochs_post = epochs_post.crop(dipole_tmin, dipole_tmax, include_tmax=True)
 
     calibration_params['ica'] = ica
     return (
@@ -675,52 +675,52 @@ class Preprocessor:
         raw_sfreq = get_raw_sfreq()
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
         info = _mne_info_from_forward(self._forward)
-        raw_pre_epoch_tmin, raw_pre_epoch_tmax = get_raw_pre_time_range()
-        raw_post_epoch_tmin, raw_post_epoch_tmax = get_raw_post_time_range()
-        pre_epoch_tmin, pre_epoch_tmax = get_pre_epoch_time_range()
-        post_epoch_tmin, post_epoch_tmax = get_post_epoch_time_range()
+        calibration_tmin, calibration_tmax = get_calibration_time_range()
+        post_tmin, post_tmax = get_post_time_range()
+        model_tmin, model_tmax = get_model_time_range()
+        dipole_tmin, dipole_tmax = get_dipole_time_range()
         _validate_time_range_within(
             "Pre-stim preprocessing",
             cfg.pre_stim_timerange[0],
             cfg.pre_stim_timerange[1],
-            raw_pre_epoch_tmin,
-            raw_pre_epoch_tmax,
+            calibration_tmin,
+            calibration_tmax,
         )
         _validate_time_range_within(
             "ICA",
             cfg.ica_opts.pre_timerange[0],
             cfg.ica_opts.pre_timerange[1],
-            raw_pre_epoch_tmin,
-            raw_pre_epoch_tmax,
+            calibration_tmin,
+            calibration_tmax,
         )
         _validate_pre_epoch_window(
-            pre_epoch_tmin, pre_epoch_tmax, raw_pre_epoch_tmin, raw_pre_epoch_tmax,
+            model_tmin, model_tmax, calibration_tmin, calibration_tmax,
         )
         _validate_post_epoch_window(
-            post_epoch_tmin, post_epoch_tmax, raw_post_epoch_tmin, raw_post_epoch_tmax,
+            dipole_tmin, dipole_tmax, post_tmin, post_tmax,
         )
         self._cfg = cfg
         self._info = info
-        self._raw_pre_epoch_tmin = raw_pre_epoch_tmin
-        self._raw_pre_epoch_tmax = raw_pre_epoch_tmax
-        self._raw_post_epoch_tmin = raw_post_epoch_tmin
-        self._raw_post_epoch_tmax = raw_post_epoch_tmax
+        self._calibration_tmin = calibration_tmin
+        self._calibration_tmax = calibration_tmax
+        self._post_tmin = post_tmin
+        self._post_tmax = post_tmax
         self._raw_pre_n_times = epoch_n_times(
-            raw_pre_epoch_tmin, raw_pre_epoch_tmax, raw_sfreq,
+            calibration_tmin, calibration_tmax, raw_sfreq,
         )
         self._raw_post_n_times = epoch_n_times(
-            raw_post_epoch_tmin, raw_post_epoch_tmax, raw_sfreq,
+            post_tmin, post_tmax, raw_sfreq,
         )
         self._pre_stim_tmin = cfg.pre_stim_timerange[0]
         self._pre_stim_tmax = cfg.pre_stim_timerange[1]
-        self._pre_epoch_tmin = pre_epoch_tmin
-        self._pre_epoch_tmax = pre_epoch_tmax
-        self._post_epoch_tmin = post_epoch_tmin
-        self._post_epoch_tmax = post_epoch_tmax
+        self._model_tmin = model_tmin
+        self._model_tmax = model_tmax
+        self._dipole_tmin = dipole_tmin
+        self._dipole_tmax = dipole_tmax
         self._opts = cfg.to_dicts()
         self._processed_sfreq = get_processed_sfreq()
-        self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
-        self._raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
+        self._raw_pre_time_offsets = np.array([calibration_tmin], dtype=np.float64)
+        self._raw_post_time_offsets = np.array([post_tmin], dtype=np.float64)
         self._info_processed = self._info.copy()
         with self._info_processed._unlock():
             self._info_processed["sfreq"] = self._processed_sfreq
@@ -749,10 +749,10 @@ class Preprocessor:
             )
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
-        return epoch_pre.crop(self._pre_epoch_tmin, self._pre_epoch_tmax, include_tmax=True)
+        return epoch_pre.crop(self._model_tmin, self._model_tmax, include_tmax=True)
 
     def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
-        return epoch_post.crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
+        return epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -764,7 +764,7 @@ class Preprocessor:
         Parameters
         ----------
         raw_pre : np.ndarray, shape (n_samples, n_channels)
-            EEG for ``[raw_pre_epoch_tmin, raw_pre_epoch_tmax]`` at ``raw_sfreq``.
+            EEG for ``[calibration_tmin, calibration_tmax]`` at ``raw_sfreq``.
         """
         if self._awaiting_post:
             raise RuntimeError(
@@ -780,7 +780,7 @@ class Preprocessor:
         Parameters
         ----------
         raw_post : np.ndarray, shape (n_samples, n_channels)
-            EEG for ``[raw_post_epoch_tmin, raw_post_epoch_tmax]`` at ``raw_sfreq``.
+            EEG for ``[post_tmin, post_tmax]`` at ``raw_sfreq``.
         """
         if not self._awaiting_post:
             raise RuntimeError("add_raw_pre must be called before add_raw_post")
@@ -789,8 +789,8 @@ class Preprocessor:
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
             self._pending_pre, raw_post,
             self._info, self._info_processed, self._cfg,
-            self._raw_pre_epoch_tmin, self._raw_pre_epoch_tmax,
-            self._raw_post_epoch_tmin, self._raw_post_epoch_tmax,
+            self._calibration_tmin, self._calibration_tmax,
+            self._post_tmin, self._post_tmax,
         )
         self._pending_pre = None
         self._awaiting_post = False
@@ -914,18 +914,18 @@ class Preprocessor:
 
         with _profile("preprocess_pre: crop_to_model_window"):
             start = time_to_sample(
-                self._pre_epoch_tmin,
+                self._model_tmin,
                 self._pre_stim_tmin,
                 self._processed_sfreq,
             )
             stop = start + epoch_n_times(
-                self._pre_epoch_tmin,
-                self._pre_epoch_tmax,
+                self._model_tmin,
+                self._model_tmax,
                 self._processed_sfreq,
             )
             if start < 0 or stop > data.shape[2]:
                 raise ValueError(
-                    f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
+                    f"cannot crop pre window [{self._model_tmin}, {self._model_tmax}] "
                     f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
                 )
             # Slicing can produce non-contiguous views; force contiguous layout
@@ -948,15 +948,15 @@ class Preprocessor:
         post_buf = crop_eeg_buffer(
             raw_post,
             self._raw_post_time_offsets,
-            self._raw_post_epoch_tmin,
-            self._raw_post_epoch_tmax,
+            self._post_tmin,
+            self._post_tmax,
         )
         post_buf = _resample_buffer_polyphase(
             post_buf,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
         )
-        epoch_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._raw_post_epoch_tmin)
+        epoch_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
         calibration_params = self._calibration_params
         dicts = self._cfg.to_dicts()
         trial_reject_opts = dicts["trial_reject_opts"]

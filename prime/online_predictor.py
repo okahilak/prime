@@ -19,7 +19,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
 from prime.models.builder import build_model
-from prime.prime_config import epoch_n_times, get_pre_epoch_time_range, get_processed_sfreq
+from prime.prime_config import epoch_n_times, get_model_time_range, get_processed_sfreq
 from prime.tta_wrapper import TTAWrapper, _apply_alignment_transform_np
 
 log = logging.getLogger(__name__)
@@ -27,12 +27,12 @@ log = logging.getLogger(__name__)
 # Model/data constants (pre-stim window from configs/prime.yaml)
 _N_CHANNELS = 60          # len(COMMON_CHANNELS) after preprocessing
 _PROCESSED_SFREQ = get_processed_sfreq()
-_PRE_EPOCH_TMIN, _PRE_EPOCH_TMAX = get_pre_epoch_time_range()
-_N_TIMEPOINTS = epoch_n_times(_PRE_EPOCH_TMIN, _PRE_EPOCH_TMAX, _PROCESSED_SFREQ)
+_model_tmin, _model_tmax = get_model_time_range()
+_N_TIMEPOINTS = epoch_n_times(_model_tmin, _model_tmax, _PROCESSED_SFREQ)
 
 _DEFAULT_ARGS = OmegaConf.create({
-    "pre_epoch_tmin": _PRE_EPOCH_TMIN,
-    "pre_epoch_tmax": _PRE_EPOCH_TMAX,
+    "model_tmin": _model_tmin,
+    "model_tmax": _model_tmax,
     "use_tta": True,
     "alignment_type": "euclidean",
     "use_backrotation": True,

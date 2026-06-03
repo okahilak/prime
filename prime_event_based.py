@@ -28,8 +28,8 @@ from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.prime_config import (
-    get_raw_post_time_range,
-    get_raw_pre_time_range,
+    get_post_time_range,
+    get_calibration_time_range,
 )
 from prime.tep_normalizer import TEPNormalizer
 
@@ -70,8 +70,8 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self.raw_pre_tmin, self.raw_pre_tmax = get_raw_pre_time_range()
-        self.raw_post_tmin, self.raw_post_tmax = get_raw_post_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_calibration_time_range()
+        self.raw_post_tmin, self.raw_post_tmax = get_post_time_range()
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)

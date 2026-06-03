@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 import mne
-from prime.prime_config import epoch_n_times, get_post_epoch_time_range, get_processed_sfreq
+from prime.prime_config import epoch_n_times, get_dipole_time_range, get_processed_sfreq
 
 
 def dipoles_for_indices(evoked_data, forward):
@@ -223,10 +223,10 @@ class DipoleFitter:
         self._max_window_size = max_window_size
         self._window_size_exponent = window_size_exponent
         self._fitting_info = None
-        self._post_epoch_tmin, self._post_epoch_tmax = get_post_epoch_time_range()
+        self._dipole_tmin, self._dipole_tmax = get_dipole_time_range()
         self._processed_sfreq = get_processed_sfreq()
         self._post_n_times = epoch_n_times(
-            self._post_epoch_tmin, self._post_epoch_tmax, self._processed_sfreq
+            self._dipole_tmin, self._dipole_tmax, self._processed_sfreq
         )
 
     def calibrate(self, cal_epochs_post):

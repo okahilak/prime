@@ -45,20 +45,20 @@ processed_sfreq: 1000  # after online preprocessing resampling (model input)
 
 # --- Raw pre-stim epoch crop (calibration / online preprocessing) ---
 # Must cover all pre-stim preprocessing steps (ICA, channel reject, filtering, etc.).
-raw_pre_epoch_tmin: -1.1
-raw_pre_epoch_tmax: -0.005
+calibration_tmin: -1.1
+calibration_tmax: -0.005
 
 # --- Raw post-stim epoch crop (calibration / online preprocessing) ---
-raw_post_epoch_tmin: -0.030
-raw_post_epoch_tmax: 0.100
+post_tmin: -0.030
+post_tmax: 0.100
 
 # --- Pre-stim EEG window: 50 ms ending 10 ms before TMS pulse ---
-pre_epoch_tmin: -0.060
-pre_epoch_tmax: -0.010
+model_tmin: -0.060
+model_tmax: -0.010
 
 # --- Post-stim TEP dipole search window ---
-post_epoch_tmin: 0.038
-post_epoch_tmax: 0.050
+dipole_tmin: 0.038
+dipole_tmax: 0.050
 
 # --- Filtering ---
 fmin: null

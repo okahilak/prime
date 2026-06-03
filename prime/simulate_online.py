@@ -44,7 +44,7 @@ import mne
 import numpy as np
 
 # --- Local imports ---
-from prime.prime_config import get_raw_post_time_range, get_raw_pre_time_range
+from prime.prime_config import get_post_time_range, get_calibration_time_range
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
@@ -125,8 +125,8 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    raw_pre_tmin, raw_pre_tmax = get_raw_pre_time_range()
-    raw_post_tmin, raw_post_tmax = get_raw_post_time_range()
+    raw_pre_tmin, raw_pre_tmax = get_calibration_time_range()
+    raw_post_tmin, raw_post_tmax = get_post_time_range()
     preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()

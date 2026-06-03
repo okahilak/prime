@@ -27,7 +27,7 @@ from moabb.paradigms.base import BaseParadigm
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from prime.prime_config import get_pre_epoch_time_range, get_processed_sfreq
+from prime.prime_config import get_model_time_range, get_processed_sfreq
 from prime.tep_normalizer import TEPNormalizer
 from prime.tta_wrapper import (
     PYRIEMANN_AVAILABLE,
@@ -62,7 +62,7 @@ def _epochs_from_npy(path: Path) -> mne.BaseEpochs:
             f"Expected 3D array (trials, channels, times), got shape {data.shape} at {path}"
         )
     n_trials = data.shape[0]
-    tmin, _ = get_pre_epoch_time_range()
+    tmin, _ = get_model_time_range()
     sfreq = get_processed_sfreq()
     ch_names = _channel_names_for_epochs(data.shape[1])
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
