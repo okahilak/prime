@@ -87,6 +87,8 @@ class Decider:
             all_event_times = np.array([float(all_event_times)])
         self.event_times = all_event_times[N_CALIBRATION_TRIALS:]
         self.next_event_idx = 0
+        
+        self.dt = 1.0 / self.sampling_frequency
 
         self.pending_pre: Optional[np.ndarray] = None
 
@@ -125,18 +127,11 @@ class Decider:
     # Periodic processing (pre-stim, at QC window end before each event)
     # ==================================================================
 
-    def event_upcoming(self, reference_time: float) -> bool:
+    def time_to_next_event(self, reference_time: float) -> float | None:
+        """Seconds from reference_time until the next TMS event, or None if exhausted."""
         if self.next_event_idx >= len(self.event_times):
-            return False
-
-        event_time = float(self.event_times[self.next_event_idx])
-        dt = 1.0 / self.sampling_frequency
-
-        is_upcoming = abs((event_time - reference_time) - self.event_lookahead) <= dt / 2
-        if is_upcoming:
-            self.next_event_idx += 1
-
-        return is_upcoming
+            return None
+        return float(self.event_times[self.next_event_idx]) - reference_time
 
     def process_periodic(
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
@@ -147,11 +142,20 @@ class Decider:
         if not self.is_calibrated:
             return None
 
-        if not self.event_upcoming(reference_time):
+        time_to_event = self.time_to_next_event(reference_time)
+        if time_to_event is None:
+            return None
+    
+        if abs(time_to_event - self.event_lookahead) > self.dt / 2:
             return None
 
+        self.next_event_idx += 1
+
+        # time_offsets are relative to reference_time; preprocessor expects TMS-event-relative.
+        event_timestamps = time_offsets - time_to_event
+
         with profile("preprocess_pre"):
-            pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets)
+            pre = self.preprocessor.preprocess_pre(eeg_buffer, event_timestamps)
 
         self.pending_pre = pre
         if pre is None:
