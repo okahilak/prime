@@ -64,31 +64,6 @@ def _profile(label: str) -> Iterator[None]:
         print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
 
 
-def _validate_time_range_within(
-    name: str,
-    tmin: float,
-    tmax: float,
-    outer_tmin: float,
-    outer_tmax: float,
-) -> None:
-    if not (outer_tmin <= tmin and tmax <= outer_tmax and tmin < tmax):
-        raise ValueError(
-            f"{name} window [{tmin}, {tmax}] must satisfy "
-            f"{outer_tmin} <= tmin < tmax <= {outer_tmax}"
-        )
-
-
-def _validate_pre_epoch_window(
-    model_tmin: float,
-    model_tmax: float,
-    calibration_tmin: float,
-    calibration_tmax: float,
-) -> None:
-    _validate_time_range_within(
-        "Pre epoch", model_tmin, model_tmax, calibration_tmin, calibration_tmax,
-    )
-
-
 def _require_info_sfreq(info: mne.Info, sfreq: float) -> None:
     if abs(info["sfreq"] - sfreq) > 1e-6:
         raise ValueError(
@@ -107,23 +82,6 @@ def _mne_info_from_forward(forward: mne.Forward) -> mne.Info:
     info.set_montage(montage)
     _require_info_sfreq(info, raw_sfreq)
     return info
-
-
-def _validate_post_epoch_window(
-    dipole_tmin: float,
-    dipole_tmax: float,
-    post_tmin: float,
-    post_tmax: float,
-) -> None:
-    if not (
-        post_tmin <= dipole_tmin
-        and dipole_tmax <= post_tmax
-        and dipole_tmin < dipole_tmax
-    ):
-        raise ValueError(
-            f"Post epoch window [{dipole_tmin}, {dipole_tmax}] must satisfy "
-            f"{post_tmin} <= dipole_tmin < dipole_tmax <= {post_tmax}"
-        )
 
 
 warnings.filterwarnings(
@@ -638,26 +596,7 @@ class Preprocessor:
         qc_tmin, qc_tmax = get_qc_time_range()
         model_tmin, model_tmax = get_model_time_range()
         dipole_tmin, dipole_tmax = get_dipole_time_range()
-        _validate_time_range_within(
-            "Pre-stim preprocessing",
-            qc_tmin,
-            qc_tmax,
-            calibration_tmin,
-            calibration_tmax,
-        )
-        _validate_time_range_within(
-            "ICA",
-            ica_tmin,
-            ica_tmax,
-            calibration_tmin,
-            calibration_tmax,
-        )
-        _validate_pre_epoch_window(
-            model_tmin, model_tmax, calibration_tmin, calibration_tmax,
-        )
-        _validate_post_epoch_window(
-            dipole_tmin, dipole_tmax, post_tmin, post_tmax,
-        )
+
         self._cfg = cfg
         self._info = info
         self._calibration_tmin = calibration_tmin
@@ -690,22 +629,6 @@ class Preprocessor:
         self._epochs_pre_ica = None
         self._epochs_post = None
         self._calibration_params = None
-
-    def _validate_raw_pre_shape(self, data: np.ndarray) -> None:
-        data = np.asarray(data)
-        if data.shape != (self._raw_pre_n_times, len(self._info.ch_names)):
-            raise ValueError(
-                f"raw pre epoch must have shape ({self._raw_pre_n_times}, {len(self._info.ch_names)}), "
-                f"got {data.shape}"
-            )
-
-    def _validate_raw_post_shape(self, data: np.ndarray) -> None:
-        data = np.asarray(data)
-        if data.shape != (self._raw_post_n_times, len(self._info.ch_names)):
-            raise ValueError(
-                f"raw post epoch must have shape ({self._raw_post_n_times}, {len(self._info.ch_names)}), "
-                f"got {data.shape}"
-            )
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
         return epoch_pre.crop(self._model_tmin, self._model_tmax, include_tmax=True)
@@ -826,7 +749,6 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        self._validate_raw_pre_shape(raw_pre)
         with _profile("preprocess_pre: crop_eeg_buffer"):
             pre_stim = crop_eeg_buffer(
                 raw_pre,
@@ -916,7 +838,6 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        self._validate_raw_post_shape(raw_post)
         post_buf = crop_eeg_buffer(
             raw_post,
             self._raw_post_time_offsets,
