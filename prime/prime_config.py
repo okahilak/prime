@@ -31,6 +31,12 @@ def get_calibration_time_range() -> tuple[float, float]:
     return float(cfg.calibration_tmin), float(cfg.calibration_tmax)
 
 
+def get_gc_time_range() -> tuple[float, float]:
+    """Pre-stimulus global-correction window [gc_tmin, gc_tmax] in seconds."""
+    cfg = load_prime_config()
+    return float(cfg.gc_tmin), float(cfg.gc_tmax)
+
+
 def get_post_time_range() -> tuple[float, float]:
     """Raw post-stimulus crop window [post_tmin, post_tmax] in seconds."""
     cfg = load_prime_config()

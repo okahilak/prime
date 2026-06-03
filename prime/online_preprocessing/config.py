@@ -93,7 +93,6 @@ class TrialRejectOpts:
 @dataclass
 class PreprocConfig:
     # Time ranges
-    pre_stim_timerange: List[float]
     baseline: List[float]
     reject_range: List[float]
     artifact_window_1: List[float]
@@ -198,7 +197,6 @@ def get_default_config() -> PreprocConfig:
     freq_range = [30, 47]
 
     return PreprocConfig(
-        pre_stim_timerange=[-0.505, -0.005],
         baseline=[-0.025, -0.015],
         reject_range=[0.02, 0.06],
         artifact_window_1=[-0.014, 0.014],
