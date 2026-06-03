@@ -147,7 +147,8 @@ def main():
 
     intervention_labels = []
     predictions = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+    preprocess_pre_times: list[float] = []
+    for trial_idx in range(N_CALIBRATION_TRIALS, 500):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
@@ -155,8 +156,9 @@ def main():
             trial_loader.get_trial(trial_idx),
             trial_tmin, trial_tmax,
         )
-        with profile("preprocess_pre_total"):
-            processed_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
+        t0 = time.perf_counter()
+        processed_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
+        preprocess_pre_times.append(time.perf_counter() - t0)
 
         processed_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 
@@ -164,6 +166,7 @@ def main():
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
+        continue
         with profile("predict"):
             probability = predictor.predict(processed_pre)
 
@@ -175,6 +178,11 @@ def main():
         predictions.append(probability)
 
         print(f"Trial {trial_idx + 1}: prediction={probability:.6f}  label={label:.6f}")
+
+    times = np.array(preprocess_pre_times)
+    mean_s = np.mean(times)
+    sem_s = np.std(times, ddof=1) / np.sqrt(len(times)) if len(times) > 1 else 0.0
+    print(f"preprocess_pre: mean={mean_s * 1000:.1f}ms, SEM={sem_s * 1000:.1f}ms (n={len(times)})")
 
     intervention_labels = np.array(intervention_labels)
     predictions = np.array(predictions)
