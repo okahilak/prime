@@ -495,15 +495,7 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     qc_epochs = mne.EpochsArray(
         qc_data, info=qc_epochs.info, events=qc_epochs.events, tmin=qc_epochs.times[0],
     )
-    if cfg.use_ica_on_pre:
-        qc_epochs.set_eeg_reference('average', projection=False, verbose=False)
     del qc_data
-
-    if cfg.use_ica_on_pre:
-        bad_ocular_qc, _ = _detect_ocular_trials(
-            ica, qc_epochs, trial_reject_opts['ocular']['pre_timerange_min'], None,
-            excluded_components['eye blink'], trial_reject_opts['ocular']['z_threshold'],
-        )
 
     bad_ocular_post, ocular_threshold_post = _detect_ocular_trials(
         ica, post_epochs, trial_reject_opts['ocular']['post_timerange'][0],
@@ -511,18 +503,11 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
         excluded_components['eye blink'], trial_reject_opts['ocular']['z_threshold'],
     )
 
-    if cfg.use_ica_on_pre:
-        bad_ocular = list(np.union1d(bad_ocular_qc, bad_ocular_post).astype(int))
-    else:
-        bad_ocular = bad_ocular_post
-
     calibration_params['ocular_threshold_post'] = ocular_threshold_post
 
-    if cfg.use_ica_on_pre:
-        ica.apply(qc_epochs)
     ica.apply(post_epochs)
 
-    qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_ocular)
+    qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_ocular_post)
     qc_epochs.set_eeg_reference('average', projection=False, verbose=False)
 
     bad_qc, stats_qc = _find_bad_trials(
