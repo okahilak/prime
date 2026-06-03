@@ -123,8 +123,7 @@ class Decider:
         )
         if not self.is_calibrated:
             # --- Calibration phase ---
-            self.preprocessor.add_raw_pre(raw_pre)
-            self.preprocessor.add_raw_post(raw_post)
+            self.preprocessor.add_trial(eeg_buffer, time_offsets)
             self.trial_count += 1
             print(f"Calibration trial {self.trial_count}/{N_CALIBRATION_TRIALS}")
 

@@ -8,10 +8,11 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-from prime.prime_config import get_post_time_range, get_calibration_time_range
+from prime.prime_config import get_post_time_range, get_calibration_time_range, get_trial_time_range
 from prime.online_preprocessing.preprocessor import (
     Preprocessor,
     crop_mne_trial_to_raw_epochs,
+    crop_mne_trial_to_buffer,
 )
 from prime.online_preprocessing.trial_loader import TrialLoader
 
@@ -83,14 +84,14 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
 
     raw_pre_tmin, raw_pre_tmax = get_calibration_time_range()
     raw_post_tmin, raw_post_tmax = get_post_time_range()
+    trial_tmin, trial_tmax = get_trial_time_range()
     preprocessor = Preprocessor(forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
-        raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+        eeg_buffer, relative_timestamps = crop_mne_trial_to_buffer(
             trial_loader.get_trial(trial_idx),
-            raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+            trial_tmin, trial_tmax,
         )
-        preprocessor.add_raw_pre(raw_pre)
-        preprocessor.add_raw_post(raw_post)
+        preprocessor.add_trial(eeg_buffer, relative_timestamps)
 
     print("Calibrating...")
 

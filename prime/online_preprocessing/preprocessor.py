@@ -5,8 +5,7 @@ preprocesses individual trials using the resulting calibration parameters.
 Usage
 -----
     preprocessor = Preprocessor(forward_path)
-    preprocessor.add_raw_pre(raw_pre)   # (n_samples, n_channels)
-    preprocessor.add_raw_post(raw_post)
+    preprocessor.add_trial(eeg_buffer, relative_timestamps)  # (n_samples, n_channels)
 
     cal_pre, cal_post = preprocessor.calibrate()
 
@@ -450,6 +449,16 @@ def crop_mne_trial_to_raw_epochs(
     return raw_pre, raw_post
 
 
+def crop_mne_trial_to_buffer(
+    trial: mne.BaseEpochs,
+    trial_tmin: float,
+    trial_tmax: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Crop a full-trial EpochsArray to the combined pre/post window."""
+    cropped = trial.copy().crop(trial_tmin, trial_tmax, include_tmax=True)
+    return _epochs_to_buffer(cropped), cropped.times.astype(np.float64)
+
+
 def append_calibration_epochs(
     epochs_pre,
     epochs_pre_ica,
@@ -729,8 +738,6 @@ class Preprocessor:
         self._epochs_pre_ica = None
         self._epochs_post = None
         self._calibration_params = None
-        self._pending_pre = None
-        self._awaiting_post = False
 
     def _validate_raw_pre_shape(self, data: np.ndarray) -> None:
         data = np.asarray(data)
@@ -748,6 +755,36 @@ class Preprocessor:
                 f"got {data.shape}"
             )
 
+    def _validate_trial(
+        self,
+        eeg_buffer: np.ndarray,
+        relative_timestamps: np.ndarray,
+    ) -> None:
+        eeg_buffer = np.asarray(eeg_buffer)
+        relative_timestamps = np.asarray(relative_timestamps, dtype=np.float64)
+        if eeg_buffer.ndim != 2 or eeg_buffer.shape[1] != len(self._info.ch_names):
+            raise ValueError(
+                f"trial buffer must have shape (n_samples, {len(self._info.ch_names)}), "
+                f"got {eeg_buffer.shape}"
+            )
+        if relative_timestamps.shape != (eeg_buffer.shape[0],):
+            raise ValueError(
+                f"relative_timestamps must have shape ({eeg_buffer.shape[0]},), "
+                f"got {relative_timestamps.shape}"
+            )
+        crop_eeg_buffer(
+            eeg_buffer,
+            relative_timestamps,
+            self._calibration_tmin,
+            self._calibration_tmax,
+        )
+        crop_eeg_buffer(
+            eeg_buffer,
+            relative_timestamps,
+            self._post_tmin,
+            self._post_tmax,
+        )
+
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
         return epoch_pre.crop(self._model_tmin, self._model_tmax, include_tmax=True)
 
@@ -758,42 +795,41 @@ class Preprocessor:
     # Public API
     # ------------------------------------------------------------------
 
-    def add_raw_pre(self, raw_pre: np.ndarray) -> None:
-        """Buffer one raw pre-stimulus epoch for calibration.
+    def add_trial(
+        self,
+        eeg_buffer: np.ndarray,
+        relative_timestamps: np.ndarray,
+    ) -> None:
+        """Append one raw trial to the calibration buffers.
 
         Parameters
         ----------
-        raw_pre : np.ndarray, shape (n_samples, n_channels)
-            EEG for ``[calibration_tmin, calibration_tmax]`` at ``raw_sfreq``.
+        eeg_buffer : np.ndarray, shape (n_samples, n_channels)
+            EEG covering ``[trial_tmin, trial_tmax]`` at ``raw_sfreq``.
+        relative_timestamps : np.ndarray, shape (n_samples,)
+            Time of each sample in seconds relative to the TMS event.
         """
-        if self._awaiting_post:
-            raise RuntimeError(
-                "add_raw_post must be called before the next add_raw_pre"
-            )
-        self._validate_raw_pre_shape(raw_pre)
-        self._pending_pre = np.asarray(raw_pre, dtype=np.float64)
-        self._awaiting_post = True
-
-    def add_raw_post(self, raw_post: np.ndarray) -> None:
-        """Append the paired pre/post epochs to the calibration buffers.
-
-        Parameters
-        ----------
-        raw_post : np.ndarray, shape (n_samples, n_channels)
-            EEG for ``[post_tmin, post_tmax]`` at ``raw_sfreq``.
-        """
-        if not self._awaiting_post:
-            raise RuntimeError("add_raw_pre must be called before add_raw_post")
-        self._validate_raw_post_shape(raw_post)
+        self._validate_trial(eeg_buffer, relative_timestamps)
+        relative_timestamps = np.asarray(relative_timestamps, dtype=np.float64)
+        raw_pre = crop_eeg_buffer(
+            eeg_buffer,
+            relative_timestamps,
+            self._calibration_tmin,
+            self._calibration_tmax,
+        )
+        raw_post = crop_eeg_buffer(
+            eeg_buffer,
+            relative_timestamps,
+            self._post_tmin,
+            self._post_tmax,
+        )
         self._epochs_pre, self._epochs_pre_ica, self._epochs_post = append_calibration_epochs(
             self._epochs_pre, self._epochs_pre_ica, self._epochs_post,
-            self._pending_pre, raw_post,
+            raw_pre, raw_post,
             self._info, self._info_processed, self._cfg,
             self._calibration_tmin, self._calibration_tmax,
             self._post_tmin, self._post_tmax,
         )
-        self._pending_pre = None
-        self._awaiting_post = False
 
     def calibrate(self):
         """Run calibration on the accumulated trials.
@@ -806,8 +842,6 @@ class Preprocessor:
         tuple[np.ndarray, np.ndarray]
             Pre- and post-stimulus calibration epochs that survived rejection.
         """
-        if self._awaiting_post:
-            raise RuntimeError("add_raw_post was not called for the last pre epoch")
         if self._epochs_pre is None:
             raise RuntimeError("No trials have been added yet.")
 

@@ -37,6 +37,13 @@ def get_post_time_range() -> tuple[float, float]:
     return float(cfg.post_tmin), float(cfg.post_tmax)
 
 
+def get_trial_time_range() -> tuple[float, float]:
+    """Full raw trial window covering both pre- and post-stimulus crops."""
+    calibration_tmin, calibration_tmax = get_calibration_time_range()
+    post_tmin, post_tmax = get_post_time_range()
+    return min(calibration_tmin, post_tmin), max(calibration_tmax, post_tmax)
+
+
 def get_raw_sfreq() -> float:
     """Raw EEG sampling rate (Hz) from the acquisition pipeline."""
     cfg = load_prime_config()
