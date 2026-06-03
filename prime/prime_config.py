@@ -37,10 +37,10 @@ def get_ica_time_range() -> tuple[float, float]:
     return float(cfg.ica_tmin), float(cfg.ica_tmax)
 
 
-def get_gc_time_range() -> tuple[float, float]:
-    """Pre-stimulus global-correction window [gc_tmin, gc_tmax] in seconds."""
+def get_qc_time_range() -> tuple[float, float]:
+    """Pre-stimulus quality control window [qc_tmin, qc_tmax] in seconds."""
     cfg = load_prime_config()
-    return float(cfg.gc_tmin), float(cfg.gc_tmax)
+    return float(cfg.qc_tmin), float(cfg.qc_tmax)
 
 
 def get_post_time_range() -> tuple[float, float]:

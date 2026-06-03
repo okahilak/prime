@@ -56,9 +56,9 @@ ica_tmax: -0.005
 post_tmin: -0.030
 post_tmax: 0.100
 
-# --- Pre-stim global-correction window (filtering, trial rejection before model crop) ---
-gc_tmin: -0.505
-gc_tmax: -0.005
+# --- Pre-stim quality control window (filtering, trial rejection before model crop) ---
+qc_tmin: -0.505
+qc_tmax: -0.005
 
 # --- Pre-stim EEG window: 50 ms ending 10 ms before TMS pulse ---
 model_tmin: -0.060

@@ -29,7 +29,7 @@ from scipy.signal import butter, filtfilt, resample_poly
 from prime.prime_config import (
     epoch_n_times,
     get_dipole_time_range,
-    get_gc_time_range,
+    get_qc_time_range,
     get_ica_time_range,
     get_model_time_range,
     get_processed_sfreq,
@@ -635,13 +635,13 @@ class Preprocessor:
         calibration_tmin, calibration_tmax = get_calibration_time_range()
         ica_tmin, ica_tmax = get_ica_time_range()
         post_tmin, post_tmax = get_post_time_range()
-        gc_tmin, gc_tmax = get_gc_time_range()
+        qc_tmin, qc_tmax = get_qc_time_range()
         model_tmin, model_tmax = get_model_time_range()
         dipole_tmin, dipole_tmax = get_dipole_time_range()
         _validate_time_range_within(
             "Pre-stim preprocessing",
-            gc_tmin,
-            gc_tmax,
+            qc_tmin,
+            qc_tmax,
             calibration_tmin,
             calibration_tmax,
         )
@@ -672,8 +672,8 @@ class Preprocessor:
         self._raw_post_n_times = epoch_n_times(
             post_tmin, post_tmax, raw_sfreq,
         )
-        self._gc_tmin = gc_tmin
-        self._gc_tmax = gc_tmax
+        self._qc_tmin = qc_tmin
+        self._qc_tmax = qc_tmax
         self._model_tmin = model_tmin
         self._model_tmax = model_tmax
         self._dipole_tmin = dipole_tmin
@@ -737,8 +737,8 @@ class Preprocessor:
         pre_buf = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
-            self._gc_tmin,
-            self._gc_tmax,
+            self._qc_tmin,
+            self._qc_tmax,
         )
         pre_ica_buf = crop_eeg_buffer(
             eeg_buffer,
@@ -757,7 +757,7 @@ class Preprocessor:
         pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
         post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
-        trial_pre = _numpy_to_epochs_array(pre_buf, self._info_processed, self._gc_tmin)
+        trial_pre = _numpy_to_epochs_array(pre_buf, self._info_processed, self._qc_tmin)
         trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, self._info_processed, self._ica_tmin)
         trial_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
         if self._epochs_pre is None:
@@ -831,8 +831,8 @@ class Preprocessor:
             pre_stim = crop_eeg_buffer(
                 raw_pre,
                 self._raw_pre_time_offsets,
-                self._gc_tmin,
-                self._gc_tmax,
+                self._qc_tmin,
+                self._qc_tmax,
             )
         with _profile("preprocess_pre: resample_polyphase"):
             pre_stim = _resample_buffer_polyphase(
@@ -887,7 +887,7 @@ class Preprocessor:
         with _profile("preprocess_pre: crop_to_model_window"):
             start = time_to_sample(
                 self._model_tmin,
-                self._gc_tmin,
+                self._qc_tmin,
                 self._processed_sfreq,
             )
             stop = start + epoch_n_times(
