@@ -58,20 +58,6 @@ from prime.online_preprocessing.config import get_default_config
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
-@contextmanager
-def _profile(label: str) -> Iterator[None]:
-    # skip profiling
-    yield
-    return
-
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = time.perf_counter() - start
-        print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
-
-
 def _require_info_sfreq(info: mne.Info, sfreq: float) -> None:
     if abs(info["sfreq"] - sfreq) > 1e-6:
         raise ValueError(
@@ -748,43 +734,38 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        with _profile("preprocess_pre: crop_eeg_buffer"):
-            pre_stim = crop_eeg_buffer(
-                eeg_buffer,
-                relative_timestamps,
-                self._qc_tmin,
-                self._qc_tmax,
-            )
-        with _profile("preprocess_pre: resample_polyphase"):
-            pre_stim = resample_buffer_polyphase(
-                pre_stim,
-                sfreq_from=self._info["sfreq"],
-                sfreq_to=self._processed_sfreq,
-            )
+        pre_stim = crop_eeg_buffer(
+            eeg_buffer,
+            relative_timestamps,
+            self._qc_tmin,
+            self._qc_tmax,
+        )
+        pre_stim = resample_buffer_polyphase(
+            pre_stim,
+            sfreq_from=self._info["sfreq"],
+            sfreq_to=self._processed_sfreq,
+        )
+
         # Keep pre-stim single-trial preprocessing fully in NumPy.
-        with _profile("preprocess_pre: to_numpy_float64"):
-            data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
+        data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
 
         if self._calibration_params['bad_channels']:
-            with _profile("preprocess_pre: interpolate_bad_channels"):
-                interpolation_info = self._calibration_params['channel_interpolation_info']
-                data[..., interpolation_info['bads_idx'], :] = np.matmul(
-                    interpolation_info['interpolation_matrix'],
-                    data[..., interpolation_info['goods_idx'], :],
-                )
-
-        filter_opts = self._opts['filter_opts']
-        with _profile("preprocess_pre: apply_filter"):
-            data = _apply_filter(
-                data,
-                self._calibration_params['qc_filter'],
-                filter_opts['pad_time'],
-                self._processed_sfreq,
+            interpolation_info = self._calibration_params['channel_interpolation_info']
+            data[..., interpolation_info['bads_idx'], :] = np.matmul(
+                interpolation_info['interpolation_matrix'],
+                data[..., interpolation_info['goods_idx'], :],
             )
 
+        filter_opts = self._opts['filter_opts']
+        data = _apply_filter(
+            data,
+            self._calibration_params['qc_filter'],
+            filter_opts['pad_time'],
+            self._processed_sfreq,
+        )
+
         # Mean subtraction (average reference).
-        with _profile("preprocess_pre: mean_subtraction"):
-            data -= np.mean(data, axis=1, keepdims=True)
+        data -= np.mean(data, axis=1, keepdims=True)
 
         trial_reject_opts = self._opts['trial_reject_opts']
 
@@ -793,44 +774,42 @@ class Preprocessor:
         pre_reject = trial_reject_opts['pre']
         workspace = self._mad_workspace
 
-        with _profile("preprocess_pre: global_mad_check"):
-            if global_mad_zscore_rejected(
-                trial,
-                qc_stats['mads_mean'],
-                qc_stats['mads_std'],
-                pre_reject['global_zscore_threshold'],
-                workspace,
-            ):
-                return None
+        if global_mad_zscore_rejected(
+            trial,
+            qc_stats['mads_mean'],
+            qc_stats['mads_std'],
+            pre_reject['global_zscore_threshold'],
+            workspace,
+        ):
+            return None
 
-        with _profile("preprocess_pre: local_mad_check"):
-            if local_mad_zscore_rejected(
-                trial,
-                pre_reject['local_zscore_threshold'],
-                workspace,
-            ):
-                return None
+        if local_mad_zscore_rejected(
+            trial,
+            pre_reject['local_zscore_threshold'],
+            workspace,
+        ):
+            return None
 
-        with _profile("preprocess_pre: crop_to_model_window"):
-            start = time_to_sample(
-                self._model_tmin,
-                self._qc_tmin,
-                self._processed_sfreq,
+        start = time_to_sample(
+            self._model_tmin,
+            self._qc_tmin,
+            self._processed_sfreq,
+        )
+        stop = start + epoch_n_times(
+            self._model_tmin,
+            self._model_tmax,
+            self._processed_sfreq,
+        )
+        if start < 0 or stop > data.shape[2]:
+            raise ValueError(
+                f"cannot crop pre window [{self._model_tmin}, {self._model_tmax}] "
+                f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
             )
-            stop = start + epoch_n_times(
-                self._model_tmin,
-                self._model_tmax,
-                self._processed_sfreq,
-            )
-            if start < 0 or stop > data.shape[2]:
-                raise ValueError(
-                    f"cannot crop pre window [{self._model_tmin}, {self._model_tmax}] "
-                    f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
-                )
-            # Slicing can produce non-contiguous views; force contiguous layout
-            # so torch.from_numpy() never sees negative/unsupported strides.
-            model_window = data[0, :, start:stop]
-            return np.ascontiguousarray(model_window, dtype=np.float64)
+
+        # Slicing can produce non-contiguous views; force contiguous layout
+        # so torch.from_numpy() never sees negative/unsupported strides.
+        model_window = data[0, :, start:stop]
+        return np.ascontiguousarray(model_window, dtype=np.float64)
 
     def preprocess_post(
         self,
