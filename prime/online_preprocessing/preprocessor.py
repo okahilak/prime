@@ -725,9 +725,8 @@ class Preprocessor:
         relative_timestamps : np.ndarray, shape (n_samples,)
             Time of each sample in seconds relative to the TMS event.
         """
-        relative_timestamps = np.asarray(relative_timestamps, dtype=np.float64)
-        processed_sfreq = float(self._info_processed["sfreq"])
-        raw_sfreq = float(self._info["sfreq"])
+        processed_sfreq = get_processed_sfreq()
+        raw_sfreq = get_raw_sfreq()
 
         pre_buf = crop_eeg_buffer(
             eeg_buffer,
