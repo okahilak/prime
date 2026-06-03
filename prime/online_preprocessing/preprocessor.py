@@ -55,6 +55,10 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 @contextmanager
 def _profile(label: str) -> Iterator[None]:
+    # skip profiling
+    yield
+    return
+
     start = time.perf_counter()
     try:
         yield
