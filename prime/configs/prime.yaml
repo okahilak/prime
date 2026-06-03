@@ -57,11 +57,11 @@ post_tmax: 0.100
 
 # --- Pre-stim quality control window ---
 qc_tmin: -0.505
-qc_tmax: -0.005
+qc_tmax: -0.010
 
 # --- Model window ---
 model_tmin: -0.060
-model_tmax: -0.010
+model_tmax: -0.015
 
 # --- Dipole search window ---
 dipole_tmin: 0.038
