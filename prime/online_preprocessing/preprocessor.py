@@ -19,19 +19,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from fractions import Fraction
 
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-
-from prime.online_preprocessing.utils.filtering import butter_filter, apply_filter, apply_filter_2d
-from scipy.signal import resample_poly
-
-from prime.online_preprocessing.utils.resampling import (
-    _cached_resample_up_down,
-    _cached_resample_window_taps,
-    resample_buffer_polyphase,
-)
+from scipy.signal import butter, filtfilt, resample_poly
 
 
 from prime.prime_config import (
@@ -61,43 +54,13 @@ DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
 
 @contextmanager
-def _profile(label: str, enabled: bool = False) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
+def _profile(label: str) -> Iterator[None]:
     start = time.perf_counter()
     try:
         yield
     finally:
         elapsed = time.perf_counter() - start
         print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
-
-
-def _median_abs_deviation_np(a: np.ndarray, axis) -> np.ndarray:
-    """NumPy equivalent of SciPy median_abs_deviation(..., scale=1.0)."""
-    a = np.asarray(a)
-    median = np.median(a, axis=axis, keepdims=True)
-    return np.median(np.abs(a - median), axis=axis)
-
-
-def _zscore_np(a: np.ndarray, axis) -> np.ndarray:
-    """NumPy equivalent of SciPy zscore(..., ddof=0)."""
-    a = np.asarray(a)
-    mean = np.mean(a, axis=axis, keepdims=True)
-    std = np.std(a, axis=axis, ddof=0, keepdims=True)
-    return (a - mean) / std
-
-
-def _mad_scalar_2d(a: np.ndarray) -> float:
-    """Global MAD for one trial shaped (n_channels, n_times)."""
-    median = np.median(a)
-    return float(np.median(np.abs(a - median)))
-
-
-def _mad_per_channel_2d(a: np.ndarray) -> np.ndarray:
-    """Per-channel MAD over time for one trial shaped (n_channels, n_times)."""
-    median = np.median(a, axis=1, keepdims=True)
-    return np.median(np.abs(a - median), axis=1)
 
 
 def _validate_time_range_within(
@@ -175,6 +138,29 @@ warnings.filterwarnings(
 mne.set_log_level("ERROR")
 
 
+# ==================== Filtering ====================
+
+def _butter_filter(data, cutoff, btype, fs, order, pad_time):
+    nyquist = fs / 2
+    if isinstance(cutoff, list):
+        if len(cutoff) == 2:
+            normalized = [cutoff[0] / nyquist, cutoff[1] / nyquist]
+        else:
+            raise ValueError("cutoff should be a single value or a list of length 2.")
+    else:
+        normalized = cutoff / nyquist
+    b, a = butter(order, normalized, btype=btype, analog=False)
+    filtered = _apply_filter(data, [b, a], pad_time, fs)
+    return filtered, [b, a]
+
+
+def _apply_filter(data, coeffs, pad_time, fs):
+    n_pad = int(pad_time * fs)
+    padded = np.pad(data, ((0, 0), (0, 0), (n_pad, n_pad)), mode='reflect')
+    filtered = filtfilt(coeffs[0], coeffs[1], padded, padlen=None)
+    return filtered[:, :, n_pad:-n_pad]
+
+
 # ==================== Bad Channel Detection ====================
 
 def _get_bad_channels_epoched(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
@@ -231,7 +217,7 @@ def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, f
 
 def _detect_bad_channels_pre(epochs, options, filter_opts):
     data = epochs.get_data(copy=True)
-    data, filter_coefficients = butter_filter(data, filter_opts['cutoff'], filter_opts['btype'], epochs.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
+    data, filter_coefficients = _butter_filter(data, filter_opts['cutoff'], filter_opts['btype'], epochs.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
     filtered_epochs = mne.EpochsArray(data, epochs.info, epochs.events, tmin=epochs.times[0])
     bad_channels = _get_bad_channels_epoched(filtered_epochs, options['z_score_threshold_mad'],
                                         options['z_score_threshold_power'], options['fmin_fmax'],
@@ -430,6 +416,23 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
+def _resample_buffer_polyphase(
+    data: np.ndarray,
+    sfreq_from: float,
+    sfreq_to: float,
+) -> np.ndarray:
+    """Resample (n_samples, n_channels) using scipy polyphase."""
+    if abs(sfreq_from - sfreq_to) < 1e-9:
+        return data
+    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
+    return resample_poly(
+        data,
+        up=ratio.numerator,
+        down=ratio.denominator,
+        axis=0,
+    )
+
+
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -486,9 +489,9 @@ def append_calibration_epochs(
         raw_post_epoch_tmax,
     )
 
-    pre_buf = resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    pre_ica_buf = resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-    post_buf = resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+    post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
     trial_pre = _numpy_to_epochs_array(pre_buf, info_processed, cfg.pre_stim_timerange[0])
     trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, info_processed, cfg.ica_opts.pre_timerange[0])
@@ -541,7 +544,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     # ICA calibration on filtered pre-stim
     ica_data = epochs_pre_ica.get_data(copy=True)
-    ica_data, _ = butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
+    ica_data, _ = _butter_filter(ica_data, ica_opts['filtering']['cutoff'], 'bandpass',
                                                epochs_pre_ica.info['sfreq'], ica_opts['filtering']['order_bandpass'],
                                                ica_opts['filtering']['pad_time_bandpass'])
     epochs_pre_ica_filtered = mne.EpochsArray(ica_data, info=epochs_pre_ica.info, events=epochs_pre_ica.events, tmin=epochs_pre_ica.times[0])
@@ -558,7 +561,7 @@ def preprocess_calibration(epochs_pre, epochs_pre_ica, epochs_post, cfg, opts, f
 
     # Filter pre-stim
     pre_data = epochs_pre.get_data(copy=True)
-    pre_data = apply_filter(pre_data, pre_filter_coefficients, filter_opts['pad_time'], epochs_pre.info['sfreq'])
+    pre_data = _apply_filter(pre_data, pre_filter_coefficients, filter_opts['pad_time'], epochs_pre.info['sfreq'])
     epochs_pre = mne.EpochsArray(pre_data, info=epochs_pre.info, events=epochs_pre.events, tmin=epochs_pre.times[0])
     if cfg.use_ica_on_pre:
         epochs_pre.set_eeg_reference('average', projection=False, verbose=False)
@@ -718,32 +721,6 @@ class Preprocessor:
         self._processed_sfreq = get_processed_sfreq()
         self._raw_pre_time_offsets = np.array([raw_pre_epoch_tmin], dtype=np.float64)
         self._raw_post_time_offsets = np.array([raw_post_epoch_tmin], dtype=np.float64)
-        pre_stim_start = time_to_sample(
-            self._pre_stim_tmin, raw_pre_epoch_tmin, raw_sfreq,
-        )
-        pre_stim_stop = pre_stim_start + epoch_n_times(
-            self._pre_stim_tmin, self._pre_stim_tmax, raw_sfreq,
-        )
-        self._pre_stim_crop_slice = slice(pre_stim_start, pre_stim_stop)
-        model_start = time_to_sample(
-            self._pre_epoch_tmin, self._pre_stim_tmin, self._processed_sfreq,
-        )
-        model_stop = model_start + epoch_n_times(
-            self._pre_epoch_tmin, self._pre_epoch_tmax, self._processed_sfreq,
-        )
-        self._pre_model_window_slice = slice(model_start, model_stop)
-        self._filter_n_pad = int(self._opts['filter_opts']['pad_time'] * self._processed_sfreq)
-        self._resample_up, self._resample_down = _cached_resample_up_down(
-            str(raw_sfreq), str(self._processed_sfreq),
-        )
-        self._resample_window_taps = _cached_resample_window_taps(
-            self._resample_up, self._resample_down, 'float64',
-        )
-        self._pre_mads_mean = None
-        self._pre_mads_std = None
-        self._pre_global_z_thresh = None
-        self._pre_local_z_thresh = None
-        self._pre_filter_workspace = None
         self._info_processed = self._info.copy()
         with self._info_processed._unlock():
             self._info_processed["sfreq"] = self._processed_sfreq
@@ -776,14 +753,6 @@ class Preprocessor:
 
     def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
         return epoch_post.crop(self._post_epoch_tmin, self._post_epoch_tmax, include_tmax=True)
-
-    def _bind_pre_trial_reject_constants(self) -> None:
-        stats = self._calibration_params['good_trial_stats_pre']
-        pre_reject = self._opts['trial_reject_opts']['pre']
-        self._pre_mads_mean = stats['mads_mean']
-        self._pre_mads_std = stats['mads_std']
-        self._pre_global_z_thresh = pre_reject['global_zscore_threshold']
-        self._pre_local_z_thresh = pre_reject['local_zscore_threshold']
 
     # ------------------------------------------------------------------
     # Public API
@@ -851,7 +820,6 @@ class Preprocessor:
             self._forward,
         )
         self._calibration_params = calibration_params
-        self._bind_pre_trial_reject_constants()
 
         if n_successful_trials != pre_data.shape[0] or n_successful_trials != post_data.shape[0]:
             raise RuntimeError(
@@ -865,7 +833,6 @@ class Preprocessor:
         """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
         instance = cls(forward_path)
         instance._calibration_params = calibration_params
-        instance._bind_pre_trial_reject_constants()
         return instance
 
     def preprocess_pre(
@@ -881,63 +848,87 @@ class Preprocessor:
         raw_pre : np.ndarray
             Raw pre-stimulus trial with shape (n_samples, n_channels).
 
-        Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
+        Returns a NumPy array with shape (n_samples, n_channels), or ``None`` if
         the trial was rejected.
         """
-        PROFILING_ENABLED = False
-
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self._validate_raw_pre_shape(raw_pre)
-        cal = self._calibration_params
-        with _profile("preprocess_pre: crop_eeg_buffer", PROFILING_ENABLED):
-            pre_stim = raw_pre[self._pre_stim_crop_slice]
-        with _profile("preprocess_pre: resample_polyphase", PROFILING_ENABLED):
-            if self._resample_up != self._resample_down:
-                pre_stim = resample_poly(
-                    pre_stim,
-                    up=self._resample_up,
-                    down=self._resample_down,
-                    axis=0,
-                    window=self._resample_window_taps,
+        with _profile("preprocess_pre: crop_eeg_buffer"):
+            pre_stim = crop_eeg_buffer(
+                raw_pre,
+                self._raw_pre_time_offsets,
+                self._pre_stim_tmin,
+                self._pre_stim_tmax,
+            )
+        with _profile("preprocess_pre: resample_polyphase"):
+            pre_stim = _resample_buffer_polyphase(
+                pre_stim,
+                sfreq_from=self._info["sfreq"],
+                sfreq_to=self._processed_sfreq,
+            )
+        # Keep pre-stim single-trial preprocessing fully in NumPy.
+        with _profile("preprocess_pre: to_numpy_float64"):
+            data = pre_stim.T[np.newaxis, :, :].astype(np.float64, copy=False)
+
+        if self._calibration_params['bad_channels']:
+            with _profile("preprocess_pre: interpolate_bad_channels"):
+                interpolation_info = self._calibration_params['channel_interpolation_info']
+                data[..., interpolation_info['bads_idx'], :] = np.matmul(
+                    interpolation_info['interpolation_matrix'],
+                    data[..., interpolation_info['goods_idx'], :],
                 )
-        with _profile("preprocess_pre: to_numpy_float64", PROFILING_ENABLED):
-            data = np.ascontiguousarray(pre_stim.T, dtype=np.float64)
 
-        if cal['bad_channels']:
-            with _profile("preprocess_pre: interpolate_bad_channels", PROFILING_ENABLED):
-                ii = cal['channel_interpolation_info']
-                data[ii['bads_idx'], :] = ii['interpolation_matrix'] @ data[ii['goods_idx'], :]
-
-        with _profile("preprocess_pre: apply_filter", PROFILING_ENABLED):
-            data, self._pre_filter_workspace = apply_filter_2d(
+        filter_opts = self._opts['filter_opts']
+        with _profile("preprocess_pre: apply_filter"):
+            data = _apply_filter(
                 data,
-                cal['pre_stim_filter'],
-                self._filter_n_pad,
-                self._pre_filter_workspace,
+                self._calibration_params['pre_stim_filter'],
+                filter_opts['pad_time'],
+                self._processed_sfreq,
             )
 
-        with _profile("preprocess_pre: mean_subtraction", PROFILING_ENABLED):
-            data -= data.mean(axis=0, keepdims=True)
+        # Mean subtraction (average reference).
+        with _profile("preprocess_pre: mean_subtraction"):
+            data -= np.mean(data, axis=1, keepdims=True)
 
-        with _profile("preprocess_pre: global_mad_check", PROFILING_ENABLED):
-            z_mad = (_mad_scalar_2d(data) - self._pre_mads_mean) / self._pre_mads_std
-            thr = self._pre_global_z_thresh
-            if z_mad < thr[0] or z_mad > thr[1]:
+        trial_reject_opts = self._opts['trial_reject_opts']
+
+        # Global MAD check.
+        with _profile("preprocess_pre: global_mad_check"):
+            mad_val = median_abs_deviation(data, axis=(1, 2))[0]
+            z_mad = (
+                mad_val - self._calibration_params['good_trial_stats_pre']['mads_mean']
+            ) / self._calibration_params['good_trial_stats_pre']['mads_std']
+            threshold = trial_reject_opts['pre']['global_zscore_threshold']
+            if z_mad < threshold[0] or z_mad > threshold[1]:
                 return None
 
-        with _profile("preprocess_pre: local_mad_check", PROFILING_ENABLED):
-            local_mad = _mad_per_channel_2d(data)
-            z_local = (local_mad - local_mad.mean()) / local_mad.std(ddof=0)
-            if np.any(np.abs(z_local) > self._pre_local_z_thresh):
+        # Local MAD check.
+        with _profile("preprocess_pre: local_mad_check"):
+            local_mad = median_abs_deviation(data, axis=2)
+            z_local = zscore(local_mad, axis=1)
+            if np.any(np.abs(z_local) > trial_reject_opts['pre']['local_zscore_threshold']):
                 return None
 
-        with _profile("preprocess_pre: crop_to_model_window", PROFILING_ENABLED):
-            # Slicing can produce non-contiguous views; force contiguous layout
-            # so torch.from_numpy() never sees negative/unsupported strides.
-            model_window = data[:, self._pre_model_window_slice]
-            return np.ascontiguousarray(model_window, dtype=np.float64)
+        with _profile("preprocess_pre: crop_to_model_window"):
+            start = time_to_sample(
+                self._pre_epoch_tmin,
+                self._pre_stim_tmin,
+                self._processed_sfreq,
+            )
+            stop = start + epoch_n_times(
+                self._pre_epoch_tmin,
+                self._pre_epoch_tmax,
+                self._processed_sfreq,
+            )
+            if start < 0 or stop > data.shape[2]:
+                raise ValueError(
+                    f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
+                    f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
+                )
+            return data[:, :, start:stop]
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
@@ -957,7 +948,7 @@ class Preprocessor:
             self._raw_post_epoch_tmin,
             self._raw_post_epoch_tmax,
         )
-        post_buf = resample_buffer_polyphase(
+        post_buf = _resample_buffer_polyphase(
             post_buf,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
