@@ -470,10 +470,9 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     post_epochs.set_eeg_reference('average', projection=False, verbose=False)
     ica_epochs.set_eeg_reference('average', projection=False, verbose=False)
 
-    n_components = get_number_of_components(ica_epochs.get_data(copy=True), ica_opts['pc_threshold'])
     ica, excluded_components, _ = get_ica(
         ica_epochs,
-        n_components,
+        ica_opts['pc_threshold'],
         None,
         ica_opts['bad_component_thresholds'],
         ica_opts['n_min_comps_to_reject'],
