@@ -18,12 +18,10 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
-from fractions import Fraction
-
 import mne
 import numpy as np
 from scipy.stats import median_abs_deviation, zscore
-from scipy.signal import butter, filtfilt, resample_poly
+from scipy.signal import butter, filtfilt
 
 
 from prime.prime_config import (
@@ -53,6 +51,7 @@ from prime.online_preprocessing.utils.mad import (
     global_mad_zscore_rejected,
     local_mad_zscore_rejected,
 )
+from prime.online_preprocessing.utils.resampling import resample_buffer_polyphase
 from prime.online_preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
@@ -383,23 +382,6 @@ def crop_eeg_buffer(
     return eeg_buffer[start:stop]
 
 
-def _resample_buffer_polyphase(
-    data: np.ndarray,
-    sfreq_from: float,
-    sfreq_to: float,
-) -> np.ndarray:
-    """Resample (n_samples, n_channels) using scipy polyphase."""
-    if abs(sfreq_from - sfreq_to) < 1e-9:
-        return data
-    ratio = Fraction(str(sfreq_to)) / Fraction(str(sfreq_from))
-    return resample_poly(
-        data,
-        up=ratio.numerator,
-        down=ratio.denominator,
-        axis=0,
-    )
-
-
 def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
@@ -676,9 +658,9 @@ class Preprocessor:
             self._post_tmax,
         )
 
-        qc_buffer = _resample_buffer_polyphase(qc_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        ica_buffer = _resample_buffer_polyphase(ica_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        post_buffer = _resample_buffer_polyphase(post_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        qc_buffer = resample_buffer_polyphase(qc_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        ica_buffer = resample_buffer_polyphase(ica_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        post_buffer = resample_buffer_polyphase(post_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
         qc_trial = _numpy_to_epochs_array(qc_buffer, self._info_processed, self._qc_tmin)
         ica_trial = _numpy_to_epochs_array(ica_buffer, self._info_processed, self._ica_tmin)
@@ -772,7 +754,7 @@ class Preprocessor:
                 self._qc_tmax,
             )
         with _profile("preprocess_pre: resample_polyphase"):
-            pre_stim = _resample_buffer_polyphase(
+            pre_stim = resample_buffer_polyphase(
                 pre_stim,
                 sfreq_from=self._info["sfreq"],
                 sfreq_to=self._processed_sfreq,
@@ -876,7 +858,7 @@ class Preprocessor:
             self._post_tmin,
             self._post_tmax,
         )
-        post_buffer = _resample_buffer_polyphase(
+        post_buffer = resample_buffer_polyphase(
             post_buffer,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
