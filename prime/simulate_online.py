@@ -148,7 +148,7 @@ def main():
     intervention_labels = []
     predictions = []
     preprocess_pre_times: list[float] = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, 500):
+    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
@@ -166,7 +166,6 @@ def main():
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
-        continue
         with profile("predict"):
             probability = predictor.predict(processed_pre)
 
