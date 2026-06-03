@@ -43,8 +43,14 @@ def get_qc_time_range() -> tuple[float, float]:
     return float(cfg.qc_tmin), float(cfg.qc_tmax)
 
 
+def get_post_initial_time_range() -> tuple[float, float]:
+    """Raw post-stimulus crop window [post_initial_tmin, post_initial_tmax] in seconds."""
+    cfg = load_prime_config()
+    return float(cfg.post_initial_tmin), float(cfg.post_initial_tmax)
+
+
 def get_post_time_range() -> tuple[float, float]:
-    """Raw post-stimulus crop window [post_tmin, post_tmax] in seconds."""
+    """Post-stimulus processing window [post_tmin, post_tmax] in seconds."""
     cfg = load_prime_config()
     return float(cfg.post_tmin), float(cfg.post_tmax)
 

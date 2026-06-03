@@ -31,6 +31,7 @@ from prime.prime_config import (
     get_ica_time_range,
     get_model_time_range,
     get_processed_sfreq,
+    get_post_initial_time_range,
     get_post_time_range,
     get_raw_sfreq,
     time_to_sample,
@@ -386,15 +387,15 @@ def crop_mne_trial_to_raw_epochs(
     trial: mne.BaseEpochs,
     raw_pre_tmin: float,
     raw_pre_tmax: float,
-    raw_post_tmin: float,
-    raw_post_tmax: float,
+    raw_post_initial_tmin: float,
+    raw_post_initial_tmax: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Split a full-trial EpochsArray into raw pre/post numpy buffers."""
     raw_pre = _epochs_to_buffer(
         trial.copy().crop(raw_pre_tmin, raw_pre_tmax, include_tmax=True),
     )
     raw_post = _epochs_to_buffer(
-        trial.copy().crop(raw_post_tmin, raw_post_tmax, include_tmax=True),
+        trial.copy().crop(raw_post_initial_tmin, raw_post_initial_tmax, include_tmax=True),
     )
     return raw_pre, raw_post
 
@@ -511,9 +512,8 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_qc)
 
     post_epochs.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
-    post_mintime = post_epochs.times[post_epochs.times > 0][0]
-    calibration_params['post_mintime'] = post_mintime
-    post_epochs.crop(post_mintime, None)
+    post_tmin, post_tmax = get_post_time_range()
+    post_epochs.crop(post_tmin, post_tmax, include_tmax=True)
 
     post_data = post_epochs.get_data(copy=True)
     evoked = np.mean(post_data, axis=0)
@@ -550,7 +550,7 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     calibration_params['sspsir_sir_projmat_orig'] = projection_original
 
     post_epochs = mne.preprocessing.fix_stim_artifact(
-        post_epochs, tmin=post_mintime, tmax=cfg.artifact_window_2[1], mode='window',
+        post_epochs, tmin=post_tmin, tmax=cfg.artifact_window_2[1], mode='window',
     )
     post_epochs.set_eeg_reference('average', projection=False, verbose=False)
 
@@ -590,6 +590,7 @@ class Preprocessor:
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
         info = _mne_info_from_forward(self._forward)
         ica_tmin, ica_tmax = get_ica_time_range()
+        post_initial_tmin, post_initial_tmax = get_post_initial_time_range()
         post_tmin, post_tmax = get_post_time_range()
         qc_tmin, qc_tmax = get_qc_time_range()
         model_tmin, model_tmax = get_model_time_range()
@@ -599,6 +600,8 @@ class Preprocessor:
         self._info = info
         self._ica_tmin = ica_tmin
         self._ica_tmax = ica_tmax
+        self._post_initial_tmin = post_initial_tmin
+        self._post_initial_tmax = post_initial_tmax
         self._post_tmin = post_tmin
         self._post_tmax = post_tmax
         self._qc_tmin = qc_tmin
@@ -654,8 +657,8 @@ class Preprocessor:
         post_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
-            self._post_tmin,
-            self._post_tmax,
+            self._post_initial_tmin,
+            self._post_initial_tmax,
         )
 
         qc_buffer = resample_buffer_polyphase(qc_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
@@ -664,7 +667,7 @@ class Preprocessor:
 
         qc_trial = _numpy_to_epochs_array(qc_buffer, self._info_processed, self._qc_tmin)
         ica_trial = _numpy_to_epochs_array(ica_buffer, self._info_processed, self._ica_tmin)
-        post_trial = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_tmin)
+        post_trial = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_initial_tmin)
 
         if self.qc_epochs is None:
             self.qc_epochs = qc_trial
@@ -847,15 +850,15 @@ class Preprocessor:
         post_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
-            self._post_tmin,
-            self._post_tmax,
+            self._post_initial_tmin,
+            self._post_initial_tmax,
         )
         post_buffer = resample_buffer_polyphase(
             post_buffer,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
         )
-        epoch_post = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_tmin)
+        epoch_post = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_initial_tmin)
         calibration_params = self._calibration_params
         dicts = self._cfg.to_dicts()
         trial_reject_opts = dicts["trial_reject_opts"]
@@ -902,7 +905,7 @@ class Preprocessor:
         epoch_post.apply_baseline(self._cfg.baseline).set_eeg_reference(
             "average", projection=False, verbose=False
         )
-        epoch_post.crop(calibration_params["post_mintime"], None)
+        epoch_post.crop(self._post_tmin, self._post_tmax, include_tmax=True)
 
         # Apply SOUND
         data = epoch_post.get_data(copy=True)
@@ -934,7 +937,7 @@ class Preprocessor:
 
         epoch_post = mne.preprocessing.fix_stim_artifact(
             epoch_post,
-            tmin=calibration_params["post_mintime"],
+            tmin=self._post_tmin,
             tmax=self._cfg.artifact_window_2[1],
             mode="window",
         )

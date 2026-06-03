@@ -27,7 +27,7 @@ import numpy as np
 from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import get_post_time_range, get_ica_time_range
+from prime.prime_config import get_post_initial_time_range, get_ica_time_range
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ class Decider:
         self.is_calibrated = False
 
         self.raw_pre_tmin, self.raw_pre_tmax = get_ica_time_range()
-        self.raw_post_tmin, self.raw_post_tmax = get_post_time_range()
+        self.raw_post_initial_tmin, self.raw_post_initial_tmax = get_post_initial_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"
 
@@ -113,7 +113,7 @@ class Decider:
         # Periodic buffer ends at the current sample; with EVENT_LOOKAHEAD_SEC until the
         # pulse, that sample is raw_pre_tmax relative to the upcoming event.
         sample_window = [self.raw_pre_tmin + EVENT_LOOKAHEAD_SEC, 0.0]
-        event_sample_window = [self.raw_post_tmin, self.raw_post_tmax]
+        event_sample_window = [self.raw_post_initial_tmin, self.raw_post_initial_tmax]
         return {
             "periodic_processing_interval": 1.0 / self.sampling_frequency,
             "sample_window": sample_window,

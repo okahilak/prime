@@ -51,10 +51,6 @@ calibration_tmax: 0.100
 ica_tmin: -1.1
 ica_tmax: -0.005
 
-# --- Post-stimulus window ---
-post_tmin: -0.030
-post_tmax: 0.100
-
 # --- Pre-stim quality control window ---
 qc_tmin: -0.200
 qc_tmax: -0.010
@@ -62,6 +58,14 @@ qc_tmax: -0.010
 # --- Model window ---
 model_tmin: -0.060
 model_tmax: -0.015
+
+# --- Initial post-stimulus window ---
+post_initial_tmin: -0.030
+post_initial_tmax: 0.100
+
+# --- Post-stimulus window ---
+post_tmin: 0.001
+post_tmax: 0.100
 
 # --- Dipole search window ---
 dipole_tmin: 0.038
