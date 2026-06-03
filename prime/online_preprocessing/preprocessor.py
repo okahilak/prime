@@ -928,7 +928,10 @@ class Preprocessor:
                     f"cannot crop pre window [{self._pre_epoch_tmin}, {self._pre_epoch_tmax}] "
                     f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
                 )
-            return data[:, :, start:stop]
+            # Slicing can produce non-contiguous views; force contiguous layout
+            # so torch.from_numpy() never sees negative/unsupported strides.
+            model_window = data[:, :, start:stop]
+            return np.ascontiguousarray(model_window, dtype=np.float64)
 
     def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
