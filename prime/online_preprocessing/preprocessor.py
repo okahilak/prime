@@ -701,36 +701,6 @@ class Preprocessor:
                 f"got {data.shape}"
             )
 
-    def _validate_trial(
-        self,
-        eeg_buffer: np.ndarray,
-        relative_timestamps: np.ndarray,
-    ) -> None:
-        eeg_buffer = np.asarray(eeg_buffer)
-        relative_timestamps = np.asarray(relative_timestamps, dtype=np.float64)
-        if eeg_buffer.ndim != 2 or eeg_buffer.shape[1] != len(self._info.ch_names):
-            raise ValueError(
-                f"trial buffer must have shape (n_samples, {len(self._info.ch_names)}), "
-                f"got {eeg_buffer.shape}"
-            )
-        if relative_timestamps.shape != (eeg_buffer.shape[0],):
-            raise ValueError(
-                f"relative_timestamps must have shape ({eeg_buffer.shape[0]},), "
-                f"got {relative_timestamps.shape}"
-            )
-        crop_eeg_buffer(
-            eeg_buffer,
-            relative_timestamps,
-            self._calibration_tmin,
-            self._calibration_tmax,
-        )
-        crop_eeg_buffer(
-            eeg_buffer,
-            relative_timestamps,
-            self._post_tmin,
-            self._post_tmax,
-        )
-
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
         return epoch_pre.crop(self._model_tmin, self._model_tmax, include_tmax=True)
 
@@ -755,40 +725,25 @@ class Preprocessor:
         relative_timestamps : np.ndarray, shape (n_samples,)
             Time of each sample in seconds relative to the TMS event.
         """
-        self._validate_trial(eeg_buffer, relative_timestamps)
         relative_timestamps = np.asarray(relative_timestamps, dtype=np.float64)
-        raw_pre = crop_eeg_buffer(
-            eeg_buffer,
-            relative_timestamps,
-            self._calibration_tmin,
-            self._calibration_tmax,
-        )
-        raw_post = crop_eeg_buffer(
-            eeg_buffer,
-            relative_timestamps,
-            self._post_tmin,
-            self._post_tmax,
-        )
-        raw_pre_time_offsets = np.array([self._calibration_tmin], dtype=np.float64)
-        raw_post_time_offsets = np.array([self._post_tmin], dtype=np.float64)
         processed_sfreq = float(self._info_processed["sfreq"])
         raw_sfreq = float(self._info["sfreq"])
 
         pre_buf = crop_eeg_buffer(
-            raw_pre,
-            raw_pre_time_offsets,
-            self._cfg.pre_stim_timerange[0],
-            self._cfg.pre_stim_timerange[1],
+            eeg_buffer,
+            relative_timestamps,
+            self._pre_stim_tmin,
+            self._pre_stim_tmax,
         )
         pre_ica_buf = crop_eeg_buffer(
-            raw_pre,
-            raw_pre_time_offsets,
+            eeg_buffer,
+            relative_timestamps,
             self._cfg.ica_opts.pre_timerange[0],
             self._cfg.ica_opts.pre_timerange[1],
         )
         post_buf = crop_eeg_buffer(
-            raw_post,
-            raw_post_time_offsets,
+            eeg_buffer,
+            relative_timestamps,
             self._post_tmin,
             self._post_tmax,
         )
