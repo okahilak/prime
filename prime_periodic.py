@@ -159,7 +159,7 @@ class Decider:
 
         probability, predict_ms = timed_ms(self.predictor.predict, pre)
         print(
-            f"Trial {self.trial_count + 1}: prediction={probability:.6f} (pre-stim)  "
+            f"Trial {self.trial_count + 1}: prediction={probability:.6f}   "
             f"preprocess={preprocess_ms:.1f}ms  predict={predict_ms:.1f}ms"
         )
         return None
@@ -225,6 +225,7 @@ class Decider:
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         labels = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, labels)
+        self.predictor.warm_up()
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         self.is_calibrated = True

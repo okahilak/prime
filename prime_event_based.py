@@ -149,6 +149,7 @@ class Decider:
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         labels = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, labels)
+        self.predictor.warm_up()
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         self.is_calibrated = True

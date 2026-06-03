@@ -180,6 +180,12 @@ class OnlinePredictor:
         if self._finetuning_enabled:
             self._init_optimizer_and_buffers()
 
+    def warm_up(self, n_calls: int = 3) -> None:
+        """Run dummy predictions to warm up CUDA/kernels before the first real trial."""
+        dummy = np.zeros((_N_CHANNELS, _N_TIMEPOINTS), dtype=np.float32)
+        for _ in range(n_calls):
+            self.predict(dummy)
+
     def predict(self, epoch_pre: np.ndarray) -> float:
         """
         Predict the probability for a single trial without side effects.
