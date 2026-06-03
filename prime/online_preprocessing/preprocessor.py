@@ -349,16 +349,20 @@ def crop_eeg_buffer(
     time_offsets: np.ndarray,
     tmin: float,
     tmax: float,
+    *,
+    sfreq: float | None = None,
 ) -> np.ndarray:
     """Crop (n_samples, n_channels) to [tmin, tmax] inclusive relative to the event.
 
     Matches ``epoch_n_times`` / MNE ``crop(..., include_tmax=True)`` on an epoch whose
-    first sample is at ``time_offsets[0]``, using ``raw_sfreq`` from configs/prime.yaml.
+    first sample is at ``time_offsets[0]``. Uses ``raw_sfreq`` from configs/prime.yaml
+    unless ``sfreq`` is given (e.g. after resampling to ``processed_sfreq``).
     """
     time_offsets = np.asarray(time_offsets, dtype=np.float64)
     if time_offsets.size < 1:
         raise ValueError("time_offsets must not be empty")
-    sfreq = get_raw_sfreq()
+    if sfreq is None:
+        sfreq = get_raw_sfreq()
     start = time_to_sample(tmin, float(time_offsets[0]), sfreq)
     stop = start + epoch_n_times(tmin, tmax, sfreq)
     if start < 0 or stop > eeg_buffer.shape[0]:
@@ -790,26 +794,14 @@ class Preprocessor:
         ):
             return None
 
-        start = time_to_sample(
-            self._model_tmin,
-            self._qc_tmin,
-            self._processed_sfreq,
-        )
-        stop = start + epoch_n_times(
+        model_buffer = crop_eeg_buffer(
+            data[0].T,
+            np.asarray([self._qc_tmin], dtype=np.float64),
             self._model_tmin,
             self._model_tmax,
-            self._processed_sfreq,
+            sfreq=self._processed_sfreq,
         )
-        if start < 0 or stop > data.shape[2]:
-            raise ValueError(
-                f"cannot crop pre window [{self._model_tmin}, {self._model_tmax}] "
-                f"from pre-stim data (start={start}, stop={stop}, n_times={data.shape[2]})"
-            )
-
-        # Slicing can produce non-contiguous views; force contiguous layout
-        # so torch.from_numpy() never sees negative/unsupported strides.
-        model_window = data[0, :, start:stop]
-        return np.ascontiguousarray(model_window, dtype=np.float64)
+        return np.ascontiguousarray(model_buffer.T, dtype=np.float64)
 
     def preprocess_post(
         self,
