@@ -4,7 +4,7 @@ Implements the PRIME online pipeline equivalent to simulate_online.py:
   1. Calibration phase (first N_CALIBRATION_TRIALS events):
      Accumulate full calibration-window trials via process_event, then batch-calibrate.
   2. Intervention phase (remaining events):
-     process_periodic: preprocess pre + predict (5 ms before pulse).
+     process_periodic: preprocess pre + predict at end of QC pre-stim window.
      process_event: crop post_initial window, preprocess post, fit dipole, label, finetune.
 
 Requires:
@@ -27,7 +27,7 @@ from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffe
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.prime_config import (
     get_calibration_time_range,
-    get_ica_time_range,
+    get_qc_time_range,
     get_post_initial_time_range,
 )
 from prime.tep_normalizer import TEPNormalizer
@@ -46,9 +46,6 @@ GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
 
 N_CALIBRATION_TRIALS = 125
 SEED = 42
-
-# process_periodic runs this many seconds before each TMS event (pre-stim window end).
-EVENT_LOOKAHEAD_SEC = 0.005
 
 
 @contextmanager
@@ -78,7 +75,8 @@ class Decider:
         self.is_calibrated = False
 
         self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
-        self.raw_pre_tmin, self.raw_pre_tmax = get_ica_time_range()
+        self.qc_tmin, self.qc_tmax = get_qc_time_range()
+        self.event_lookahead = -self.qc_tmax
         self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"
@@ -114,9 +112,7 @@ class Decider:
     # ==================================================================
 
     def get_configuration(self) -> dict[str, Any]:
-        # Periodic buffer ends at the current sample; with EVENT_LOOKAHEAD_SEC until the
-        # pulse, that sample is raw_pre_tmax relative to the upcoming event.
-        sample_window = [self.raw_pre_tmin + EVENT_LOOKAHEAD_SEC, 0.0]
+        sample_window = [self.qc_tmin - self.qc_tmax, 0.0]
         event_sample_window = [self.calibration_tmin, self.calibration_tmax]
         return {
             "periodic_processing_interval": 1.0 / self.sampling_frequency,
@@ -126,7 +122,7 @@ class Decider:
         }
 
     # ==================================================================
-    # Periodic processing (pre-stim, 5 ms before each event)
+    # Periodic processing (pre-stim, at QC window end before each event)
     # ==================================================================
 
     def event_upcoming(self, reference_time: float) -> bool:
@@ -136,7 +132,7 @@ class Decider:
         event_time = float(self.event_times[self.next_event_idx])
         dt = 1.0 / self.sampling_frequency
 
-        is_upcoming = abs((event_time - reference_time) - EVENT_LOOKAHEAD_SEC) <= dt / 2
+        is_upcoming = abs((event_time - reference_time) - self.event_lookahead) <= dt / 2
         if is_upcoming:
             self.next_event_idx += 1
 
