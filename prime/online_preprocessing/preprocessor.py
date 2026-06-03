@@ -642,12 +642,6 @@ class Preprocessor:
         self.post_epochs = None
         self._calibration_params = None
 
-    def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
-        return epoch_pre.crop(self._model_tmin, self._model_tmax, include_tmax=True)
-
-    def _crop_post_to_tep_window(self, epoch_post: mne.Epochs) -> mne.Epochs:
-        return epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True)
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -985,7 +979,8 @@ class Preprocessor:
         if np.any(np.abs(z_local) > trial_reject_opts["post"]["local_zscore_threshold"]):
             return None
 
-        return self._crop_post_to_tep_window(epoch_post).get_data(copy=False)
+        cropped = epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True).get_data(copy=False)
+        return cropped
 
     # ------------------------------------------------------------------
     # Convenience helpers
