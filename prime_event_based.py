@@ -25,12 +25,8 @@ from typing import Any
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
-from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
+from prime.online_preprocessing.preprocessor import Preprocessor
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import (
-    get_post_time_range,
-    get_calibration_time_range,
-)
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -69,9 +65,6 @@ class Decider:
         # Trial counter
         self.trial_count = 0
         self.is_calibrated = False
-
-        self.raw_pre_tmin, self.raw_pre_tmax = get_calibration_time_range()
-        self.raw_post_tmin, self.raw_post_tmax = get_post_time_range()
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)
@@ -115,12 +108,6 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         """Process a trial event. Mirrors simulate_online.py trial-by-trial logic."""
 
-        raw_pre = crop_eeg_buffer(
-            eeg_buffer, time_offsets, self.raw_pre_tmin, self.raw_pre_tmax,
-        )
-        raw_post = crop_eeg_buffer(
-            eeg_buffer, time_offsets, self.raw_post_tmin, self.raw_post_tmax,
-        )
         if not self.is_calibrated:
             # --- Calibration phase ---
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
@@ -133,8 +120,8 @@ class Decider:
         else:
             # --- Intervention phase ---
             self.trial_count += 1
-            processed_pre = self.preprocessor.preprocess_pre(raw_pre)
-            processed_post = self.preprocessor.preprocess_post(raw_post)
+            processed_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets)
+            processed_post = self.preprocessor.preprocess_post(eeg_buffer, time_offsets)
 
             if processed_pre is None or processed_post is None:
                 print(f"Trial {self.trial_count}: REJECTED by preprocessing")

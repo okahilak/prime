@@ -9,8 +9,8 @@ Usage
 
     cal_pre, cal_post = preprocessor.calibrate()
 
-    epoch_pre = preprocessor.preprocess_pre(raw_pre)   # None if rejected
-    epoch_post = preprocessor.preprocess_post(raw_post)
+    epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)   # None if rejected
+    epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 """
 
 import warnings
@@ -605,12 +605,6 @@ class Preprocessor:
         self._ica_tmax = ica_tmax
         self._post_tmin = post_tmin
         self._post_tmax = post_tmax
-        self._raw_pre_n_times = epoch_n_times(
-            calibration_tmin, calibration_tmax, raw_sfreq,
-        )
-        self._raw_post_n_times = epoch_n_times(
-            post_tmin, post_tmax, raw_sfreq,
-        )
         self._qc_tmin = qc_tmin
         self._qc_tmax = qc_tmax
         self._model_tmin = model_tmin
@@ -619,8 +613,6 @@ class Preprocessor:
         self._dipole_tmax = dipole_tmax
         self._opts = cfg.to_dicts()
         self._processed_sfreq = get_processed_sfreq()
-        self._raw_pre_time_offsets = np.array([calibration_tmin], dtype=np.float64)
-        self._raw_post_time_offsets = np.array([post_tmin], dtype=np.float64)
         self._info_processed = self._info.copy()
         with self._info_processed._unlock():
             self._info_processed["sfreq"] = self._processed_sfreq
@@ -732,7 +724,8 @@ class Preprocessor:
 
     def preprocess_pre(
         self,
-        raw_pre: np.ndarray,
+        eeg_buffer: np.ndarray,
+        relative_timestamps: np.ndarray,
     ) -> np.ndarray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
@@ -740,8 +733,10 @@ class Preprocessor:
 
         Parameters
         ----------
-        raw_pre : np.ndarray
-            Raw pre-stimulus trial with shape (n_samples, n_channels).
+        eeg_buffer : np.ndarray, shape (n_samples, n_channels)
+            EEG covering ``[trial_tmin, trial_tmax]`` at ``raw_sfreq``.
+        relative_timestamps : np.ndarray, shape (n_samples,)
+            Time of each sample in seconds relative to the TMS event.
 
         Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
         the trial was rejected.
@@ -751,8 +746,8 @@ class Preprocessor:
 
         with _profile("preprocess_pre: crop_eeg_buffer"):
             pre_stim = crop_eeg_buffer(
-                raw_pre,
-                self._raw_pre_time_offsets,
+                eeg_buffer,
+                relative_timestamps,
                 self._qc_tmin,
                 self._qc_tmax,
             )
@@ -827,10 +822,21 @@ class Preprocessor:
             model_window = data[0, :, start:stop]
             return np.ascontiguousarray(model_window, dtype=np.float64)
 
-    def preprocess_post(self, raw_post: np.ndarray) -> np.ndarray | None:
+    def preprocess_post(
+        self,
+        eeg_buffer: np.ndarray,
+        relative_timestamps: np.ndarray,
+    ) -> np.ndarray | None:
         """Resample and preprocess a single post-stimulus trial.
 
         Must be called after ``calibrate()``.
+
+        Parameters
+        ----------
+        eeg_buffer : np.ndarray, shape (n_samples, n_channels)
+            EEG covering ``[trial_tmin, trial_tmax]`` at ``raw_sfreq``.
+        relative_timestamps : np.ndarray, shape (n_samples,)
+            Time of each sample in seconds relative to the TMS event.
 
         Returns a NumPy array with shape (1, n_channels, n_samples), or ``None`` if
         the trial was rejected.
@@ -839,8 +845,8 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         post_buf = crop_eeg_buffer(
-            raw_post,
-            self._raw_post_time_offsets,
+            eeg_buffer,
+            relative_timestamps,
             self._post_tmin,
             self._post_tmax,
         )

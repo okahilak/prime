@@ -44,8 +44,8 @@ import mne
 import numpy as np
 
 # --- Local imports ---
-from prime.prime_config import get_post_time_range, get_calibration_time_range, get_trial_time_range
-from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_raw_epochs, crop_mne_trial_to_buffer
+from prime.prime_config import get_trial_time_range
+from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
 from prime.online_predictor import OnlinePredictor
@@ -125,8 +125,6 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    raw_pre_tmin, raw_pre_tmax = get_calibration_time_range()
-    raw_post_tmin, raw_post_tmax = get_post_time_range()
     trial_tmin, trial_tmax = get_trial_time_range()
     preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
@@ -153,14 +151,14 @@ def main():
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
 
-        raw_pre, raw_post = crop_mne_trial_to_raw_epochs(
+        eeg_buffer, relative_timestamps = crop_mne_trial_to_buffer(
             trial_loader.get_trial(trial_idx),
-            raw_pre_tmin, raw_pre_tmax, raw_post_tmin, raw_post_tmax,
+            trial_tmin, trial_tmax,
         )
         with profile("preprocess_pre_total"):
-            processed_pre = preprocessor.preprocess_pre(raw_pre)
+            processed_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)
 
-        processed_post = preprocessor.preprocess_post(raw_post)
+        processed_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 
         if processed_pre is None or processed_post is None:
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
