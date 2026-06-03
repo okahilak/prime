@@ -123,7 +123,7 @@ def _butter_filter(data, cutoff, btype, fs, order, pad_time):
 def _apply_filter(data, coeffs, pad_time, fs):
     n_pad = int(pad_time * fs)
     padded = np.pad(data, ((0, 0), (0, 0), (n_pad, n_pad)), mode='reflect')
-    filtered = filtfilt(coeffs[0], coeffs[1], padded, padlen=None)
+    filtered = filtfilt(coeffs[0], coeffs[1], padded, padlen=0)
     return filtered[:, :, n_pad:-n_pad]
 
 
