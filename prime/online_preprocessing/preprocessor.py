@@ -613,9 +613,9 @@ class Preprocessor:
         with self._info_processed._unlock():
             self._info_processed["sfreq"] = self._processed_sfreq
 
-        self._epochs_pre = None
-        self._epochs_pre_ica = None
-        self._epochs_post = None
+        self.qc_epochs = None
+        self.ica_epochs = None
+        self.post_epochs = None
         self._calibration_params = None
 
     def _crop_pre_to_model_window(self, epoch_pre: mne.Epochs) -> mne.Epochs:
@@ -645,40 +645,41 @@ class Preprocessor:
         processed_sfreq = get_processed_sfreq()
         raw_sfreq = get_raw_sfreq()
 
-        pre_buf = crop_eeg_buffer(
+        qc_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._qc_tmin,
             self._qc_tmax,
         )
-        pre_ica_buf = crop_eeg_buffer(
+        ica_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._ica_tmin,
             self._ica_tmax,
         )
-        post_buf = crop_eeg_buffer(
+        post_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._post_tmin,
             self._post_tmax,
         )
 
-        pre_buf = _resample_buffer_polyphase(pre_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        pre_ica_buf = _resample_buffer_polyphase(pre_ica_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        post_buf = _resample_buffer_polyphase(post_buf, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        qc_buffer = _resample_buffer_polyphase(qc_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        ica_buffer = _resample_buffer_polyphase(ica_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        post_buffer = _resample_buffer_polyphase(post_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
 
-        trial_pre = _numpy_to_epochs_array(pre_buf, self._info_processed, self._qc_tmin)
-        trial_pre_ica = _numpy_to_epochs_array(pre_ica_buf, self._info_processed, self._ica_tmin)
-        trial_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
-        if self._epochs_pre is None:
-            self._epochs_pre = trial_pre
-            self._epochs_pre_ica = trial_pre_ica
-            self._epochs_post = trial_post
+        qc_trial = _numpy_to_epochs_array(qc_buffer, self._info_processed, self._qc_tmin)
+        ica_trial = _numpy_to_epochs_array(ica_buffer, self._info_processed, self._ica_tmin)
+        post_trial = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_tmin)
+
+        if self.qc_epochs is None:
+            self.qc_epochs = qc_trial
+            self.ica_epochs = ica_trial
+            self.post_epochs = post_trial
         else:
-            self._epochs_pre = mne.concatenate_epochs([self._epochs_pre, trial_pre])
-            self._epochs_pre_ica = mne.concatenate_epochs([self._epochs_pre_ica, trial_pre_ica])
-            self._epochs_post = mne.concatenate_epochs([self._epochs_post, trial_post])
+            self.qc_epochs = mne.concatenate_epochs([self.qc_epochs, qc_trial])
+            self.ica_epochs = mne.concatenate_epochs([self.ica_epochs, ica_trial])
+            self.post_epochs = mne.concatenate_epochs([self.post_epochs, post_trial])
 
     def calibrate(self):
         """Run calibration on the accumulated trials.
@@ -691,13 +692,13 @@ class Preprocessor:
         tuple[np.ndarray, np.ndarray]
             Pre- and post-stimulus calibration epochs that survived rejection.
         """
-        if self._epochs_pre is None:
+        if self.qc_epochs is None:
             raise RuntimeError("No trials have been added yet.")
 
         calibration_params, n_successful_trials, pre_data, post_data = preprocess_calibration(
-            self._epochs_pre.copy(),
-            self._epochs_pre_ica.copy(),
-            self._epochs_post.copy(),
+            self.qc_epochs.copy(),
+            self.ica_epochs.copy(),
+            self.post_epochs.copy(),
             self._cfg,
             self._opts,
             self._forward,
@@ -840,18 +841,18 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
-        post_buf = crop_eeg_buffer(
+        post_buffer = crop_eeg_buffer(
             eeg_buffer,
             relative_timestamps,
             self._post_tmin,
             self._post_tmax,
         )
-        post_buf = _resample_buffer_polyphase(
-            post_buf,
+        post_buffer = _resample_buffer_polyphase(
+            post_buffer,
             sfreq_from=self._info["sfreq"],
             sfreq_to=self._processed_sfreq,
         )
-        epoch_post = _numpy_to_epochs_array(post_buf, self._info_processed, self._post_tmin)
+        epoch_post = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_tmin)
         calibration_params = self._calibration_params
         dicts = self._cfg.to_dicts()
         trial_reject_opts = dicts["trial_reject_opts"]
@@ -968,6 +969,6 @@ class Preprocessor:
     @property
     def n_trials(self):
         """Number of trials accumulated so far."""
-        if self._epochs_pre is None:
+        if self.qc_epochs is None:
             return 0
-        return len(self._epochs_pre)
+        return len(self.qc_epochs)
