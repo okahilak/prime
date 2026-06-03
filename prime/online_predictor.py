@@ -125,7 +125,7 @@ class OnlinePredictor:
 
     Usage:
         predictor = OnlinePredictor(global_backrotation, model_path="pretrained.pt", seed=42)
-        predictor.calibrate(cal_trials, cal_labels)
+        predictor.calibrate(model_buffers, cal_labels)
         for epoch_pre, label in zip(intervention_epochs_pre, int_labels):
             prob = predictor.predict(epoch_pre)
             loss = predictor.finetune(epoch_pre, label)
@@ -294,7 +294,7 @@ class OnlinePredictor:
             self._init_optimizer_and_buffers()
 
     def calibrate(
-        self, cal_epochs_pre: np.ndarray, cal_labels: np.ndarray, **kwargs
+        self, model_buffers: np.ndarray, cal_labels: np.ndarray, **kwargs
     ) -> None:
         """
         Perform initial calibration: initialize alignment from calibration
@@ -305,13 +305,13 @@ class OnlinePredictor:
         This matches the original training path.
 
         Args:
-            cal_epochs_pre: Preprocessed calibration trials as a NumPy array
-                            with shape (n_trials, n_channels, n_times).
+            model_buffers: Preprocessed model-window calibration trials as a NumPy
+                           array with shape (n_trials, n_channels, n_times).
             cal_labels: Calibration labels, shape (n_trials,).
             **kwargs: Optional overrides for lr (lr_calibration) and
                       n_epochs (calibration_epochs).
         """
-        epochs_np = cal_epochs_pre
+        epochs_np = model_buffers
         lr = kwargs.get("lr", getattr(self.args, "lr_calibration", 0.0001))
         n_epochs = kwargs.get(
             "n_epochs", getattr(self.args, "calibration_epochs", 50)

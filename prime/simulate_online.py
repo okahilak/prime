@@ -137,10 +137,10 @@ def main():
         )
         preprocessor.add_trial(eeg_buffer, relative_timestamps)
 
-    cal_pre, cal_post = preprocessor.calibrate()
-    amplitudes = dipole_fitter.calibrate(cal_post)
+    model_buffers, dipole_buffers = preprocessor.calibrate()
+    amplitudes = dipole_fitter.calibrate(dipole_buffers)
     labels = normalizer.calibrate(amplitudes)
-    predictor.calibrate(cal_pre, labels)
+    predictor.calibrate(model_buffers, labels)
 
     # Intervention phase
     print_summary("INTERVENTION PHASE")

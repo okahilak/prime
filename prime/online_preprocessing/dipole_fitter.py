@@ -229,13 +229,13 @@ class DipoleFitter:
             self._dipole_tmin, self._dipole_tmax, self._processed_sfreq
         )
 
-    def calibrate(self, cal_epochs_post):
+    def calibrate(self, dipole_buffers):
         """Compute dipole fitting parameters from calibration trials.
 
         Parameters
         ----------
-        cal_epochs_post : np.ndarray
-            Preprocessed post-stimulus calibration epochs with shape
+        dipole_buffers : np.ndarray
+            Preprocessed dipole-window calibration epochs with shape
             (n_trials, n_channels, n_times).
 
         Returns
@@ -243,10 +243,10 @@ class DipoleFitter:
         calibration_amplitudes : np.ndarray
             Dipole amplitudes (free orientation) fitted to the calibration trials.
         """
-        epochs = np.asarray(cal_epochs_post)
+        epochs = np.asarray(dipole_buffers)
         if epochs.ndim != 3:
             raise ValueError(
-                f"cal_epochs_post must have shape (n_trials, n_channels, n_times), got {epochs.shape}."
+                f"dipole_buffers must have shape (n_trials, n_channels, n_times), got {epochs.shape}."
             )
         if epochs.shape[1] != len(self._forward.ch_names):
             raise ValueError(

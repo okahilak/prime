@@ -91,11 +91,11 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     print("Calibrating...")
 
     start_time = time.time()
-    cal_pre, _cal_post = preprocessor.calibrate()
+    model_buffers, dipole_buffers = preprocessor.calibrate()
 
     _save_calibration_bundle(calibration_bundle_path, preprocessor.calibration_params)
 
-    print(f"Used {len(cal_pre)} trials for calibration")
+    print(f"Used {len(model_buffers)} trials for calibration")
 
     end_time = time.time()
     print(f"Calibration stage took {end_time - start_time:.2f} seconds")

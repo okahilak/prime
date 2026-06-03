@@ -7,7 +7,7 @@ Usage
     preprocessor = Preprocessor(forward_path)
     preprocessor.add_trial(eeg_buffer, relative_timestamps)  # (n_samples, n_channels)
 
-    cal_pre, cal_post = preprocessor.calibrate()
+    model_buffers, dipole_buffers = preprocessor.calibrate()
 
     epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)   # None if rejected
     epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
@@ -422,7 +422,11 @@ def crop_mne_trial_to_buffer(
 
 
 def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forward):
-    """Full calibration preprocessing pipeline for qc, ica, and post epochs."""
+    """Full calibration preprocessing pipeline for qc, ica, and post epochs.
+
+    Returns ``(calibration_params, n_successful_trials, model_buffers, dipole_buffers)``
+    where the last two arrays are cropped to the model and dipole time windows.
+    """
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
     trial_reject_opts = opts['trial_reject_opts']
@@ -590,16 +594,13 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
     model_tmin, model_tmax = get_model_time_range()
     dipole_tmin, dipole_tmax = get_dipole_time_range()
 
-    qc_epochs = qc_epochs.crop(model_tmin, model_tmax, include_tmax=True)
-    post_epochs = post_epochs.crop(dipole_tmin, dipole_tmax, include_tmax=True)
+    model_epochs = qc_epochs.crop(model_tmin, model_tmax, include_tmax=True)
+    dipole_epochs = post_epochs.crop(dipole_tmin, dipole_tmax, include_tmax=True)
 
     calibration_params['ica'] = ica
-    return (
-        calibration_params,
-        n_successful_trials,
-        qc_epochs.get_data(copy=False),
-        post_epochs.get_data(copy=False),
-    )
+    model_buffers = model_epochs.get_data(copy=False)
+    dipole_buffers = dipole_epochs.get_data(copy=False)
+    return calibration_params, n_successful_trials, model_buffers, dipole_buffers
 
 
 # ==================== Preprocessor class ====================
@@ -713,27 +714,33 @@ class Preprocessor:
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
-            Pre- and post-stimulus calibration epochs that survived rejection.
+            ``(model_buffers, dipole_buffers)`` — preprocessed calibration trials cropped
+            to the model and dipole time windows, respectively.
         """
         if self.qc_epochs is None:
             raise RuntimeError("No trials have been added yet.")
 
-        calibration_params, n_successful_trials, qc_data, post_data = preprocess_calibration(
-            self.qc_epochs.copy(),
-            self.ica_epochs.copy(),
-            self.post_epochs.copy(),
-            self._cfg,
-            self._opts,
-            self._forward,
+        calibration_params, n_successful_trials, model_buffers, dipole_buffers = (
+            preprocess_calibration(
+                self.qc_epochs.copy(),
+                self.ica_epochs.copy(),
+                self.post_epochs.copy(),
+                self._cfg,
+                self._opts,
+                self._forward,
+            )
         )
         self._calibration_params = calibration_params
 
-        if n_successful_trials != qc_data.shape[0] or n_successful_trials != post_data.shape[0]:
+        if (
+            n_successful_trials != model_buffers.shape[0]
+            or n_successful_trials != dipole_buffers.shape[0]
+        ):
             raise RuntimeError(
                 "mismatch between successful trial count and calibration epoch arrays"
             )
 
-        return qc_data, post_data
+        return model_buffers, dipole_buffers
 
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):

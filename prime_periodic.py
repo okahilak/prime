@@ -214,10 +214,10 @@ class Decider:
 
         t0 = time.perf_counter()
 
-        cal_pre, cal_post = self.preprocessor.calibrate()
-        amplitudes = self.dipole_fitter.calibrate(cal_post)
+        model_buffers, dipole_buffers = self.preprocessor.calibrate()
+        amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         labels = self.normalizer.calibrate(amplitudes)
-        self.predictor.calibrate(cal_pre, labels)
+        self.predictor.calibrate(model_buffers, labels)
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         self.is_calibrated = True
