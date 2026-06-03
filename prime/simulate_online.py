@@ -36,9 +36,7 @@ import argparse
 import hashlib
 import time
 import warnings
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import mne
 import numpy as np
@@ -61,16 +59,6 @@ PRETRAINED_MODEL_PATH = Path("results") / "train" / "pretrained.pt"
 GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
 
 SEED = 42
-
-
-@contextmanager
-def profile(label: str) -> Iterator[None]:
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = time.perf_counter() - start
-        print(f"[profile] {label}: {elapsed * 1000:.1f}ms")
 
 
 def print_summary(summary_text):
@@ -148,6 +136,7 @@ def main():
     intervention_labels = []
     predictions = []
     preprocess_pre_times: list[float] = []
+    predict_times: list[float] = []
     for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
         if trial_idx % 100 == 0:
             print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
@@ -166,8 +155,9 @@ def main():
             print(f"Trial {trial_idx + 1}: REJECTED by preprocessing")
             continue
 
-        with profile("predict"):
-            probability = predictor.predict(processed_pre)
+        t0 = time.perf_counter()
+        probability = predictor.predict(processed_pre)
+        predict_times.append(time.perf_counter() - t0)
 
         amplitude = dipole_fitter.fit_trial(processed_post)
         label = normalizer.transform(amplitude)
@@ -178,10 +168,12 @@ def main():
 
         print(f"Trial {trial_idx + 1}: prediction={probability:.6f}  label={label:.6f}")
 
-    times = np.array(preprocess_pre_times)
-    mean_s = np.mean(times)
-    sem_s = np.std(times, ddof=1) / np.sqrt(len(times)) if len(times) > 1 else 0.0
-    print(f"preprocess_pre: mean={mean_s * 1000:.1f}ms, SEM={sem_s * 1000:.1f}ms (n={len(times)})")
+    for label, times_list in [("preprocess_pre", preprocess_pre_times), ("predict", predict_times)]:
+        times = np.array(times_list)
+        mean_s = np.mean(times)
+        std_s = np.std(times, ddof=1) if len(times) > 1 else 0.0
+        sem_s = std_s / np.sqrt(len(times)) if len(times) > 1 else 0.0
+        print(f"{label}: mean={mean_s * 1000:.1f}ms, std={std_s * 1000:.1f}ms, SEM={sem_s * 1000:.1f}ms (n={len(times)})")
 
     intervention_labels = np.array(intervention_labels)
     predictions = np.array(predictions)
