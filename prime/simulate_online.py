@@ -44,7 +44,7 @@ import mne
 import numpy as np
 
 # --- Local imports ---
-from prime.prime_config import get_trial_time_range
+from prime.prime_config import get_calibration_time_range
 from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
@@ -125,7 +125,7 @@ def main():
 
     predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
-    trial_tmin, trial_tmax = get_trial_time_range()
+    trial_tmin, trial_tmax = get_calibration_time_range()
     preprocessor = Preprocessor(forward_path)
     dipole_fitter = DipoleFitter(forward_path)
     normalizer = TEPNormalizer()

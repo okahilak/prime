@@ -27,7 +27,7 @@ import numpy as np
 from prime.online_predictor import OnlinePredictor
 from prime.online_preprocessing.preprocessor import Preprocessor
 from prime.online_preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import get_post_time_range, get_calibration_time_range
+from prime.prime_config import get_post_time_range, get_ica_time_range
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ class Decider:
         self.trial_count = 0
         self.is_calibrated = False
 
-        self.raw_pre_tmin, self.raw_pre_tmax = get_calibration_time_range()
+        self.raw_pre_tmin, self.raw_pre_tmax = get_ica_time_range()
         self.raw_post_tmin, self.raw_post_tmax = get_post_time_range()
 
         subject_id_str = f"sub-{subject_id:03d}"

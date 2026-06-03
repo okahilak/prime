@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-from prime.prime_config import get_trial_time_range
+from prime.prime_config import get_calibration_time_range
 from prime.online_preprocessing.preprocessor import (
     Preprocessor,
     crop_mne_trial_to_buffer,
@@ -79,7 +79,7 @@ def _run_calibration_stage(trial_loader, forward_path, calibration_bundle_path):
     """Calibration only: writes bundle to disk; no state returned except the path."""
     print("Appending calibration trials...")
 
-    trial_tmin, trial_tmax = get_trial_time_range()
+    trial_tmin, trial_tmax = get_calibration_time_range()
     preprocessor = Preprocessor(forward_path)
     for trial_idx in range(N_TRIALS_CALIBRATE):
         eeg_buffer, relative_timestamps = crop_mne_trial_to_buffer(
@@ -156,7 +156,7 @@ def _run_online_processing_stage(
 
     calibration_params = _load_calibration_bundle(calibration_bundle_path)
     epochs = trial_loader._epochs
-    trial_tmin, trial_tmax = get_trial_time_range()
+    trial_tmin, trial_tmax = get_calibration_time_range()
     preprocessor = Preprocessor.from_bundle(calibration_params, forward_path)
     epochs_data = trial_loader._eeg_data
 

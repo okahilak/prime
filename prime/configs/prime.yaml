@@ -43,10 +43,10 @@ weight_decay_finetune: 0.0
 raw_sfreq: 5000        # incoming EEG from the acquisition pipeline
 processed_sfreq: 1000  # after online preprocessing resampling (model input)
 
-# --- Raw pre-stim epoch crop (calibration / online preprocessing) ---
-# Must cover all pre-stim preprocessing steps (ICA, channel reject, filtering, etc.).
+# --- Raw trial window (calibration / online preprocessing input) ---
+# Must cover all pre- and post-stim preprocessing steps (ICA, channel reject, filtering, etc.).
 calibration_tmin: -1.1
-calibration_tmax: -0.005
+calibration_tmax: 0.100
 
 # --- Pre-stim ICA epoch crop ---
 ica_tmin: -1.1

@@ -34,7 +34,6 @@ from prime.prime_config import (
     get_model_time_range,
     get_processed_sfreq,
     get_post_time_range,
-    get_calibration_time_range,
     get_raw_sfreq,
     time_to_sample,
 )
@@ -590,7 +589,6 @@ class Preprocessor:
         raw_sfreq = get_raw_sfreq()
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
         info = _mne_info_from_forward(self._forward)
-        calibration_tmin, calibration_tmax = get_calibration_time_range()
         ica_tmin, ica_tmax = get_ica_time_range()
         post_tmin, post_tmax = get_post_time_range()
         qc_tmin, qc_tmax = get_qc_time_range()
@@ -599,8 +597,6 @@ class Preprocessor:
 
         self._cfg = cfg
         self._info = info
-        self._calibration_tmin = calibration_tmin
-        self._calibration_tmax = calibration_tmax
         self._ica_tmin = ica_tmin
         self._ica_tmax = ica_tmax
         self._post_tmin = post_tmin

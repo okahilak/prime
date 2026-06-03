@@ -26,7 +26,7 @@ def get_dipole_time_range() -> tuple[float, float]:
 
 
 def get_calibration_time_range() -> tuple[float, float]:
-    """Pre-stimulus crop window covering all online preprocessing steps (ICA, filtering, etc.)."""
+    """Full raw trial window covering all online preprocessing steps."""
     cfg = load_prime_config()
     return float(cfg.calibration_tmin), float(cfg.calibration_tmax)
 
@@ -47,13 +47,6 @@ def get_post_time_range() -> tuple[float, float]:
     """Raw post-stimulus crop window [post_tmin, post_tmax] in seconds."""
     cfg = load_prime_config()
     return float(cfg.post_tmin), float(cfg.post_tmax)
-
-
-def get_trial_time_range() -> tuple[float, float]:
-    """Full raw trial window covering both pre- and post-stimulus crops."""
-    calibration_tmin, calibration_tmax = get_calibration_time_range()
-    post_tmin, post_tmax = get_post_time_range()
-    return min(calibration_tmin, post_tmin), max(calibration_tmax, post_tmax)
 
 
 def get_raw_sfreq() -> float:
