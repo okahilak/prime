@@ -18,7 +18,7 @@ python3 -m prime.train --test $test_subjects
 
 # Loop over test datasets
 for subject_id in $test_subjects; do
-    python3 -m prime.simulate_online "$subject_id"
+    python3 -u -m prime.simulate_online "$subject_id" | tee "simulate_online_${subject_id}"
     exit_code=$?
     if [[ $exit_code -ne 0 ]]; then
         echo "ERROR: simulate_online.py failed for subject ${subject_id} (exit code ${exit_code}). Aborting."
