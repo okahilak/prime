@@ -2,7 +2,7 @@
 
 read -rp "Run preprocessing? [y/N] " run_preprocessing
 if [[ "$run_preprocessing" =~ ^[Yy]$ ]]; then
-    python3 -m prime.online_preprocessing.run_all_subjects
+    python3 -m prime.preprocessing.run_all_subjects
 fi
 python3 -m prime.train --cv
 

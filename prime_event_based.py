@@ -25,8 +25,8 @@ from typing import Any
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
-from prime.online_preprocessing.preprocessor import Preprocessor
-from prime.online_preprocessing.dipole_fitter import DipoleFitter
+from prime.preprocessing.preprocessor import Preprocessor
+from prime.preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------

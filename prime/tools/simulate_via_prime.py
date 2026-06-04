@@ -31,7 +31,7 @@ import numpy as np
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "prime"))
-sys.path.insert(0, str(ROOT_DIR / "prime" / "online_preprocessing"))
+sys.path.insert(0, str(ROOT_DIR / "prime" / "preprocessing"))
 
 from prime import Decider, EVENT_SAMPLE_WINDOW
 

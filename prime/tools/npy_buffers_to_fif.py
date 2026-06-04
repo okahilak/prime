@@ -3,7 +3,7 @@
 Convert online-preprocessing .npy buffer arrays to MNE Epochs (.fif).
 
 Reads ``data/processed/{subject}/{subject}_{label}_{key}_buffer.npy`` files
-written by ``prime.online_preprocessing.preprocess`` and saves sibling
+written by ``prime.preprocessing.preprocess`` and saves sibling
 ``.fif`` files with the same basename.
 
 Usage (from repo root):

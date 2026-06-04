@@ -4,11 +4,11 @@ Run preprocessing and/or dipole extraction for every subject under
 data/raw/{subject}/.
 
 Example:
-  python online_preprocessing/run_all_subjects.py --step both
-  python online_preprocessing/run_all_subjects.py --step preprocess
-  python online_preprocessing/run_all_subjects.py --step dipole --subject sub-018
-  python online_preprocessing/run_all_subjects.py --max-subjects 10 --jobs 4
-  python online_preprocessing/run_all_subjects.py --dry-run
+  python preprocessing/run_all_subjects.py --step both
+  python preprocessing/run_all_subjects.py --step preprocess
+  python preprocessing/run_all_subjects.py --step dipole --subject sub-018
+  python preprocessing/run_all_subjects.py --max-subjects 10 --jobs 4
+  python preprocessing/run_all_subjects.py --dry-run
 """
 import argparse
 import os
@@ -82,10 +82,10 @@ def _process_subject(
             print(f"  SKIP preprocess: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m prime.online_preprocessing.preprocess --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime.preprocessing.preprocess --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "prime.online_preprocessing.preprocess", "--subject", subject],
+                [python, "-u", "-m", "prime.preprocessing.preprocess", "--subject", subject],
                 prep_env,
                 f"preprocess {subject}",
             )
@@ -96,10 +96,10 @@ def _process_subject(
             print(f"  SKIP dipole: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m prime.online_preprocessing.fit_dipole --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime.preprocessing.fit_dipole --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "prime.online_preprocessing.fit_dipole", "--subject", subject],
+                [python, "-u", "-m", "prime.preprocessing.fit_dipole", "--subject", subject],
                 prep_env,
                 f"dipole fit {subject}",
             )

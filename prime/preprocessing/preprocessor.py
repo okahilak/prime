@@ -36,24 +36,24 @@ from prime.prime_config import (
     get_raw_sfreq,
     time_to_sample,
 )
-from prime.online_preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
-from prime.online_preprocessing.utils.ssp_sir_python import (
+from prime.preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
+from prime.preprocessing.utils.ssp_sir_python import (
     ssp_sir_to_average,
     ssp_sir_trials,
     ssp_sir_single_trial,
 )
-from prime.online_preprocessing.utils.sound_modified import sound
-from prime.online_preprocessing.utils.channel_interpolations import (
+from prime.preprocessing.utils.sound_modified import sound
+from prime.preprocessing.utils.channel_interpolations import (
     custom_get_interpolation_matrix,
     apply_channel_interpolation,
 )
-from prime.online_preprocessing.utils.mad import (
+from prime.preprocessing.utils.mad import (
     SingleTrialMadWorkspace,
     global_mad_zscore_rejected,
     local_mad_zscore_rejected,
 )
-from prime.online_preprocessing.utils.resampling import resample_buffer_polyphase
-from prime.online_preprocessing.config import get_default_config
+from prime.preprocessing.utils.resampling import resample_buffer_polyphase
+from prime.preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 

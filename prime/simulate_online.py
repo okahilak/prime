@@ -43,12 +43,12 @@ import numpy as np
 
 # --- Local imports ---
 from prime.prime_config import get_calibration_time_range
-from prime.online_preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
-from prime.online_preprocessing.dipole_fitter import DipoleFitter
+from prime.preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
+from prime.preprocessing.dipole_fitter import DipoleFitter
 from prime.tep_normalizer import TEPNormalizer
 from prime.online_predictor import OnlinePredictor
-from prime.online_preprocessing.trial_loader import TrialLoader
-from prime.online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
+from prime.preprocessing.trial_loader import TrialLoader
+from prime.preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 
 # =============================================================================
 # Hard-coded constants

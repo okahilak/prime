@@ -9,11 +9,11 @@ import mne
 import numpy as np
 
 from prime.prime_config import get_calibration_time_range
-from prime.online_preprocessing.preprocessor import (
+from prime.preprocessing.preprocessor import (
     Preprocessor,
     crop_mne_trial_to_buffer,
 )
-from prime.online_preprocessing.trial_loader import TrialLoader
+from prime.preprocessing.trial_loader import TrialLoader
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 

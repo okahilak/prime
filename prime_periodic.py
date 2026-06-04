@@ -22,8 +22,8 @@ from typing import Any, Optional
 import numpy as np
 
 from prime.online_predictor import OnlinePredictor
-from prime.online_preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
-from prime.online_preprocessing.dipole_fitter import DipoleFitter
+from prime.preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
+from prime.preprocessing.dipole_fitter import DipoleFitter
 from prime.prime_config import (
     get_calibration_time_range,
     get_qc_time_range,
