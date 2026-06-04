@@ -10,6 +10,7 @@ The `project_template/decider/` directory contains several example decider modul
 
 - **`example.py`**: Basic periodic processing with event handling
 - **`example_predetermined.py`**: Demonstrates predetermined trial timing with per-trial ITI scheduling
+- **`example_task.py`**: Demonstrates protocol tasks (e.g. offline training between stages)
 - **`example_sensory_stimuli.py`**: Demonstrates both predefined and dynamic sensory stimuli
 - **`phastimate.py`**: Real-time phase estimation for brain state-dependent stimulation
 
@@ -32,7 +33,7 @@ To add more libraries, modify `src/decider/Dockerfile` and run `build-neurosimo`
 Initializes the decider with device configuration parameters automatically provided by the pipeline.
 
 **Parameters:**
-- `subject_id` (str): Subject identifier
+- `subject_id` (int): Subject identifier (1–999)
 - `num_eeg_channels` (int): Number of EEG channels
 - `num_emg_channels` (int): Number of EMG channels  
 - `sampling_frequency` (int): Sampling frequency in Hz
@@ -46,10 +47,13 @@ Called by the pipeline during initialization. Must return a dictionary with conf
 #### `periodic_processing_interval` (float, optional)
 How frequently the `process_periodic()` method is called, in seconds. Must be greater than `0.0`. Defaults to `0.1` (10 times per second) if not specified.
 
+Use this as the step size when you analyze data with a rolling window: set `sample_window` to the window length and `periodic_processing_interval` to how often you want a new analysis pass (how far the window advances between calls).
+
 **Examples:**
 - `0.1`: Process 10 times per second (default)
 - `1.0`: Process once per second
 - `0.01`: Process 100 times per second
+- `0.5` with `sample_window: [-2.0, 0.0]`: 2 s lookback, re-analyzed every 0.5 s
 
 #### `sample_window` (list)
 Two-element list `[earliest_seconds, latest_seconds]` defining the buffer size relative to current sample, expressed in **seconds**.
@@ -119,6 +123,11 @@ List of pre-defined sensory stimuli sent to the presenter at initialization. Can
 ### `process_periodic(...)`
 
 Main processing method called by the pipeline for periodic processing of EEG/EMG samples.
+
+During periodic protocol stages, the decider schedules `process_periodic()` on a fixed cadence given by `periodic_processing_interval`. That schedule is independent of pulse and event callbacks (see the timeline under `process_event`).
+
+The experiment [protocol](../protocols/README.md) requires `safety.minimum_trial_interval`: the minimum seconds between consecutive trials/pulses. The `process_periodic()` method is **not called until that interval has elapsed since the previous stimulation**. The next call
+happens only after the interval ends.
 
 **Parameters:**
 
@@ -321,6 +330,33 @@ def process_predetermined(
     return {'trigger_offset': iti}
 ```
 
+### `process_task(task_name)`
+
+Optional method for protocols that include a `task` element (see [protocols README](../protocols/README.md#task)).
+
+Called **synchronously** when the experiment coordinator advances to a task. The coordinator does not advance the protocol
+until `process_task` returns. While a task runs, no `process_periodic`, `process_pulse`, and `process_event` are invoked for incoming samples.
+
+Not called during warm-up rounds.
+
+**Parameters:**
+
+#### `task_name` (str)
+The `name` from the protocol task entry (e.g. `"train_classifier"`). Use this string to branch on which task to run.
+
+**Return value:** None. The return value is ignored.
+
+**Example:**
+```python
+def process_task(self, task_name: str) -> None:
+    if task_name == 'train_classifier':
+        self.train_classifier()
+    else:
+        raise ValueError(f"Unknown task: {task_name}")
+```
+
+For an example, see `example_task.py` and `protocols/example_task.yaml`.
+
 ## Example Workflows
 
 ### Predetermined Trial Timing
@@ -339,6 +375,16 @@ def process_predetermined(
 ```
 
 For a complete example, see `example_predetermined.py`.
+
+### Protocol Tasks
+```python
+def process_task(self, task_name: str) -> None:
+    """Run offline work between stages (e.g. train a classifier)."""
+    if task_name == 'train_classifier':
+        self.train_classifier()
+```
+
+Define tasks in the protocol YAML between stages; see `protocols/example_task.yaml` and the [protocols README](../protocols/README.md#task).
 
 ### Continuous Monitoring
 ```python
@@ -364,14 +410,16 @@ def process_event(self, reference_time, reference_index, time_offsets,
     # ...
 ```
 
-### Regular Interval Processing
+### Rolling Window Processing
 ```python
 def get_configuration(self):
     return {
-        'sample_window': [-1.000, 0.0],  # Last second
-        # periodic_processing_interval defaults to 0.1 (10 times per second)
+        'sample_window': [-2.0, 0.0],           # 2 s lookback ending at current sample
+        'periodic_processing_interval': 0.25,  # advance analysis every 250 ms
     }
 ```
+
+Between pulses, `process_periodic()` runs on that 250 ms cadence. After a pulse, calls are suppressed until `minimum_trial_interval` (from the protocol) has passed.
 
 ### Sensory Stimuli Example
 For a complete example demonstrating both predefined and dynamic sensory stimuli, see `example_sensory_stimuli.py`.
