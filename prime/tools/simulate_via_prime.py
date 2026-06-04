@@ -6,11 +6,11 @@ Reads the CSV+JSON simulator dataset, extracts buffers around each event
 on the same short simulator dataset.
 
 Usage (from repository root, with venv activated):
-    python -m prime.tools.simulate_via_prime [--n-trials N]
+    python -m prime.tools.simulate_via_prime SUBJECT_ID [--n-trials N]
 
 Examples:
-    python -m prime.tools.simulate_via_prime --n-trials 5    # First 5 calib trials (data check)
-    python -m prime.tools.simulate_via_prime --n-trials 130  # 125 calib + 5 intervention
+    python -m prime.tools.simulate_via_prime 21 --n-trials 5    # First 5 calib trials (data check)
+    python -m prime.tools.simulate_via_prime 21 --n-trials 130  # 125 calib + 5 intervention
 """
 
 # Force single-threaded BLAS/LAPACK BEFORE importing numpy/scipy/torch.
@@ -37,8 +37,11 @@ from simulate_event_based import Decider, N_CALIBRATION_TRIALS
 from prime.prime_config import get_calibration_time_range
 
 DATA_ROOT = ROOT_DIR / "offline_data"
-SUBJECT_ID = 21
-SHORT_DATASET = DATA_ROOT / "simulator" / "sub-021" / "sub-021-short.json"
+
+
+def default_short_dataset(subject_id: int) -> Path:
+    subject_id_str = f"sub-{subject_id:03d}"
+    return DATA_ROOT / "simulator" / subject_id_str / f"{subject_id_str}-short.json"
 
 
 def load_dataset(json_path: Path):
@@ -89,7 +92,7 @@ def extract_buffer(
     return eeg_buffer, emg_buffer, time_offsets
 
 
-def run_comparison(n_trials: int, dataset_path: Path):
+def run_comparison(subject_id: int, n_trials: int, dataset_path: Path):
     event_sample_window = get_calibration_time_range()
 
     raw_data, event_times, sfreq, n_eeg_channels, n_emg_channels = load_dataset(
@@ -106,7 +109,7 @@ def run_comparison(n_trials: int, dataset_path: Path):
 
     print("\n--- Running DECIDER (simulate_event_based.process_event) ---")
     decider = Decider(
-        subject_id=SUBJECT_ID,
+        subject_id=subject_id,
         num_eeg_channels=n_eeg_channels,
         num_emg_channels=n_emg_channels,
         sampling_frequency=int(sfreq),
@@ -141,6 +144,11 @@ def main():
         description="Feed simulator CSV buffers through simulate_event_based.Decider"
     )
     parser.add_argument(
+        "subject_id",
+        type=int,
+        help="Subject ID (e.g. 21 for sub-021)",
+    )
+    parser.add_argument(
         "--n-trials",
         type=int,
         default=130,
@@ -149,11 +157,12 @@ def main():
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=SHORT_DATASET,
-        help="Path to simulator dataset JSON metadata",
+        default=None,
+        help="Path to simulator dataset JSON metadata (default: sub-XXX-short.json)",
     )
     args = parser.parse_args()
-    run_comparison(args.n_trials, args.dataset)
+    dataset_path = args.dataset or default_short_dataset(args.subject_id)
+    run_comparison(args.subject_id, args.n_trials, dataset_path)
 
 
 if __name__ == "__main__":
