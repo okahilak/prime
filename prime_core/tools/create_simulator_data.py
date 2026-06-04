@@ -1,4 +1,4 @@
-"""Convert epoched EEGLAB data to the EEG simulator CSV+JSON format.
+"""Create EEG simulator CSV+JSON datasets from epoched EEGLAB data.
 
 This script loads epoched EEG data, picks and reorders channels to match
 the forward solution, then reconstructs a continuous raw signal by placing
@@ -6,10 +6,10 @@ epochs at their original positions and filling gaps with reproducible random
 noise. The output is a JSON metadata file, a CSV data file, and an event file.
 
 Usage:
-    python convert_epochs_to_csv.py <subject_id> [--short]
+    python create_simulator_data.py <subject_id> [--short]
 
 Example:
-    python convert_epochs_to_csv.py sub-021
+    python create_simulator_data.py sub-021
 """
 
 import argparse
@@ -172,7 +172,7 @@ def write_dataset(output_dir, subject_id, raw_data, event_samples, sfreq, n_chan
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert epoched EEGLAB data to EEG simulator CSV+JSON format."
+        description="Create EEG simulator CSV+JSON datasets from epoched EEGLAB data."
     )
     parser.add_argument("subject_id", help="Subject ID (e.g., sub-021)")
     parser.add_argument(
