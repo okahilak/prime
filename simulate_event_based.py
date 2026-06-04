@@ -27,6 +27,7 @@ import numpy as np
 from prime.online_predictor import OnlinePredictor
 from prime.preprocessing.preprocessor import Preprocessor
 from prime.preprocessing.dipole_fitter import DipoleFitter
+from prime.prime_config import get_calibration_time_range
 from prime.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
@@ -43,10 +44,6 @@ GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotat
 
 N_CALIBRATION_TRIALS = 125
 SEED = 42
-
-# Event sample window: must cover the full trial range needed by the Preprocessor.
-# ICA needs [-1.1, -0.005], post needs [-0.03, 0.1]. Use the dataset range for safety.
-EVENT_SAMPLE_WINDOW = [-1.3, 0.5998]
 
 
 class Decider:
@@ -65,6 +62,8 @@ class Decider:
         # Trial counter
         self.trial_count = 0
         self.is_calibrated = False
+
+        self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)
@@ -85,9 +84,10 @@ class Decider:
     # ==================================================================
 
     def get_configuration(self) -> dict[str, Any]:
+        event_sample_window = [self.calibration_tmin, self.calibration_tmax]
         return {
-            "event_sample_window": EVENT_SAMPLE_WINDOW,
-            "sample_window": [-0.5, 0.0],
+            "event_sample_window": event_sample_window,
+            "sample_window": [0.0, 0.0],  # Unused
             "warm_up_rounds": 0,
         }
 
