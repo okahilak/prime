@@ -1,12 +1,12 @@
-# analyze_preft.py
-# Usage: python3 analyze_preft.py path/to/results_summary.csv
+# analyze_results.py
+# Usage: python3 analyze_results.py path/to/results_summary.csv
 
 import csv
 import statistics
 import sys
 
 if len(sys.argv) != 2:
-    print("Usage: python3 analyze_preft.py path/to/results_summary.csv")
+    print("Usage: python3 analyze_results.py path/to/results_summary.csv")
     sys.exit(1)
 
 rows = []
