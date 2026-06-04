@@ -17,7 +17,7 @@ python3 -m prime_core.train --test $test_subjects
 
 # Loop over test datasets
 for subject_id in $test_subjects; do
-    python3 -u -m prime_core.test_by_trial "$subject_id" | tee "test_by_trial_${subject_id}"
+    python3 -u -m prime_core.test_by_trial "$subject_id" | tee "offline_results/test_by_trial_${subject_id}"
     exit_code=$?
     if [[ $exit_code -ne 0 ]]; then
         echo "ERROR: test_by_trial.py failed for subject ${subject_id} (exit code ${exit_code}). Aborting."
