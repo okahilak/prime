@@ -38,11 +38,13 @@ from prime_core.tep_normalizer import TEPNormalizer
 # ---------------------------------------------------------------------------
 
 FORWARD_PATH = Path("offline_data") / "fsaverage" / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
+
+# Use a model trained on all subjects
+PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained_all.pt"
+GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation_all.npy"
 
 # ---------------------------------------------------------------------------
-# Protocol parameters (protocols/prime.yaml, PRIME.md)
+# Protocol parameters
 # ---------------------------------------------------------------------------
 
 PREDICTION_THRESHOLD = 0.5
