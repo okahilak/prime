@@ -1,0 +1,287 @@
+"""PRIME decider module for NeuroSimo.
+
+Implements protocols/prime.yaml (PRIME-TEP validation):
+
+  1. Calibration stage (100 predetermined high-ITI trials):
+     Accumulate trials via process_pulse, then batch-calibrate in calibrate_prime task.
+  2. Intervention blocks (75% PRIME-guided periodic, 25% predetermined high-ITI):
+     process_periodic: rolling-window QC + prediction; schedule pulse when excitable.
+     process_pulse: post-stimulus preprocessing, dipole fit, label, finetune.
+  3. Evaluation stages (predetermined low-ITI):
+     Timed brain-state-independent pulses only (no finetuning).
+
+Requires:
+  - A pretrained PRIME model checkpoint (.pt)
+  - A global back-rotation matrix (.npy)
+  - An MNE forward solution (.fif) for dipole fitting
+"""
+
+import time
+from collections import deque
+from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
+
+from prime_core.online_predictor import OnlinePredictor
+from prime_core.preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
+from prime_core.preprocessing.dipole_fitter import DipoleFitter
+from prime_core.prime_config import (
+    get_calibration_time_range,
+    get_qc_time_range,
+    get_post_initial_time_range,
+)
+from prime_core.tep_normalizer import TEPNormalizer
+
+# ---------------------------------------------------------------------------
+# Paths — adjust per setup
+# ---------------------------------------------------------------------------
+
+FORWARD_PATH = Path("offline_data") / "fsaverage" / "fsaverage-fwd.fif"
+PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
+
+# ---------------------------------------------------------------------------
+# Protocol parameters (protocols/prime.yaml, PRIME.md)
+# ---------------------------------------------------------------------------
+
+MINIMUM_TRIAL_INTERVAL = 2.5
+ROLLING_STEP = 0.01
+RECENT_REJECT_WINDOW = 1.0
+PREDICTION_THRESHOLD = 0.5
+TRIGGER_LEAD = 0.01  # seconds until pulse after a PRIME-guided trigger decision
+
+HIGH_ITI_MIN = 4.0
+HIGH_ITI_MAX = 9.0
+LOW_ITI_MIN = 2.5
+LOW_ITI_MAX = 3.5
+
+SEED = 42
+
+
+def timed_ms(fn, /, *args, **kwargs):
+    t0 = time.perf_counter()
+    result = fn(*args, **kwargs)
+    return result, (time.perf_counter() - t0) * 1000
+
+
+class Decider:
+    def __init__(
+        self,
+        subject_id: int,
+        num_eeg_channels: int,
+        num_emg_channels: int,
+        sampling_frequency: int,
+    ):
+        self.subject_id = subject_id
+        self.num_eeg_channels = num_eeg_channels
+        self.num_emg_channels = num_emg_channels
+        self.sampling_frequency = sampling_frequency
+
+        self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
+        self.qc_tmin, self.qc_tmax = get_qc_time_range()
+        self.event_lookahead = -self.qc_tmax
+        self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
+
+        self.dt = 1.0 / self.sampling_frequency
+        self.rng = np.random.default_rng(SEED + subject_id)
+
+        self.is_calibrated = False
+        self.pending_pre: Optional[np.ndarray] = None
+        self._last_pulse_time = -np.inf
+        self._last_rolling_check_time = -np.inf
+        self._recent_pre_checks: deque[tuple[float, bool]] = deque()
+
+        self.preprocessor = Preprocessor(FORWARD_PATH)
+        self.dipole_fitter = DipoleFitter(FORWARD_PATH)
+        self.normalizer = TEPNormalizer()
+
+        global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
+        self.predictor = OnlinePredictor(
+            global_backrotation,
+            model_path=PRETRAINED_MODEL_PATH,
+            seed=SEED,
+        )
+
+        print(
+            f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
+            f"eeg={num_eeg_channels}  emg={num_emg_channels}"
+        )
+
+    # ==================================================================
+    # Configuration
+    # ==================================================================
+
+    def get_configuration(self) -> dict[str, Any]:
+        return {
+            "periodic_processing_interval": ROLLING_STEP,
+            "sample_window": [self.qc_tmin - self.qc_tmax, 0.0],
+            "pulse_sample_window": [self.calibration_tmin, self.calibration_tmax],
+            "warm_up_rounds": 0,
+        }
+
+    # ==================================================================
+    # Protocol helpers
+    # ==================================================================
+
+    @staticmethod
+    def _is_intervention_stage(stage_name: str) -> bool:
+        return stage_name.startswith("intervention_block_")
+
+    @staticmethod
+    def _is_evaluation_stage(stage_name: str) -> bool:
+        return stage_name.startswith("evaluation_")
+
+    def _record_pre_check(self, reference_time: float, passed: bool) -> None:
+        self._recent_pre_checks.append((reference_time, passed))
+        cutoff = reference_time - RECENT_REJECT_WINDOW
+        while self._recent_pre_checks and self._recent_pre_checks[0][0] < cutoff:
+            self._recent_pre_checks.popleft()
+
+    def _recent_data_rejected(self) -> bool:
+        if not self._recent_pre_checks:
+            return False
+        return not all(passed for _, passed in self._recent_pre_checks)
+
+    def _event_timestamps(self, time_offsets: np.ndarray, time_to_pulse: float) -> np.ndarray:
+        return time_offsets - time_to_pulse
+
+    def _preprocess_pre_aligned(
+            self, eeg_buffer: np.ndarray, time_offsets: np.ndarray,
+            time_to_pulse: float) -> np.ndarray | None:
+        return self.preprocessor.preprocess_pre(
+            eeg_buffer, self._event_timestamps(time_offsets, time_to_pulse)
+        )
+
+    # ==================================================================
+    # Predetermined trial timing
+    # ==================================================================
+
+    def process_predetermined(
+            self, reference_time: float, stage_name: str, trial: int,
+            trial_type: str) -> dict[str, Any] | None:
+        if trial_type == "high_iti":
+            iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
+        elif trial_type == "low_iti":
+            iti = self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)
+        else:
+            raise ValueError(f"Unknown predetermined trial type: {trial_type!r}")
+
+        return {"trigger_offset": iti}
+
+    # ==================================================================
+    # Calibration task
+    # ==================================================================
+
+    def process_task(self, task_name: str) -> None:
+        if task_name != "calibrate_prime":
+            raise ValueError(f"Unknown task: {task_name!r}")
+        self.run_calibration()
+
+    # ==================================================================
+    # Periodic processing (PRIME-guided intervention)
+    # ==================================================================
+
+    def process_periodic(
+            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
+            eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
+            is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
+            is_warm_up: bool) -> dict[str, Any] | None:
+
+        if is_warm_up or not self.is_calibrated:
+            return None
+        if not self._is_intervention_stage(stage_name):
+            return None
+        if reference_time < self._last_pulse_time + MINIMUM_TRIAL_INTERVAL:
+            return None
+        if self.pending_pre is not None:
+            return None
+        if reference_time < self._last_rolling_check_time + ROLLING_STEP - self.dt / 2:
+            return None
+        self._last_rolling_check_time = reference_time
+
+        pre = self._preprocess_pre_aligned(eeg_buffer, time_offsets, self.event_lookahead)
+        self._record_pre_check(reference_time, pre is not None)
+        if pre is None or self._recent_data_rejected():
+            return None
+
+        probability, predict_ms = timed_ms(self.predictor.predict, pre)
+        print(
+            f"Rolling check t={reference_time:.3f}s: prediction={probability:.6f}  "
+            f"predict={predict_ms:.1f}ms"
+        )
+        if probability < PREDICTION_THRESHOLD:
+            return None
+
+        self.pending_pre = pre
+        print(
+            f"PRIME trigger at t={reference_time + TRIGGER_LEAD:.3f}s  "
+            f"prediction={probability:.6f}"
+        )
+        return {"trigger_offset": TRIGGER_LEAD}
+
+    # ==================================================================
+    # Pulse processing
+    # ==================================================================
+
+    def process_pulse(
+            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
+            eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
+            is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+
+        self._last_pulse_time = reference_time
+
+        if stage_name == "calibration":
+            self.preprocessor.add_trial(eeg_buffer, time_offsets)
+            print(f"Calibration trial collected ({trial_in_stage + 1} valid in stage)")
+            return None
+
+        if self._is_evaluation_stage(stage_name):
+            return None
+
+        if not self.is_calibrated or not self._is_intervention_stage(stage_name):
+            return None
+
+        pre = self.pending_pre
+        self.pending_pre = None
+        if pre is None:
+            pre = self._preprocess_pre_aligned(eeg_buffer, time_offsets, 0.0)
+
+        post_buffer, post_time_offsets = crop_eeg_buffer(
+            eeg_buffer,
+            time_offsets,
+            self.post_initial_tmin,
+            self.post_initial_tmax,
+        )
+        post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
+
+        if pre is None:
+            print(f"Trial {trial_in_stage + 1} ({stage_name}): REJECTED (pre-stimulus)")
+            return {"trial_invalid": True}
+        if post is None:
+            print(f"Trial {trial_in_stage + 1} ({stage_name}): REJECTED (post-stimulus)")
+            return {"trial_invalid": True}
+
+        amplitude = self.dipole_fitter.fit_trial(post)
+        label = self.normalizer.transform(amplitude)
+        self.predictor.finetune(pre, label)
+        print(f"Trial {trial_in_stage + 1} ({stage_name}): label={label:.6f}")
+        return None
+
+    # ==================================================================
+    # Calibration
+    # ==================================================================
+
+    def run_calibration(self) -> None:
+        print("Running calibration...")
+
+        t0 = time.perf_counter()
+
+        model_buffers, dipole_buffers = self.preprocessor.calibrate()
+        amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
+        labels = self.normalizer.calibrate(amplitudes)
+        self.predictor.calibrate(model_buffers, labels)
+        self.predictor.warm_up()
+
+        print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
+        self.is_calibrated = True
