@@ -2,7 +2,7 @@
 
 Reads the CSV+JSON simulator dataset, extracts buffers around each event
 (mimicking what the NeuroSimo backend does), and feeds them through
-``simulate_event_based.Decider``. Intended to mirror ``prime_core.simulate_online``
+``simulate_event_based.Decider``. Intended to mirror ``prime_core.test_by_trial``
 on the same short simulator dataset.
 
 Usage (from repository root, with venv activated):

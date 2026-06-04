@@ -1,6 +1,6 @@
 """PRIME decider module for NeuroSimo.
 
-Implements the PRIME online pipeline equivalent to simulate_online.py:
+Implements the PRIME online pipeline equivalent to test_by_trial.py:
   1. Calibration phase (first N_CALIBRATION_TRIALS events):
      Accumulate raw trials, then batch-calibrate preprocessing, dipole fitting,
      TEP normalization, and predictor alignment.
@@ -15,7 +15,7 @@ Requires:
   - A global back-rotation matrix (.npy)
   - An MNE forward solution (.fif) for dipole fitting
 
-See simulate_online.py for the offline simulation equivalent.
+See test_by_trial.py for the offline simulation equivalent.
 """
 
 import time
@@ -106,7 +106,7 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        """Process a trial event. Mirrors simulate_online.py trial-by-trial logic."""
+        """Process a trial event. Mirrors test_by_trial.py trial-by-trial logic."""
 
         if not self.is_calibrated:
             # --- Calibration phase ---

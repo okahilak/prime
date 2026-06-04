@@ -46,20 +46,19 @@ python -m prime_core.preprocessing.run_all_subjects [--step preprocess|dipole|bo
 
 Reads `offline_data/raw/`, writes processed epochs under `offline_data/processed/`.
 
-### `prime_core.simulate_online`: per-subject online replay
+### `prime_core.test_by_trial`: per-subject online replay
 
 ```bash
-python -m prime_core.simulate_online <subject_id>
+python -m prime_core.test_by_trial <subject_id>
 ```
 
-Replays one subject trial-by-trial through the online pipeline and checks against `train.py` outputs.
+Replays one subject trial-by-trial and checks against `train.py --test` batch testing outputs.
 
 ## Testing NeuroSimo integration
 
 Create simulator data for subject 21:
 
 ```bash
-python -m prime_core.tools.create_simulator_data 21
 python -m prime_core.tools.create_simulator_data 21 --short
 ```
 
@@ -68,3 +67,6 @@ Make it available to NeuroSimo:
 ```bash
 cp -r ~/projects/prime/decider/offline_data/simulator/sub-021/ ~/projects/prime/eeg_simulator/
 ```
+
+Open NeuroSimo, select the project `prime`, and switch the dataset to `sub-021-short.json`. Switch
+the decider to `simulate_by_events.py`. Start the session.
