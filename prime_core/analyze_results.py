@@ -40,8 +40,3 @@ for col, label in cols.items():
 print()
 print("Paper targets: PRE-FT median = 0.68 (all), 0.77 (extreme)")
 print()
-print("Sorted PRE-FT ROC AUC (all):")
-vals = sorted(float(r['finetuned_roc_auc_all']) for r in rows)
-for v in vals:
-    bar = "█" * max(0, int((v - 0.5) * 100))
-    print(f"  {v:.3f} {bar}")
