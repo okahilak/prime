@@ -21,13 +21,13 @@ import sys
 
 def _configure_threading_from_cli() -> bool:
     # Must run before importing numeric libraries so BLAS/OpenMP picks it up.
-    single_threaded = "--single-threaded" in sys.argv
-    if single_threaded:
+    multi_threaded = "--multi-threaded" in sys.argv
+    if not multi_threaded:
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
         os.environ["MKL_NUM_THREADS"] = "1"
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["NUMEXPR_NUM_THREADS"] = "1"
-    return single_threaded
+    return not multi_threaded
 
 
 SINGLE_THREADED = _configure_threading_from_cli()
@@ -71,9 +71,9 @@ def main():
     parser = argparse.ArgumentParser(description="Simulate online processing for a single subject.")
     parser.add_argument("subject_id", type=int, help="Subject ID (e.g. 21 for sub-021)")
     parser.add_argument(
-        "--single-threaded",
+        "--multi-threaded",
         action="store_true",
-        help="Force single-threaded BLAS/OpenMP execution (default: multi-threaded)",
+        help="Allow multi-threaded BLAS/OpenMP execution (default: single-threaded)",
     )
     parser.add_argument(
         "--csv",
