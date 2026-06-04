@@ -1,26 +1,28 @@
 """Create EEG simulator CSV+JSON datasets from epoched EEGLAB data.
 
-This script loads epoched EEG data, picks and reorders channels to match
-the forward solution, then reconstructs a continuous raw signal by placing
-epochs at their original positions and filling gaps with reproducible random
-noise. The output is a JSON metadata file, a CSV data file, and an event file.
+Loads epoched EEG data, picks and reorders channels to match the forward
+solution, then reconstructs a continuous raw signal by placing epochs at their
+original positions and filling gaps with reproducible random noise. Writes a
+JSON metadata file, a CSV data file, and an event file under
+``offline_data/simulator/<subject_id>/``.
 
-Usage:
-    python create_simulator_data.py <subject_id> [--short]
+Usage (from repo root):
+    python -m prime_core.tools.create_simulator_data <subject_id> [--short]
 
 Example:
-    python create_simulator_data.py sub-021
+    python -m prime_core.tools.create_simulator_data 21 --short
 """
 
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import mne
 import numpy as np
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
+DATA_ROOT = Path("offline_data")
 
 COMMON_CHANNELS = [
     'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
@@ -34,6 +36,17 @@ COMMON_CHANNELS = [
 ]
 
 RANDOM_SEED = 42
+
+
+def normalize_subject_id(subject: str) -> str:
+    """Map ``21`` or ``sub-21`` to ``sub-021``; leave other ids unchanged."""
+    subject = subject.strip()
+    match = re.fullmatch(r"sub-(\d+)(.*)", subject)
+    if match:
+        return f"sub-{int(match.group(1)):03d}{match.group(2)}"
+    if subject.isdigit():
+        return f"sub-{int(subject):03d}"
+    return subject
 
 
 def load_and_prepare_epochs(subject_id):
@@ -174,25 +187,26 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create EEG simulator CSV+JSON datasets from epoched EEGLAB data."
     )
-    parser.add_argument("subject_id", help="Subject ID (e.g., sub-021)")
+    parser.add_argument("subject_id", help="Subject ID (e.g. 21 or sub-021)")
     parser.add_argument(
         "--short",
         action="store_true",
         help="Only use the first 200 trials; output files are named <subject_id>-short_*",
     )
     args = parser.parse_args()
+    subject_id = normalize_subject_id(args.subject_id)
 
     mne.set_log_level("WARNING")
 
-    output_dir = DATA_ROOT / "simulator" / args.subject_id
+    output_dir = DATA_ROOT / "simulator" / subject_id
 
-    print(f"Loading epochs for {args.subject_id}...")
-    epochs = load_and_prepare_epochs(args.subject_id)
+    print(f"Loading epochs for {subject_id}...")
+    epochs = load_and_prepare_epochs(subject_id)
 
-    output_subject_id = args.subject_id
+    output_subject_id = subject_id
     if args.short:
         epochs = epochs[:200]
-        output_subject_id = f"{args.subject_id}-short"
+        output_subject_id = f"{subject_id}-short"
         print(f"--short: using first {len(epochs)} epochs, output prefix: {output_subject_id}")
 
     print(f"Epochs: {epochs.get_data().shape}")

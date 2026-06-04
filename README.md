@@ -53,3 +53,18 @@ python -m prime_core.simulate_online <subject_id>
 ```
 
 Replays one subject trial-by-trial through the online pipeline and checks against `train.py` outputs.
+
+## Testing NeuroSimo integration
+
+Create simulator data for subject 21:
+
+```bash
+python -m prime_core.tools.create_simulator_data 21
+python -m prime_core.tools.create_simulator_data 21 --short
+```
+
+Make it available to NeuroSimo:
+
+```bash
+cp -r ~/projects/prime/decider/offline_data/simulator/sub-021/ ~/projects/prime/eeg_simulator/
+```
