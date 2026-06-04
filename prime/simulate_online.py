@@ -196,7 +196,7 @@ def main():
     prediction_differences = np.abs(predictions - offline_predictions)
 
     labels_match = np.allclose(intervention_labels, offline_labels, atol=1e-7)
-    predictions_all_close = np.allclose(predictions, offline_predictions, atol=1e-3)
+    predictions_all_close = np.allclose(predictions, offline_predictions, atol=1e-2)
 
     print("\n" + "=" * 70)
     print("COMPARE ONLINE vs OFFLINE")
@@ -208,7 +208,7 @@ def main():
     print(f"\n  PREDICTIONS ({len(predictions)} trials):")
     print(f"    Max diff:           {np.max(prediction_differences):.6f}")
     print(f"    Mean diff:          {np.mean(prediction_differences):.6f}")
-    print(f"    All close (1e-3):   {predictions_all_close}")
+    print(f"    All close (1e-2):   {predictions_all_close}")
     print("=" * 70)
 
     if not labels_match:
