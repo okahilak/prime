@@ -1,12 +1,18 @@
-"""One-time setup: fetch fsaverage BEM assets and write fsaverage-fwd.fif."""
+"""One-time setup: fetch fsaverage BEM assets and write fsaverage-fwd.fif.
+
+Usage (from repo root):
+  python3 -m prime_core.preprocessing.build_fsaverage
+
+Requires ``offline_data/raw/sub-018/sub-018_task-tep_all_eeg.set`` (sync
+``offline_data`` from the shared drive; see README).
+"""
 from pathlib import Path
 
 import mne
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
-FSAVERAGE_DIR = DATA_ROOT / "fsaverage"
+FSAVERAGE_DIR = Path("offline_data") / "fsaverage"
 FORWARD_PATH = FSAVERAGE_DIR / "fsaverage-fwd.fif"
-RAW_EEGLAB = DATA_ROOT / "raw" / "sub-018" / "sub-018_task-tep_all_eeg.set"
+RAW_EEGLAB = Path("offline_data") / "raw" / "sub-018" / "sub-018_task-tep_all_eeg.set"
 
 COMMON_CHANNELS = [
     "AF3", "AF4", "AF7", "AF8", "C1", "C2", "C3", "C4", "C5", "C6",
@@ -18,7 +24,7 @@ COMMON_CHANNELS = [
 ]
 
 
-def main():
+def main() -> None:
     if FORWARD_PATH.exists():
         print(f"Forward solution already exists: {FORWARD_PATH}")
         return
@@ -26,7 +32,7 @@ def main():
     if not RAW_EEGLAB.exists():
         raise FileNotFoundError(
             f"EEGLAB epochs not found at {RAW_EEGLAB}. "
-            "Link sub-018 under preprocessing/data_epoched/raw_eeglab_and_block_idents/Tuebingen/ first."
+            "Sync offline_data from the shared drive (see README)."
         )
 
     mne.datasets.fetch_fsaverage(subjects_dir=str(FSAVERAGE_DIR), verbose=True)

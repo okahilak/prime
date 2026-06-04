@@ -55,7 +55,7 @@ class TrialLoader:
         if not forward_path.exists():
             raise FileNotFoundError(
                 f"Forward solution not found at {forward_path}. "
-                f"Run: python {DATA_ROOT / 'build_fsaverage_forward.py'}"
+                "Run: python3 -m prime_core.preprocessing.build_fsaverage"
             )
         channel_order = mne.read_forward_solution(forward_path).ch_names
         montage = mne.channels.make_standard_montage('standard_1005')

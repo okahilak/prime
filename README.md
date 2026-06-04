@@ -15,6 +15,8 @@ rsync -ah --info=progress2 ~/samba/Projects/2026-05-PRIME/offline_data ~/project
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+python -m prime_core.preprocessing.build_fsaverage
 ```
 
 ## Entrypoints
