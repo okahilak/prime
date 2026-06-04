@@ -69,4 +69,20 @@ cp -r ~/projects/prime/decider/offline_data/simulator/sub-021/ ~/projects/prime/
 ```
 
 Open NeuroSimo, select the project `prime`, and switch the dataset to `sub-021-short.json`. Switch
-the decider to `simulate_by_events.py`. Start the session.
+the decider to `simulate_by_events.py`. To run faster, set "Playback speed" to a higher value such as
+4.0. Start the session.
+
+After the calibration trials, the system starts printing predictions and labels. These should match the
+outputs of `python -m prime_core.test_by_trial 21`.
+
+After this, switch the decider to `simulate_by_periodic.py`. Note that high playback speeds may make
+the system to fall behind. On the BNPLAB NeuroSimo computer, a playback speed of 0.5 is recommended.
+Start the session.
+
+Similarly to `simulate_by_events.py`, the system starts printing predictions and labels. Check that they
+match the outputs of `python -m prime_core.test_by_trial 21 --csv`.
+
+## Running online pipeline in NeuroSimo
+
+Select the project `prime`, switch the decider to `prime.py`. Start EEG streaming from the device,
+and start the session.
