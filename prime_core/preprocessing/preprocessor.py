@@ -24,7 +24,7 @@ from scipy.stats import median_abs_deviation, zscore
 from scipy.signal import butter, filtfilt
 
 
-from prime.prime_config import (
+from prime_core.prime_config import (
     epoch_n_times,
     get_dipole_time_range,
     get_qc_time_range,
@@ -36,24 +36,24 @@ from prime.prime_config import (
     get_raw_sfreq,
     time_to_sample,
 )
-from prime.preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
-from prime.preprocessing.utils.ssp_sir_python import (
+from prime_core.preprocessing.utils.ica_calibrator import get_number_of_components, get_ica
+from prime_core.preprocessing.utils.ssp_sir_python import (
     ssp_sir_to_average,
     ssp_sir_trials,
     ssp_sir_single_trial,
 )
-from prime.preprocessing.utils.sound_modified import sound
-from prime.preprocessing.utils.channel_interpolations import (
+from prime_core.preprocessing.utils.sound_modified import sound
+from prime_core.preprocessing.utils.channel_interpolations import (
     custom_get_interpolation_matrix,
     apply_channel_interpolation,
 )
-from prime.preprocessing.utils.mad import (
+from prime_core.preprocessing.utils.mad import (
     SingleTrialMadWorkspace,
     global_mad_zscore_rejected,
     local_mad_zscore_rejected,
 )
-from prime.preprocessing.utils.resampling import resample_buffer_polyphase
-from prime.preprocessing.config import get_default_config
+from prime_core.preprocessing.utils.resampling import resample_buffer_polyphase
+from prime_core.preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 

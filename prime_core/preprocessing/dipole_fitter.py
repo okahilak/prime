@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 import mne
-from prime.prime_config import epoch_n_times, get_dipole_time_range, get_processed_sfreq
+from prime_core.prime_config import epoch_n_times, get_dipole_time_range, get_processed_sfreq
 
 
 def dipoles_for_indices(evoked_data, forward):

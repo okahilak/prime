@@ -2,15 +2,15 @@
 
 Reads the CSV+JSON simulator dataset, extracts buffers around each event
 (mimicking what the NeuroSimo backend does), and feeds them through
-``simulate_event_based.Decider``. Intended to mirror ``prime.simulate_online``
+``simulate_event_based.Decider``. Intended to mirror ``prime_core.simulate_online``
 on the same short simulator dataset.
 
 Usage (from repository root, with venv activated):
-    python -m prime.tools.simulate_via_prime SUBJECT_ID [--n-trials N]
+    python -m prime_core.tools.simulate_via_prime SUBJECT_ID [--n-trials N]
 
 Examples:
-    python -m prime.tools.simulate_via_prime 21 --n-trials 5    # First 5 calib trials (data check)
-    python -m prime.tools.simulate_via_prime 21 --n-trials 130  # 125 calib + 5 intervention
+    python -m prime_core.tools.simulate_via_prime 21 --n-trials 5    # First 5 calib trials (data check)
+    python -m prime_core.tools.simulate_via_prime 21 --n-trials 130  # 125 calib + 5 intervention
 """
 
 # Force single-threaded BLAS/LAPACK BEFORE importing numpy/scipy/torch.
@@ -34,7 +34,7 @@ if str(ROOT_DIR) not in sys.path:
 os.chdir(ROOT_DIR)
 
 from simulate_event_based import Decider, N_CALIBRATION_TRIALS
-from prime.prime_config import get_calibration_time_range
+from prime_core.prime_config import get_calibration_time_range
 
 DATA_ROOT = ROOT_DIR / "offline_data"
 

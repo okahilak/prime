@@ -8,12 +8,12 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-from prime.prime_config import get_calibration_time_range
-from prime.preprocessing.preprocessor import (
+from prime_core.prime_config import get_calibration_time_range
+from prime_core.preprocessing.preprocessor import (
     Preprocessor,
     crop_mne_trial_to_buffer,
 )
-from prime.preprocessing.trial_loader import TrialLoader
+from prime_core.preprocessing.trial_loader import TrialLoader
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 

@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 # Import model class and prefix
-from prime.models.models import MODEL_CLASS, MODEL_PREFIX
+from prime_core.models.models import MODEL_CLASS, MODEL_PREFIX
 
 
 def get_username():

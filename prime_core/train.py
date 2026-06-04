@@ -39,10 +39,10 @@ from rich.table import Table
 from rich.console import Console
 
 # Local project-specific modules
-from prime.datasets import *
-from prime.cross_validator import CrossValidator, log_memory_usage
-from prime.prime_config import PRIME_CONFIG_PATH
-from prime.utils import save_results_df
+from prime_core.datasets import *
+from prime_core.cross_validator import CrossValidator, log_memory_usage
+from prime_core.prime_config import PRIME_CONFIG_PATH
+from prime_core.utils import save_results_df
 
 # --- Global Setup ---
 warnings.filterwarnings("ignore", category=RuntimeWarning)

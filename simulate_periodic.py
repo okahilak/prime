@@ -21,15 +21,15 @@ from typing import Any, Optional
 
 import numpy as np
 
-from prime.online_predictor import OnlinePredictor
-from prime.preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
-from prime.preprocessing.dipole_fitter import DipoleFitter
-from prime.prime_config import (
+from prime_core.online_predictor import OnlinePredictor
+from prime_core.preprocessing.preprocessor import Preprocessor, crop_eeg_buffer
+from prime_core.preprocessing.dipole_fitter import DipoleFitter
+from prime_core.prime_config import (
     get_calibration_time_range,
     get_qc_time_range,
     get_post_initial_time_range,
 )
-from prime.tep_normalizer import TEPNormalizer
+from prime_core.tep_normalizer import TEPNormalizer
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup

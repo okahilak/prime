@@ -3,12 +3,12 @@
 Convert online-preprocessing .npy buffer arrays to MNE Epochs (.fif).
 
 Reads ``data/processed/{subject}/{subject}_{label}_{key}_buffer.npy`` files
-written by ``prime.preprocessing.preprocess`` and saves sibling
+written by ``prime_core.preprocessing.preprocess`` and saves sibling
 ``.fif`` files with the same basename.
 
 Usage (from repo root):
-  python -m prime.tools.npy_buffers_to_fif 21
-  python -m prime.tools.npy_buffers_to_fif sub-021
+  python -m prime_core.tools.npy_buffers_to_fif 21
+  python -m prime_core.tools.npy_buffers_to_fif sub-021
 """
 
 import argparse
@@ -19,8 +19,8 @@ from typing import Callable
 import mne
 import numpy as np
 
-from prime.datasets import _channel_names_for_epochs
-from prime.prime_config import (
+from prime_core.datasets import _channel_names_for_epochs
+from prime_core.prime_config import (
     epoch_n_times,
     get_dipole_time_range,
     get_model_time_range,

@@ -20,15 +20,15 @@ from torchinfo import summary
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from prime.datasets import (
+from prime_core.datasets import (
     TEPDataset,
     TEPParadigm,
     get_subject_list,
     load_pretrain_data,
 )
-from prime.models.builder import build_model
-from prime.online_predictor import OnlinePredictor, score_predictions
-from prime.utils import (
+from prime_core.models.builder import build_model
+from prime_core.online_predictor import OnlinePredictor, score_predictions
+from prime_core.utils import (
     RegressionMetricsTracker,
     filter_args_for_model,
     get_checkpoint_dir,

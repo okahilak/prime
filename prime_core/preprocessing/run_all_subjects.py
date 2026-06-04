@@ -82,10 +82,10 @@ def _process_subject(
             print(f"  SKIP preprocess: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m prime.preprocessing.preprocess --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime_core.preprocessing.preprocess --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "prime.preprocessing.preprocess", "--subject", subject],
+                [python, "-u", "-m", "prime_core.preprocessing.preprocess", "--subject", subject],
                 prep_env,
                 f"preprocess {subject}",
             )
@@ -96,10 +96,10 @@ def _process_subject(
             print(f"  SKIP dipole: output exists for {subject}")
             n_skip += 1
         elif dry_run:
-            print(f"  DRY-RUN: {python} -m prime.preprocessing.fit_dipole --subject {subject}")
+            print(f"  DRY-RUN: {python} -m prime_core.preprocessing.fit_dipole --subject {subject}")
         else:
             _run_command(
-                [python, "-u", "-m", "prime.preprocessing.fit_dipole", "--subject", subject],
+                [python, "-u", "-m", "prime_core.preprocessing.fit_dipole", "--subject", subject],
                 prep_env,
                 f"dipole fit {subject}",
             )

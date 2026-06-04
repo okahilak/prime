@@ -27,9 +27,9 @@ from moabb.paradigms.base import BaseParadigm
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
-from prime.prime_config import get_model_time_range, get_processed_sfreq
-from prime.tep_normalizer import TEPNormalizer
-from prime.tta_wrapper import (
+from prime_core.prime_config import get_model_time_range, get_processed_sfreq
+from prime_core.tep_normalizer import TEPNormalizer
+from prime_core.tta_wrapper import (
     PYRIEMANN_AVAILABLE,
     _apply_alignment_transform_np,
     _compute_alignment_transform_np,

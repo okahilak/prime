@@ -39,13 +39,13 @@ from pathlib import Path
 import numpy as np
 
 # --- Local imports ---
-from prime.prime_config import get_calibration_time_range
-from prime.preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
-from prime.preprocessing.dipole_fitter import DipoleFitter
-from prime.tep_normalizer import TEPNormalizer
-from prime.online_predictor import OnlinePredictor
-from prime.preprocessing.trial_loader import TrialLoader
-from prime.preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
+from prime_core.prime_config import get_calibration_time_range
+from prime_core.preprocessing.preprocessor import Preprocessor, crop_mne_trial_to_buffer
+from prime_core.preprocessing.dipole_fitter import DipoleFitter
+from prime_core.tep_normalizer import TEPNormalizer
+from prime_core.online_predictor import OnlinePredictor
+from prime_core.preprocessing.trial_loader import TrialLoader
+from prime_core.preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 
 # =============================================================================
 # Hard-coded constants
