@@ -156,30 +156,28 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
-        if is_warm_up or not self.is_calibrated:
+        if not self.is_calibrated:
             return None
+
         if not self.is_intervention_stage(stage_name):
-            return None
-        if self.pending_pre is not None:
             return None
 
         pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
         if pre is None:
+            print(f"Periodic check t={reference_time:.3f}s: REJECTED (pre-stimulus)")
             return None
 
         probability, predict_ms = timed_ms(self.predictor.predict, pre)
         print(
-            f"Rolling check t={reference_time:.3f}s: prediction={probability:.6f}  "
+            f"Periodic check t={reference_time:.3f}s: prediction={probability:.3f}  "
             f"prediction_time={predict_ms:.1f}ms"
         )
         if probability < PREDICTION_THRESHOLD:
             return None
 
         self.pending_pre = pre
-        print(
-            f"PRIME trigger at t={reference_time + TRIGGER_OFFSET:.3f}s  "
-            f"prediction={probability:.6f}  prediction_time={predict_ms:.1f}ms"
-        )
+        print(f"Trigger scheduled at t={reference_time + TRIGGER_OFFSET:.3f}s")
+
         return {"trigger_offset": TRIGGER_OFFSET}
 
     # ==================================================================
@@ -193,13 +191,7 @@ class Decider:
 
         if stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
-            print(f"Calibration trial collected ({trial_in_stage + 1} valid in stage)")
-            return None
-
-        if self.is_evaluation_stage(stage_name):
-            return None
-
-        if not self.is_calibrated or not self.is_intervention_stage(stage_name):
+            print(f"Calibration trial {trial_in_stage + 1} collected")
             return None
 
         pre = self.pending_pre
@@ -213,9 +205,6 @@ class Decider:
         )
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
 
-        if pre is None:
-            print(f"Trial {trial_in_stage + 1} ({stage_name}): REJECTED (pre-stimulus)")
-            return {"trial_invalid": True}
         if post is None:
             print(f"Trial {trial_in_stage + 1} ({stage_name}): REJECTED (post-stimulus)")
             return {"trial_invalid": True}
@@ -223,7 +212,8 @@ class Decider:
         amplitude = self.dipole_fitter.fit_trial(post)
         label = self.normalizer.transform(amplitude)
         self.predictor.finetune(pre, label)
-        print(f"Trial {trial_in_stage + 1} ({stage_name}): label={label:.6f}")
+
+        print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
         return None
 
     # ==================================================================
