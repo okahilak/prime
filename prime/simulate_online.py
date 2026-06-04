@@ -33,12 +33,9 @@ def _configure_threading_from_cli() -> bool:
 SINGLE_THREADED = _configure_threading_from_cli()
 
 import argparse
-import hashlib
 import time
-import warnings
 from pathlib import Path
 
-import mne
 import numpy as np
 
 # --- Local imports ---
@@ -183,28 +180,25 @@ def main():
         sem_s = std_s / np.sqrt(len(times)) if len(times) > 1 else 0.0
         print(f"{label}: mean={mean_s * 1000:.1f}ms, std={std_s * 1000:.1f}ms, SEM={sem_s * 1000:.1f}ms (n={len(times)})")
 
+    if n_trials < n_total_trials:
+        print("Not all trials were processed. Exiting.")
+        return
+
     intervention_labels = np.array(intervention_labels)
     predictions = np.array(predictions)
 
-    # Compare with offline results
     offline_data = np.load(predictions_path)
     offline_labels = offline_data["actual_values"]
     offline_predictions = offline_data["predictions"]
 
-    full_run = n_trials >= n_total_trials
-    if not full_run:
-        n_intervention = max(0, n_trials - N_CALIBRATION_TRIALS)
-        offline_labels = offline_labels[:n_intervention]
-        offline_predictions = offline_predictions[:n_intervention]
-    else:
-        if len(intervention_labels) != len(offline_labels):
-            raise RuntimeError(
-                f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
-            )
-        if len(predictions) != len(offline_predictions):
-            raise RuntimeError(
-                f"Prediction count mismatch: online={len(predictions)}, offline={len(offline_predictions)}"
-            )
+    if len(intervention_labels) != len(offline_labels):
+        raise RuntimeError(
+            f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
+        )
+    if len(predictions) != len(offline_predictions):
+        raise RuntimeError(
+            f"Prediction count mismatch: online={len(predictions)}, offline={len(offline_predictions)}"
+        )
 
     label_differences = np.abs(intervention_labels - offline_labels)
     prediction_differences = np.abs(predictions - offline_predictions)
