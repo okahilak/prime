@@ -15,7 +15,7 @@
 # Override any value via CLI: python train.py --cv -c configs/prime.yaml lr_pretrain=0.001
 
 # --- Data ---
-data_root: "data/processed"
+data_root: "offline_data/processed"
 base_output_dir: "offline_results"
 
 # --- Phase 1: population pretraining ---
