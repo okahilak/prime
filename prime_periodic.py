@@ -36,8 +36,8 @@ from prime.tep_normalizer import TEPNormalizer
 # ---------------------------------------------------------------------------
 
 FORWARD_PATH = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
-PRETRAINED_MODEL_PATH = Path("results") / "train" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
+PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
 
 # ---------------------------------------------------------------------------
 # Protocol parameters

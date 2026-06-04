@@ -55,8 +55,8 @@ from prime.online_preprocessing.trial_loader_from_csv import TrialLoaderFromCsv
 # =============================================================================
 N_CALIBRATION_TRIALS = 125
 
-PRETRAINED_MODEL_PATH = Path("results") / "train" / "pretrained.pt"
-GLOBAL_BACKROTATION_PATH = Path("results") / "train" / "global_backrotation.npy"
+PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
+GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
 
 SEED = 42
 
@@ -84,7 +84,7 @@ def main():
 
     subject_id = args.subject_id
     subject_id_str = f"sub-{subject_id:03d}"
-    predictions_path = Path("results") / "test" / f"predictions_subj_{subject_id}.npz"
+    predictions_path = Path("offline_results") / "test" / f"predictions_subj_{subject_id}.npz"
 
     print(f"Subject: {subject_id_str}")
     print(f"Calibration trials: {N_CALIBRATION_TRIALS}")

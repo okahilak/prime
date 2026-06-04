@@ -16,7 +16,7 @@
 
 # --- Data ---
 data_root: "data/processed"
-base_output_dir: "results"
+base_output_dir: "offline_results"
 
 # --- Phase 1: population pretraining ---
 pretrain_epochs: 100
