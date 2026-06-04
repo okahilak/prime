@@ -9,7 +9,7 @@ Usage
 
     model_buffers, dipole_buffers = preprocessor.calibrate()
 
-    epoch_pre = preprocessor.preprocess_pre(eeg_buffer, relative_timestamps)   # None if rejected
+    epoch_pre = preprocessor.preprocess_pre(eeg_buffer, timestamps)   # None if rejected
     epoch_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
 """
 
@@ -726,7 +726,9 @@ class Preprocessor:
     def preprocess_pre(
         self,
         eeg_buffer: np.ndarray,
-        relative_timestamps: np.ndarray,
+        timestamps: np.ndarray,
+        *,
+        online: bool = False,
     ) -> np.ndarray | None:
         """Resample and preprocess a single pre-stimulus trial.
 
@@ -736,8 +738,11 @@ class Preprocessor:
         ----------
         eeg_buffer : np.ndarray, shape (n_samples, n_channels)
             EEG covering ``[trial_tmin, trial_tmax]`` at ``raw_sfreq``.
-        relative_timestamps : np.ndarray, shape (n_samples,)
-            Time of each sample in seconds relative to the TMS event.
+        timestamps : np.ndarray, shape (n_samples,)
+            Time of each sample in seconds relative to the TMS pulse, unless
+            ``online`` is true (in which case timestamps are assumed to end at 0 s).
+        online : bool, default False
+            Timestamps are relative to the periodic reference, not the pulse.
 
         Returns a NumPy array with shape (n_channels, n_times), or ``None`` if
         the trial was rejected.
@@ -745,9 +750,13 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
+        timestamps = np.asarray(timestamps, dtype=np.float64)
+        if online:
+            timestamps = timestamps + self._qc_tmax
+
         pre_stim, _ = crop_eeg_buffer(
             eeg_buffer,
-            relative_timestamps,
+            timestamps,
             self._qc_tmin,
             self._qc_tmax,
         )

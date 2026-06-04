@@ -81,7 +81,6 @@ class Decider:
         self.qc_tmin, self.qc_tmax = get_qc_time_range()
         self.qc_window_size = self.qc_tmax - self.qc_tmin
 
-        self.event_lookahead = -self.qc_tmax
         self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
 
         self.rng = np.random.default_rng(SEED + subject_id)
@@ -121,16 +120,6 @@ class Decider:
 
     def is_evaluation_stage(stage_name):
         return stage_name.startswith("evaluation_")
-
-    def event_timestamps(self, time_offsets: np.ndarray, time_to_pulse: float) -> np.ndarray:
-        return time_offsets - time_to_pulse
-
-    def preprocess_pre_aligned(
-            self, eeg_buffer: np.ndarray, time_offsets: np.ndarray,
-            time_to_pulse: float) -> np.ndarray | None:
-        return self.preprocessor.preprocess_pre(
-            eeg_buffer, self.event_timestamps(time_offsets, time_to_pulse)
-        )
 
     # ==================================================================
     # Predetermined trial timing
@@ -174,7 +163,7 @@ class Decider:
         if self.pending_pre is not None:
             return None
 
-        pre = self.preprocess_pre_aligned(eeg_buffer, time_offsets, self.event_lookahead)
+        pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
         if pre is None:
             return None
 
