@@ -35,7 +35,7 @@ from prime.tep_normalizer import TEPNormalizer
 # Paths — adjust per setup
 # ---------------------------------------------------------------------------
 
-FORWARD_PATH = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
+FORWARD_PATH = Path("offline_data") / "fsaverage" / "fsaverage-fwd.fif"
 PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
 GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
 
@@ -76,7 +76,7 @@ class Decider:
 
         subject_id_str = f"sub-{subject_id:03d}"
 
-        events_path = Path("data") / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
+        events_path = Path("offline_data") / "simulator" / subject_id_str / f"{subject_id_str}_events.csv"
         all_event_times = np.loadtxt(events_path, dtype=np.float64)
         if all_event_times.ndim == 0:
             all_event_times = np.array([float(all_event_times)])

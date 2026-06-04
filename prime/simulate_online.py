@@ -92,13 +92,13 @@ def main():
 
     # --- Setup ---
 
-    forward_path = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
+    forward_path = Path("offline_data") / "fsaverage" / "fsaverage-fwd.fif"
 
     # --- Load all data (in a real system, trials would arrive one at a time) ---
     print("\nLoading raw data...")
 
     if args.csv:
-        json_path = Path("data") / "simulator" / subject_id_str / f"{subject_id_str}.json"
+        json_path = Path("offline_data") / "simulator" / subject_id_str / f"{subject_id_str}.json"
         trial_loader = TrialLoaderFromCsv(json_path)
     else:
         trial_loader = TrialLoader(subject_id_str)

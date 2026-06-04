@@ -55,7 +55,7 @@ from prime.preprocessing.utils.mad import (
 from prime.preprocessing.utils.resampling import resample_buffer_polyphase
 from prime.preprocessing.config import get_default_config
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 
 
 def _require_info_sfreq(info: mne.Info, sfreq: float) -> None:

@@ -29,7 +29,7 @@ from prime.prime_config import (
     get_qc_time_range,
 )
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 PROCESSED_DIR = DATA_ROOT / "processed"
 
 BUFFER_KEYS = ("qc", "model", "post", "dipole")

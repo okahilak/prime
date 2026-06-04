@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DATA_ROOT = SCRIPT_DIR.parent.parent / "data"
+DATA_ROOT = SCRIPT_DIR.parent.parent / "offline_data"
 
 RAW_DATA_DIR = DATA_ROOT / "raw"
 DIPOLE_FIT_SCRIPT = SCRIPT_DIR / "fit_dipole.py"

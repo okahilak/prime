@@ -3,7 +3,7 @@ from pathlib import Path
 
 import mne
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 FSAVERAGE_DIR = DATA_ROOT / "fsaverage"
 FORWARD_PATH = FSAVERAGE_DIR / "fsaverage-fwd.fif"
 RAW_EEGLAB = DATA_ROOT / "raw" / "sub-018" / "sub-018_task-tep_all_eeg.set"

@@ -6,7 +6,7 @@ from pathlib import Path
 import mne
 import numpy as np
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 
 CHANNEL_NAMES = [
     'AF3', 'AF4', 'AF7', 'AF8', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',

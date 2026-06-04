@@ -41,7 +41,7 @@ from prime.tta_wrapper import (
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
-DATA_ROOT_PATH = Path(__file__).resolve().parent.parent / "data" / "processed"
+DATA_ROOT_PATH = Path(__file__).resolve().parent.parent / "offline_data" / "processed"
 FSAVERAGE_FORWARD = DATA_ROOT_PATH.parent / "fsaverage" / "fsaverage-fwd.fif"
 
 

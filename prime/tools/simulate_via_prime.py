@@ -37,7 +37,7 @@ from prime import Decider, EVENT_SAMPLE_WINDOW
 
 # Same constants as simulate_online.py
 N_CALIBRATION_TRIALS = 125
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 SEED = 42
 
 

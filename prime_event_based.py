@@ -33,7 +33,7 @@ from prime.tep_normalizer import TEPNormalizer
 # Paths — adjust per setup
 # ---------------------------------------------------------------------------
 
-FORWARD_PATH = Path("data") / "fsaverage" / "fsaverage-fwd.fif"
+FORWARD_PATH = Path("offline_data") / "fsaverage" / "fsaverage-fwd.fif"
 PRETRAINED_MODEL_PATH = Path("offline_results") / "train" / "pretrained.pt"
 GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotation.npy"
 

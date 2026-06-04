@@ -15,7 +15,7 @@ try:
 except ImportError:
     from dipole_fitter import DipoleFitter
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 
 def _load_post_epochs(subject_directory, subject, group_label):
     epoch_path = os.path.join(subject_directory, f"{subject}_{group_label}_post.npy")

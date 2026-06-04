@@ -15,7 +15,7 @@ from prime.preprocessing.preprocessor import (
 )
 from prime.preprocessing.trial_loader import TrialLoader
 
-DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
 
 N_TRIALS_CALIBRATE = 125
 
