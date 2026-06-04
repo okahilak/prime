@@ -80,6 +80,12 @@ def main():
         action="store_true",
         help="Load trials from CSV simulator dataset instead of raw epochs",
     )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        default=None,
+        help="Total trials to process (default: all loaded trials)",
+    )
     args = parser.parse_args()
 
     subject_id = args.subject_id
@@ -104,7 +110,9 @@ def main():
         trial_loader = TrialLoader(subject_id_str)
 
     n_total_trials = trial_loader.num_trials
+    n_trials = n_total_trials if args.n_trials is None else min(args.n_trials, n_total_trials)
     print(f"Loaded {n_total_trials} trials for {subject_id_str}")
+    print(f"Running {n_trials} trials")
 
     # Calibration phase
     print_summary("CALIBRATION PHASE")
@@ -137,9 +145,9 @@ def main():
     predictions = []
     preprocess_pre_times: list[float] = []
     predict_times: list[float] = []
-    for trial_idx in range(N_CALIBRATION_TRIALS, n_total_trials):
+    for trial_idx in range(N_CALIBRATION_TRIALS, n_trials):
         if trial_idx % 100 == 0:
-            print(f"Processing trial {trial_idx + 1}/{n_total_trials}...")
+            print(f"Processing trial {trial_idx + 1}/{n_trials}...")
 
         eeg_buffer, relative_timestamps = crop_mne_trial_to_buffer(
             trial_loader.get_trial(trial_idx),
@@ -183,14 +191,20 @@ def main():
     offline_labels = offline_data["actual_values"]
     offline_predictions = offline_data["predictions"]
 
-    if len(intervention_labels) != len(offline_labels):
-        raise RuntimeError(
-            f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
-        )
-    if len(predictions) != len(offline_predictions):
-        raise RuntimeError(
-            f"Prediction count mismatch: online={len(predictions)}, offline={len(offline_predictions)}"
-        )
+    full_run = n_trials >= n_total_trials
+    if not full_run:
+        n_intervention = max(0, n_trials - N_CALIBRATION_TRIALS)
+        offline_labels = offline_labels[:n_intervention]
+        offline_predictions = offline_predictions[:n_intervention]
+    else:
+        if len(intervention_labels) != len(offline_labels):
+            raise RuntimeError(
+                f"Label count mismatch: online={len(intervention_labels)}, offline={len(offline_labels)}"
+            )
+        if len(predictions) != len(offline_predictions):
+            raise RuntimeError(
+                f"Prediction count mismatch: online={len(predictions)}, offline={len(offline_predictions)}"
+            )
 
     label_differences = np.abs(intervention_labels - offline_labels)
     prediction_differences = np.abs(predictions - offline_predictions)
