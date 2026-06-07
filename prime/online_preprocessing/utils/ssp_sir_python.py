@@ -21,7 +21,7 @@ def ssp_sir_to_average(data, L, fs, timerange, high_cutoff=100, order=2, method=
         n_channels = data.shape[0] #number of channels in the data
         # get data that is over 100 Hz to estimate muscle artifacts
         b, a = butter(order,high_cutoff/(fs/2),btype='high',analog=False) #digital (analog=False) 2nd order butterworth filter coefficients
-        data_high = filtfilt(b,a,data,axis=-1, padlen=data.shape[1]-1) #data high-pass filtered to over "high_cutoff" frequencies
+        data_high = filtfilt(b,a,data,axis=-1, padlen=None) #data high-pass filtered to over "high_cutoff" frequencies
 
         #use a 50-ms sliding window approach to estimate the muscle artifact
         data_high_squared = data_high**2
