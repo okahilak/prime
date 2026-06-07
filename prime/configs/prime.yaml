@@ -56,7 +56,7 @@ post_tmin: -0.030
 post_tmax: 0.100
 
 # --- Pre-stim quality control window ---
-qc_tmin: -0.200
+qc_tmin: -0.510
 qc_tmax: -0.010
 
 # --- Model window ---

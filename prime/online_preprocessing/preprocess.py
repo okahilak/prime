@@ -8,12 +8,19 @@ from concurrent.futures import ProcessPoolExecutor
 import mne
 import numpy as np
 
-from prime.prime_config import get_calibration_time_range
+from prime.prime_config import (
+    get_calibration_time_range,
+    get_post_time_range,
+    get_processed_sfreq,
+    get_raw_sfreq,
+)
 from prime.online_preprocessing.preprocessor import (
     Preprocessor,
+    crop_eeg_buffer,
     crop_mne_trial_to_buffer,
 )
 from prime.online_preprocessing.trial_loader import TrialLoader
+from prime.online_preprocessing.utils.resampling import resample_buffer_polyphase
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
 
@@ -24,7 +31,19 @@ mne.set_log_level("ERROR")
 
 # ==================== Single-Trial Worker ====================
 
-BUFFER_KEYS = ('qc', 'model', 'post', 'dipole')
+BUFFER_KEYS = ('qc', 'model', 'post', 'dipole', 'post_raw')
+
+
+def extract_post_raw(eeg_buffer, relative_timestamps):
+    """Crop and resample the post window without further preprocessing."""
+    post_tmin, post_tmax = get_post_time_range()
+    post_buffer = crop_eeg_buffer(eeg_buffer, relative_timestamps, post_tmin, post_tmax)
+    post_buffer = resample_buffer_polyphase(
+        post_buffer,
+        sfreq_from=get_raw_sfreq(),
+        sfreq_to=get_processed_sfreq(),
+    )
+    return np.ascontiguousarray(post_buffer.T, dtype=np.float64)
 
 
 def process_single_trial(eeg_buffer, relative_timestamps, preprocessor):
@@ -33,7 +52,11 @@ def process_single_trial(eeg_buffer, relative_timestamps, preprocessor):
     buffers_post = preprocessor.preprocess_post(eeg_buffer, relative_timestamps)
     if buffers_pre is None or buffers_post is None:
         return None
-    return {**buffers_pre, **buffers_post}
+    return {
+        **buffers_pre,
+        **buffers_post,
+        'post_raw': extract_post_raw(eeg_buffer, relative_timestamps),
+    }
 
 
 _online_trial_worker_state = {}
