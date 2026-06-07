@@ -1,5 +1,6 @@
 """Load shared settings from configs/prime.yaml."""
 
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -47,6 +48,15 @@ def get_post_time_range() -> tuple[float, float]:
     """Raw post-stimulus crop window [post_tmin, post_tmax] in seconds."""
     cfg = load_prime_config()
     return float(cfg.post_tmin), float(cfg.post_tmax)
+
+
+def get_processed_post_time_range() -> tuple[float, float]:
+    """Processed post-stimulus window after cropping to the first sample > 0 s."""
+    post_tmin, post_tmax = get_post_time_range()
+    sfreq = get_processed_sfreq()
+    first_idx_after_zero = math.floor(-post_tmin * sfreq) + 1
+    post_mintime = post_tmin + first_idx_after_zero / sfreq
+    return post_mintime, post_tmax
 
 
 def get_raw_sfreq() -> float:
