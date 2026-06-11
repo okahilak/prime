@@ -53,4 +53,5 @@ def resample_buffer_polyphase(
         down=down,
         axis=0,
         window=window_taps,
+        padtype='reflect',
     )
