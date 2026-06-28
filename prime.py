@@ -95,6 +95,7 @@ class Decider:
 
         self.is_calibrated = False
         self.pending_pre: Optional[np.ndarray] = None
+        self.last_qc_failure_time: float = -np.inf
 
         # Pre-compute per-trial types for each intervention block
         self.intervention_trial_types = {}
@@ -194,6 +195,11 @@ class Decider:
         pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
         if pre is None:
             print(f"Periodic check t={reference_time:.3f}s: REJECTED (pre-stimulus)")
+            self.last_qc_failure_time = reference_time
+            return None
+
+        if reference_time - self.last_qc_failure_time < 1.0:
+            print(f"Periodic check t={reference_time:.3f}s: SUPPRESSED (QC failure within past 1 s)")
             return None
 
         probability, predict_ms = timed_ms(self.predictor.predict, pre)
