@@ -8,18 +8,23 @@ safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
 
 stages:
+  # --- Baseline stage ---
+  - stage:
+      name: "baseline"
+      trials: 100
+      notes: "Baseline TEP assessment: 100 single pulses, 110% RMT, ITI 3 ± 0.5 s."
+
   # --- Calibration stage ---
   - stage:
       name: "calibration"
-      trials:
-        - { count: 100, timing: predetermined, type: high_iti }
-      notes: "Brain-state-independent calibration (ITI 6.5 ± 2.5 s). Goal: 100 valid trials for TEP calibration and predictor alignment."
+      trials: 100
+      notes: "Brain-state-independent calibration (ITI 6.5 ± 2.5 s). Goal: 100 valid trials."
       max_failures: 25
 
   # --- Calibration task ---
   - task:
       name: "calibrate_prime"
-      notes: "Calibration task (offline model calibration happens here)"
+      notes: "Offline model calibration"
 
   # --- Rest ---
   - rest:
@@ -31,21 +36,15 @@ stages:
   # --- Intervention stage (4 blocks × 200 trials) ---
   - stage:
       name: "intervention_block_1"
-      trials:
-        - { count: 150 }
-        - { count: 50, timing: predetermined, type: high_iti }
-      order: "random"
-      notes: "Intervention block 1: 75% PRIME-guided, 25% brain-state-independent (randomized order)"
+      trials: 200
+      notes: "Intervention block 1: 75% PRIME-guided, 25% brain-state-independent (randomized order, handled by decider)"
 
   - rest:
       duration: 60.0
 
   - stage:
       name: "intervention_block_2"
-      trials:
-        - { count: 150 }
-        - { count: 50, timing: predetermined, type: high_iti }
-      order: "random"
+      trials: 200
       notes: "Intervention block 2"
 
   - rest:
@@ -53,10 +52,7 @@ stages:
 
   - stage:
       name: "intervention_block_3"
-      trials:
-        - { count: 150 }
-        - { count: 50, timing: predetermined, type: high_iti }
-      order: "random"
+      trials: 200
       notes: "Intervention block 3"
 
   - rest:
@@ -64,10 +60,7 @@ stages:
 
   - stage:
       name: "intervention_block_4"
-      trials:
-        - { count: 150 }
-        - { count: 50, timing: predetermined, type: high_iti }
-      order: "random"
+      trials: 200
       notes: "Intervention block 4"
 
   - rest:
@@ -77,8 +70,7 @@ stages:
   # --- Evaluation stage (0, 15, 30, 60 min post-intervention) ---
   - stage:
       name: "evaluation_0min"
-      trials:
-        - { count: 100, timing: predetermined, type: low_iti }
+      trials: 100
       notes: "Post-intervention evaluation at 0 min (ITI 3 ± 0.5 s, 110% RMT)"
 
   - rest:
@@ -89,8 +81,7 @@ stages:
 
   - stage:
       name: "evaluation_15min"
-      trials:
-        - { count: 100, timing: predetermined, type: low_iti }
+      trials: 100
       notes: "Post-intervention evaluation at 15 min"
 
   - rest:
@@ -101,8 +92,7 @@ stages:
 
   - stage:
       name: "evaluation_30min"
-      trials:
-        - { count: 100, timing: predetermined, type: low_iti }
+      trials: 100
       notes: "Post-intervention evaluation at 30 min"
 
   - rest:
@@ -113,6 +103,5 @@ stages:
 
   - stage:
       name: "evaluation_60min"
-      trials:
-        - { count: 100, timing: predetermined, type: low_iti }
+      trials: 100
       notes: "Post-intervention evaluation at 60 min"

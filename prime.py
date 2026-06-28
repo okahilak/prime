@@ -90,6 +90,13 @@ class Decider:
         self.is_calibrated = False
         self.pending_pre: Optional[np.ndarray] = None
 
+        # Pre-compute per-trial types for each intervention block
+        self.intervention_trial_types = {}
+        for block in range(1, 5):
+            types = ["periodic"] * 150 + ["predetermined"] * 50
+            self.rng.shuffle(types)
+            self.intervention_trial_types[f"intervention_block_{block}"] = types
+
         global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
         self.predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
@@ -117,27 +124,35 @@ class Decider:
     # ==================================================================
     # Protocol helpers
     # ==================================================================
-    def is_intervention_stage(stage_name):
+    @staticmethod
+    def is_intervention_stage(stage_name: str) -> bool:
         return stage_name.startswith("intervention_block_")
 
-    def is_evaluation_stage(stage_name):
+    @staticmethod
+    def is_evaluation_stage(stage_name: str) -> bool:
         return stage_name.startswith("evaluation_")
 
     # ==================================================================
     # Predetermined trial timing
     # ==================================================================
 
-    def process_predetermined(
-            self, reference_time: float, stage_name: str, trial: int,
-            trial_type: str) -> dict[str, Any] | None:
-        if trial_type == "high_iti":
-            iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
-        elif trial_type == "low_iti":
+    def prepare_trial(self, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+        """Schedule trigger upfront for predetermined stages; return None for periodic."""
+        if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
             iti = self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)
-        else:
-            raise ValueError(f"Unknown predetermined trial type: {trial_type!r}")
+            return {"trigger_offset": iti}
 
-        return {"trigger_offset": iti}
+        if stage_name == "calibration":
+            iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
+            return {"trigger_offset": iti}
+
+        if self.is_intervention_stage(stage_name):
+            if self.intervention_trial_types[stage_name][trial_in_stage] == "predetermined":
+                iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
+                return {"trigger_offset": iti}
+            return None
+
+        return None
 
     # ==================================================================
     # Calibration task

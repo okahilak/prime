@@ -40,7 +40,7 @@ Stimulation intensity with 110% RMT adjustable based on TEP fidelity:
 - approx. 10–20 trials (RT-TEP/NeurOne)
 - aim = 10 µV peak-to-peak TEP Amplitude (N45)(30–60 ms post-TMS, visual inspection)
 
-## 1. Pre-intervention phase (Baseline):
+## 1. Baseline phase:
 
 100 single TMS pulses on left M1 hotspot with 110% RMT with 3±0.5 s intervals
 
