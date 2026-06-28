@@ -238,9 +238,31 @@ class Decider:
             print(f"Calibration trial {trial_in_stage + 1} collected")
             return None
         
-        pre = self.pending_pre
-        self.pending_pre = None
+        if self.is_intervention_stage(stage_name):
+            pre = self.pending_pre
+            self.pending_pre = None
 
+            if pre is None:
+                raise ValueError("process_pulse called without a valid pre-stimulus buffer")
+
+            success, label = self.analyze_tep(time_offsets, eeg_buffer)
+            if success:
+                self.predictor.finetune(pre, label)
+
+            if not success:
+                print(f"Trial {trial_in_stage + 1} ({stage_name}) failed: post-stimulus processing failed")
+            else:
+                print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
+
+            return {
+                "trial_invalid": not success,
+            }
+
+    # ==================================================================
+    # TEP analysis
+    # ==================================================================
+
+    def analyze_tep(self, time_offsets: np.ndarray, eeg_buffer: np.ndarray) -> bool:
         post_buffer, post_time_offsets = crop_eeg_buffer(
             eeg_buffer,
             time_offsets,
@@ -250,15 +272,12 @@ class Decider:
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
 
         if post is None:
-            print(f"Trial {trial_in_stage + 1} ({stage_name}): REJECTED (post-stimulus)")
-            return {"trial_invalid": True}
+            return False, None
 
         amplitude = self.dipole_fitter.fit_trial(post)
         label = self.normalizer.transform(amplitude)
-        self.predictor.finetune(pre, label)
 
-        print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
-        return None
+        return True, label
 
     # ==================================================================
     # Calibration
