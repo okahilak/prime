@@ -1,14 +1,26 @@
-# PRIME-TEP Validation
+# PRIME-TEP validation
 
-## Experimental Design Considerations
+## Experimental design considerations
 
-### Overview
+---
 
-- 15 subjects, 2 sessions each (TBS, 3 pulses at 100 Hz), session order randomized:
+# Overview
+
+- PRIME has been validated to deliver single-pulse TMS at high cortical excitability states (TEP-N45 Amplitude). This study represents the first test of whether the results translate to theta-burst stimulation-induced plasticity.
+
+- Key Question:
+
+Can stimulation delivered during PRIME-defined high excitability cortical states enhance plasticity outcomes (TEP-N45 Amplitude) compared with stimulation delivered at random?
+
+---
+
+# Overview
+
+- 15 subjects, 2 sessions each (TBS, 3 pulses at 100 Hz), session order randomized
   - PRIME high excitability
-  - Brain-state-independent stimulation (PRIME only used for prediction performance evaluation, not to guide stimulation)
+  - brain-state-independent (PRIME only used for prediction performance evaluation, not to guide stimulation)
 
-### Setup
+## Setup
 
 - 62 EEG channels (-> REFTEP++)
 - 1 EMG channel (FDI)
@@ -17,54 +29,71 @@
 - cool-B65 coil (-> REFTEP++)
 - Noise masking
 
-### Stimulation Target and Intensity
+---
 
-- Left M1 hotspot with 110% RMT
-- Adjustable based on TEP fidelity
-- Aim: 10 µV peak-to-peak (30–60 ms post-TMS, visual inspection)
-- Approx. 10–20 trials (RT-TEP/NeurOne)
+# Experimental design
 
-## Experimental Design
+## 0. TEP-thresholding:
 
-### 1. Calibration Phase
+Stimulation intensity with 110% RMT adjustable based on TEP fidelity:
 
-- 100 valid brain-state-independent trials (max. 125 attempts)
-- ITI: 6.5 ± 2.5 s
-- Goal: use trials to calculate
-  - Filters (SOUND, SSP-SIR, ICA)
-  - Trial rejection thresholds
+- approx. 10–20 trials (RT-TEP/NeurOne)
+- aim = 10 µV peak-to-peak TEP Amplitude (N45)(30–60 ms post-TMS, visual inspection)
+
+## 1. Pre-intervention phase (Baseline):
+
+100 single TMS pulses on left M1 hotspot with 110% RMT with 3±0.5 s intervals
+
+---
+
+# Experimental design
+
+## 2. Calibration phase
+
+- 125 brain-state-independent trials: single-pulse TMS
+- ITI 6.5 +- 2.5s
+- goal = get 100 valid trials to calculate
+  - filters (SOUND, SSP-SIR, ICA)
+  - trial rejection thresholds
   - TEP estimates
-- Offline subject-specific calibration of PRIME using preprocessed calibration data
-- Use pretrained model (REFTEP++ data)
+- offline subject-specific calibration of PRIME using preprocessed calibration data
+  - use pretrained model (REFTEP++ data)
 
-### 2. Intervention Phase
+---
 
-**Block design:**
+# Experimental design
+
+## 3. Intervention phase
+
+### Block design
 
 - 4 blocks × 200 trials
-- In PRIME session:
-  - Randomized PRIME-guided and brain-state-independent trials (75/25)
-- In brain-state-independent session:
-  - 100% brain-state-independent trials
+- Stimulation intensity:
+  - triplets: 80% RMT
+  - single-pulse TMS: 110% RMT
+- ITI: 6.5 ± 2.5 s
+  - If PRIME does not trigger before the end of the ITI, a pulse is delivered at the end of the ITI, but the trial is excluded from PRIME-triggered analyses
 
-**Rolling window preprocessing:**
+- Each block in the PRIME session:
+  - 150 PRIME-triggered and 50 brain-state-independent trials are interleaved
+  - 150 triplets and 50 single-pulse TMS trials are interleaved, with 5 single-pulse trials per 20-trial mini-block
+  - Triggering mode (PRIME vs. brain-state-independent) and stimulation type (triplet vs. single-pulse) are independent factors
 
-- Start: 2.5 s after pulse
-- Step size: 10 ms (TODO: test system compatibility)
-- Window size: 200 ms
-- No stimulation if last 1 second of EEG data are rejected (TODO: not implemented; do not implement before clarifying)
+- Each block in the brain-state-independent session:
+  - 200 brain-state-independent trials
+  - same triplet/single-pulse structure as in the PRIME session
 
-### 3. Evaluation Phase
+- Rolling-window preprocessing:
+  - Start: 2.5 s after pulse
+  - Step size: 10 ms (TO DO: test system compatibility)
+  - Window size: 500 ms
 
-- Goal: assess lasting effects of the intervention
-- 100 single TMS pulses each, 3 ± 0.5 s intervals, 110% RMT, at 0-, 15-, 30-, and 60-min post-intervention
+- No stimulation if the last 1 s of EEG data is rejected
+---
 
-## Follow-Up Experiments
+# Experimental design
 
-- Test PRIME on Timo's data (prefrontal target)
-- If successful -> closed-loop experiment
+## 4. Post-Intervention (Evaluation) phase
 
-## Responsible Persons
-
-- PRIME integration into NeuroSimo: Olli-Pekka
-- PRIME experiment: Dania
+- Goal: assess lasting effects of the stimulation
+- 100 single TMS pulses each, 3±0.5 s intervals, 110% RMT, at 0-, 15-, 30-, and 60-min post-intervention
