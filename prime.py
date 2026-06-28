@@ -230,11 +230,14 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
+        if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
+            return None
+
         if stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
             return None
-
+        
         pre = self.pending_pre
         self.pending_pre = None
 
