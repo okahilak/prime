@@ -32,6 +32,7 @@ from prime_core.prime_config import (
     get_post_initial_time_range,
 )
 from prime_core.tep_normalizer import TEPNormalizer
+from util.magventure_tms import MagVentureTMS
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup
@@ -49,6 +50,9 @@ GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotat
 
 PREDICTION_THRESHOLD = 0.5
 TRIGGER_OFFSET = 0.01
+
+AMPLITUDE_SINGLE_PULSE = 110  # % RMT, used for baseline / calibration / evaluation
+AMPLITUDE_TBS = 80            # % RMT, used for intervention triplets
 
 HIGH_ITI_MIN = 4.0
 HIGH_ITI_MAX = 9.0
@@ -86,6 +90,8 @@ class Decider:
         self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
 
         self.rng = np.random.default_rng(SEED + subject_id)
+
+        self.tms = MagVentureTMS()
 
         self.is_calibrated = False
         self.pending_pre: Optional[np.ndarray] = None
@@ -137,16 +143,22 @@ class Decider:
     # ==================================================================
 
     def prepare_trial(self, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        """Schedule trigger upfront for predetermined stages; return None for periodic."""
+        """Schedule trigger upfront for predetermined stages; return None for periodic.
+        Also arms the TMS device for the upcoming trial's pulse mode."""
         if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
+            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
             iti = self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)
             return {"trigger_offset": iti}
 
         if stage_name == "calibration":
+            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
             iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
             return {"trigger_offset": iti}
 
         if self.is_intervention_stage(stage_name):
+            # TODO: interleave single-pulse and TBS once the trial-type split is finalised.
+            # For now all intervention trials use TBS triplets.
+            self.tms.set_tbs(AMPLITUDE_TBS)
             if self.intervention_trial_types[stage_name][trial_in_stage] == "predetermined":
                 iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
                 return {"trigger_offset": iti}
