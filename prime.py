@@ -97,11 +97,17 @@ class Decider:
         self.pending_pre: Optional[np.ndarray] = None
         self.last_qc_failure_time: float = -np.inf
 
-        # Pre-compute per-trial types for each intervention block
-        self.intervention_trial_types = {}
+        # Pre-compute per-trial types for each intervention block.
+        # Each block has 10 mini-blocks of 20 trials; within each mini-block
+        # 15 are periodic and 5 are predetermined (75/25 split).
+        self.intervention_trial_types: dict[str, list[str]] = {}
+        mini_block = ["periodic"] * 15 + ["predetermined"] * 5
         for block in range(1, 5):
-            types = ["periodic"] * 150 + ["predetermined"] * 50
-            self.rng.shuffle(types)
+            types: list[str] = []
+            for _ in range(10):
+                shuffled = mini_block.copy()
+                self.rng.shuffle(shuffled)
+                types.extend(shuffled)
             self.intervention_trial_types[f"intervention_block_{block}"] = types
 
         global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
