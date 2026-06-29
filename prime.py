@@ -308,21 +308,22 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
         if stage_name == "baseline":
-            return None
+            pass
 
         elif stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
-            return None
 
         elif self.is_intervention_stage(stage_name):
-            return self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
 
         elif self.is_evaluation_stage(stage_name):
-            return None
+            pass
 
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")
+
+        # TODO: Log trial information
 
     def process_intervention_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
@@ -333,7 +334,7 @@ class Decider:
 
         if not success:
             print("Trial failed: post-stimulus processing failed")
-            return None
+            return
 
         assert label is not None
 
@@ -342,11 +343,10 @@ class Decider:
             # window is extracted here from the pulse-aligned buffer.
             pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
 
-            if pre is None:
+            if pre is not None:
+                self.predictor.finetune(pre, label)
+            else:
                 print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
-                return None
-
-            self.predictor.finetune(pre, label)
 
         elif condition == "prime_single_pulse":
             # For non-forced PRIME singles, pre is the prediction window from process_periodic.
@@ -357,11 +357,10 @@ class Decider:
                 pre = self.current_pre
 
             # If preprocessing fails (can only happen for forced trials), skip finetuning.
-            if pre is None:
+            if pre is not None:
+                self.predictor.finetune(pre, label)
+            else:
                 print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
-                return None
-
-            self.predictor.finetune(pre, label)
 
         elif condition == "prime_triplet":
             # Do not finetune on triplet trials.
@@ -371,8 +370,6 @@ class Decider:
             raise ValueError(f"Unknown condition: {condition!r}")
 
         print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
-
-        return None
 
     # ==================================================================
     # TEP analysis
