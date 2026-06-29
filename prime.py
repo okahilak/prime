@@ -51,8 +51,9 @@ GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotat
 PREDICTION_THRESHOLD = 0.5
 TRIGGER_OFFSET = 0.01
 
-AMPLITUDE_SINGLE_PULSE = 110  # % RMT, used for baseline / calibration / evaluation
-AMPLITUDE_TBS = 80            # % RMT, used for intervention triplets
+# TODO: Change for each subject to match the protocol specifications.
+AMPLITUDE_SINGLE_PULSE = 50   # % MSI, used for baseline / calibration / evaluation
+AMPLITUDE_TBS = 60            # % MSI, used for intervention triplets
 
 HIGH_ITI_MIN = 4.0
 HIGH_ITI_MAX = 9.0
