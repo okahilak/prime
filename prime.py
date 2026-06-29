@@ -152,9 +152,9 @@ class Decider:
         self.normalizer = TEPNormalizer()
 
         # Create results directory and trials CSV file.
-        results_dir = Path("results") / str(subject_id)
-        results_dir.mkdir(parents=True, exist_ok=True)
-        self.trials_csv = results_dir / "trials.csv"
+        self.results_dir = Path("results") / str(subject_id)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.trials_csv = self.results_dir / "trials.csv"
         self.csv_fields = [
             "stage", "trial_in_stage", "condition", "iti",
             "trial_start_time", "target_time", "max_time",
@@ -314,7 +314,7 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
-        self.current_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
+        self.current_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, from_pulse=False)
 
         self.qc_window_good.append(self.current_pre is not None)
 
@@ -377,6 +377,11 @@ class Decider:
             "label": label,
         })
         self.write_trial_row()
+        self.save_raw_buffers(
+            stage_name, trial_in_stage,
+            self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)[0],
+            self.extract_raw_post_from_pulse(time_offsets, eeg_buffer),
+        )
 
     def process_intervention_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
@@ -440,14 +445,29 @@ class Decider:
     def preprocess_pre_from_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
     ) -> Optional[np.ndarray]:
-        """Extract and preprocess the pre-stimulus QC window from a pulse-aligned buffer."""
-        pre_buffer, pre_time_offsets = crop_eeg_buffer(
-            eeg_buffer,
-            time_offsets,
-            self.qc_tmin,
-            self.qc_tmax,
+        pre_buffer, pre_time_offsets = self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)
+        return self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, from_pulse=True)
+
+    def extract_raw_pre_from_pulse(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        return crop_eeg_buffer(eeg_buffer, time_offsets, self.qc_tmin, self.qc_tmax)
+
+    def extract_raw_post_from_pulse(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+    ) -> np.ndarray:
+        raw_post, _ = crop_eeg_buffer(
+            eeg_buffer, time_offsets, self.post_initial_tmin, self.post_initial_tmax
         )
-        return self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, online=True)
+        return raw_post
+
+    def save_raw_buffers(
+            self, stage_name: str, trial_in_stage: int,
+            raw_pre: np.ndarray, raw_post: np.ndarray
+    ) -> None:
+        stem = f"{stage_name}_{trial_in_stage:04d}"
+        np.save(self.results_dir / f"{stem}_pre_raw.npy", raw_pre)
+        np.save(self.results_dir / f"{stem}_post_raw.npy", raw_post)
 
     def analyze_tep(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
