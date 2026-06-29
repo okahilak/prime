@@ -322,7 +322,7 @@ class Decider:
 
             if not success:
                 print("Trial failed: post-stimulus processing failed")
-                return {"trial_invalid": True}
+                return None
 
             assert label is not None
 
