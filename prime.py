@@ -21,6 +21,7 @@ Requires:
   - An MNE forward solution (.fif) for dipole fitting
 """
 
+import csv
 import time
 from collections import deque
 from pathlib import Path
@@ -150,6 +151,19 @@ class Decider:
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)
         self.normalizer = TEPNormalizer()
 
+        # Create results directory and trials CSV file.
+        results_dir = Path("results") / str(subject_id)
+        results_dir.mkdir(parents=True, exist_ok=True)
+        self.trials_csv = results_dir / "trials.csv"
+        self.csv_fields = [
+            "stage", "trial_in_stage", "condition", "iti",
+            "trial_start_time", "target_time", "max_time",
+            "prediction_probability", "trigger_time", "is_forced", "pulse_time", "label",
+        ]
+        with open(self.trials_csv, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
+        self.current_trial: dict = {}
+
         print(
             f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
             f"eeg={num_eeg_channels}  emg={num_emg_channels}"
@@ -214,31 +228,56 @@ class Decider:
 
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
 
+        self.current_trial = {
+            "stage": stage_name,
+            "trial_in_stage": trial_in_stage,
+            "condition": None,
+            "iti": None,
+            "trial_start_time": start_time,
+            "target_time": None,
+            "max_time": None,
+            "prediction_probability": None,
+            "trigger_time": None,
+            "is_forced": None,
+            "pulse_time": None,
+            "label": None,
+        }
+
         # Baseline: single pulses, predetermined.
         if stage_name == "baseline":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.current_trial["iti"] = iti
+            self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}
 
         # Calibration: single pulses, predetermined.
         elif stage_name == "calibration":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.current_trial["iti"] = iti
+            self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}
 
         # Intervention: look up this trial's condition and set the matching pulse type.
         elif self.is_intervention_stage(stage_name):
             condition = self.condition_for_trial(stage_name, trial_in_stage)
+            self.current_trial["condition"] = condition
+
             if condition == "prime_triplet":
                 self.trial_max_time = start_time + iti
+                self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_tbs(AMPLITUDE_TBS)
                 return None
 
             elif condition == "prime_single_pulse":
                 self.trial_max_time = start_time + iti
+                self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
                 return None
 
             elif condition == "predetermined":
                 self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+                self.current_trial["iti"] = iti
+                self.current_trial["target_time"] = start_time + iti
                 return {"trigger_offset": iti}
 
             else:
@@ -247,6 +286,8 @@ class Decider:
         # Evaluation: single pulses, predetermined.
         elif self.is_evaluation_stage(stage_name):
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.current_trial["iti"] = iti
+            self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}
 
         else:
@@ -296,6 +337,10 @@ class Decider:
 
         print("Prime trigger scheduled")
 
+        self.current_trial["prediction_probability"] = probability
+        self.current_trial["trigger_time"] = reference_time
+        self.current_trial["target_time"] = reference_time + TRIGGER_OFFSET
+
         return {"trigger_offset": TRIGGER_OFFSET}
 
     # ==================================================================
@@ -307,6 +352,8 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
+        label = None
+
         if stage_name == "baseline":
             pass
 
@@ -315,7 +362,8 @@ class Decider:
             print(f"Calibration trial {trial_in_stage + 1} collected")
 
         elif self.is_intervention_stage(stage_name):
-            self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            label = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
 
         elif self.is_evaluation_stage(stage_name):
             pass
@@ -323,18 +371,23 @@ class Decider:
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")
 
-        # TODO: Log trial information
+        self.current_trial.update({
+            "pulse_time": reference_time,
+            "is_forced": self.current_is_forced,
+            "label": label,
+        })
+        self.write_trial_row()
 
     def process_intervention_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
-            stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+            stage_name: str, trial_in_stage: int) -> Optional[float]:
         condition = self.condition_for_trial(stage_name, trial_in_stage)
 
         success, label = self.analyze_tep(time_offsets, eeg_buffer)
 
         if not success:
             print("Trial failed: post-stimulus processing failed")
-            return
+            return None
 
         assert label is not None
 
@@ -369,7 +422,16 @@ class Decider:
         else:
             raise ValueError(f"Unknown condition: {condition!r}")
 
-        print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
+        return label
+
+    # ==================================================================
+    # Trial logging
+    # ==================================================================
+
+    def write_trial_row(self) -> None:
+        row = {field: self.current_trial.get(field) for field in self.csv_fields}
+        with open(self.trials_csv, "a", newline="") as f:
+            csv.DictWriter(f, fieldnames=self.csv_fields).writerow(row)
 
     # ==================================================================
     # TEP analysis
