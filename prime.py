@@ -60,10 +60,8 @@ TRIGGER_OFFSET = 0.01
 AMPLITUDE_SINGLE_PULSE = 50   # % MSI, used for baseline / calibration / evaluation / single-pulse intervention
 AMPLITUDE_TBS = 60            # % MSI, used for intervention triplets
 
-HIGH_ITI_MIN = 4.0
-HIGH_ITI_MAX = 9.0
-LOW_ITI_MIN = 2.5
-LOW_ITI_MAX = 3.5
+ITI_MIN = 2.5
+ITI_MAX = 5.5
 
 # Intervention block structure (PRIME application session).
 INTERVENTION_BLOCK_TRIALS = 200
@@ -207,15 +205,17 @@ class Decider:
         Returns None for PRIME-guided (periodic) trials, whose trigger is
         scheduled later by process_periodic.
         """
+        iti = self.rng.uniform(ITI_MIN, ITI_MAX)
+
         # Baseline / evaluation: single pulses, low ITI, brain-state-independent.
         if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
-            return {"trigger_offset": self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)}
+            return {"trigger_offset": iti}
 
         # Calibration: single pulses, high ITI, brain-state-independent.
         if stage_name == "calibration":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
-            return {"trigger_offset": self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)}
+            return {"trigger_offset": iti}
 
         # Intervention: look up this trial's condition and set the matching pulse type.
         if self.is_intervention_stage(stage_name):
@@ -230,7 +230,7 @@ class Decider:
 
             elif condition == "predetermined":
                 self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
-                return {"trigger_offset": self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)}
+                return {"trigger_offset": iti}
 
             else:
                 raise ValueError(f"Unknown condition: {condition!r}")
