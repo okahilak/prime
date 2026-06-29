@@ -22,6 +22,7 @@ Requires:
 """
 
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
@@ -68,6 +69,14 @@ LOW_ITI_MAX = 3.5
 INTERVENTION_BLOCK_TRIALS = 200
 MINI_BLOCK_SIZE = 20
 
+# Pre-stimulus QC. process_periodic runs every 10 ms, so each call contributes
+# one 200 ms window's good/bad result. A candidate stimulation is allowed only if
+#   1. the most recent 5 windows are all good, and
+#   2. at least 80% of the windows in the last 500 ms (50 windows) are good.
+QC_RECENT_WINDOWS = 5
+QC_HISTORY_WINDOWS = 50        # 500 ms / 10 ms step
+QC_MIN_GOOD_FRACTION = 0.80
+
 SEED = 42
 
 
@@ -112,7 +121,12 @@ class Decider:
 
         self.is_calibrated = False
         self.pending_pre: Optional[np.ndarray] = None
-        self.last_qc_failure_time: float = -np.inf
+
+        # Rolling good/bad result of the most recent pre-stimulus QC windows.
+        # Holds the last 500 ms (one entry per 10 ms periodic call); older
+        # entries — including any post-pulse windows from the previous trial —
+        # fall out on their own.
+        self.qc_window_good: deque[bool] = deque(maxlen=QC_HISTORY_WINDOWS)
 
         # Pre-compute the per-trial condition schedule for each intervention
         # block. Done once here (deterministic, seeded) so that querying a
@@ -166,6 +180,21 @@ class Decider:
     def condition_for_trial(self, stage_name: str, trial_in_stage: int) -> str:
         """The intervention condition for a given trial. Pure lookup."""
         return self.intervention_conditions[stage_name][trial_in_stage]
+
+    def qc_passes(self) -> bool:
+        """Whether the recent pre-stimulus windows allow stimulation."""
+        history = self.qc_window_good
+        if len(history) < QC_RECENT_WINDOWS:
+            return False
+
+        recent = list(history)
+
+        # 1. The most recent QC_RECENT_WINDOWS windows must all be good.
+        if not all(recent[-QC_RECENT_WINDOWS:]):
+            return False
+
+        # 2. At least QC_MIN_GOOD_FRACTION of the last 500 ms must be good.
+        return sum(recent) / len(recent) >= QC_MIN_GOOD_FRACTION
 
     # ==================================================================
     # Trial preparation (timing + stimulator arming)
@@ -239,15 +268,13 @@ class Decider:
             return None
 
         pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
-        if pre is None:
-            print(f"Periodic check t={reference_time:.3f}s: REJECTED (pre-stimulus)")
-            self.last_qc_failure_time = reference_time
+        self.qc_window_good.append(pre is not None)
+
+        if not self.qc_passes():
+            print(f"Periodic check t={reference_time:.3f}s: REJECTED (recent-window QC)")
             return None
 
-        if reference_time - self.last_qc_failure_time < 1.0:
-            print(f"Periodic check t={reference_time:.3f}s: SUPPRESSED (QC failure within past 1 s)")
-            return None
-
+        # QC passed, so the most recent window is good and pre is available.
         probability, predict_ms = timed_ms(self.predictor.predict, pre)
         print(
             f"Periodic check t={reference_time:.3f}s: prediction={probability:.3f}  "
