@@ -279,34 +279,47 @@ class Decider:
             return None
 
         if self.is_intervention_stage(stage_name):
-            # pending_pre is set only by process_periodic, so it is present for
-            # PRIME-guided (periodic) trials and None for predetermined trials.
-            pre = self.pending_pre
-            self.pending_pre = None
-
             success, label = self.analyze_tep(time_offsets, eeg_buffer)
-
-            # TODO (next step): implement the finetuning rule from the protocol.
-            # Finetune PRIME only on *valid single-pulse* trials — PRIME-triggered,
-            # predetermined, and forced singles — and never on triplets. One thing
-            # this needs that isn't here yet:
-            #   (1) Predetermined singles must also finetune, but they
-            #       have no `pre` because they skip process_periodic. We need to
-            #       compute/store a prediction for them at fire time.
-            # For now we keep the prior behaviour: finetune whenever a PRIME
-            # prediction is available (i.e. periodic trials only). This still
-            # (incorrectly) finetunes periodic triplets — fixed in the next step.
-            if success and pre is not None:
-                self.predictor.finetune(pre, label)
 
             if not success:
                 print(f"Trial {trial_in_stage + 1} ({stage_name}) failed: post-stimulus processing failed")
-            else:
-                print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
 
-            return {
-                "trial_invalid": not success,
-            }
+                # TODO: Should this just move onto the next trial?
+                return {"trial_invalid": True}
+
+            condition = self.condition_for_trial(stage_name, trial_in_stage)
+            if condition == "predetermined":
+                # Predetermined trials skip process_periodic, so their pre-stimulus
+                # window is extracted here from the pulse-aligned buffer.
+                pre_buffer, pre_time_offsets = crop_eeg_buffer(
+                    eeg_buffer,
+                    time_offsets,
+                    self.qc_tmin,
+                    self.qc_tmax,
+                )
+                pre = self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, online=True)
+
+                if pre is None:
+                    print(
+                        f"Trial {trial_in_stage + 1} ({stage_name}) skipped finetuning: "
+                        "pre-stimulus processing failed"
+                    )
+                    return None
+
+                self.predictor.finetune(pre, label)
+
+            if condition == "prime_single_pulse":
+                # pending_pre is set by process_periodic for PRIME-guided trials.
+                pre = self.pending_pre
+                self.pending_pre = None
+
+                assert pre is not None, "PRIME-guided single pulse trial missing pre-stimulus window"
+
+                self.predictor.finetune(pre, label)
+
+            print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
+
+            return None
 
         return None
 
