@@ -118,7 +118,10 @@ class Decider:
         self.tms = MagVentureTMS()
 
         self.is_calibrated = False
-        self.pending_pre: Optional[np.ndarray] = None
+        self.current_pre: Optional[np.ndarray] = None
+        self.current_is_forced = False
+
+        self.trial_max_time = None
 
         # Rolling good/bad result of the most recent pre-stimulus QC windows.
         # Holds the last 500 ms (one entry per 10 ms periodic call); older
@@ -179,7 +182,7 @@ class Decider:
         """The intervention condition for a given trial. Pure lookup."""
         return self.intervention_conditions[stage_name][trial_in_stage]
 
-    def qc_passes(self) -> bool:
+    def check_qc(self) -> bool:
         """Whether the recent pre-stimulus windows allow stimulation."""
         history = self.qc_window_good
         if len(history) < QC_RECENT_WINDOWS:
@@ -198,33 +201,39 @@ class Decider:
     # Trial preparation (timing + stimulator arming)
     # ==================================================================
 
-    def prepare_trial(self, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+    def prepare_trial(self, start_time: float, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         """Arm the stimulator for the upcoming trial and, for predetermined
         trials, schedule the trigger upfront by returning its ITI.
 
         Returns None for PRIME-guided (periodic) trials, whose trigger is
         scheduled later by process_periodic.
         """
+        self.current_is_forced = False
+        self.current_pre = None
+        self.trial_max_time = None
+
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
 
-        # Baseline / evaluation: single pulses, low ITI, brain-state-independent.
-        if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
+        # Baseline: single pulses, predetermined.
+        if stage_name == "baseline":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
             return {"trigger_offset": iti}
 
-        # Calibration: single pulses, high ITI, brain-state-independent.
-        if stage_name == "calibration":
+        # Calibration: single pulses, predetermined.
+        elif stage_name == "calibration":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
             return {"trigger_offset": iti}
 
         # Intervention: look up this trial's condition and set the matching pulse type.
-        if self.is_intervention_stage(stage_name):
+        elif self.is_intervention_stage(stage_name):
             condition = self.condition_for_trial(stage_name, trial_in_stage)
             if condition == "prime_triplet":
+                self.trial_max_time = start_time + iti
                 self.tms.set_tbs(AMPLITUDE_TBS)
                 return None
 
             elif condition == "prime_single_pulse":
+                self.trial_max_time = start_time + iti
                 self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
                 return None
 
@@ -235,7 +244,13 @@ class Decider:
             else:
                 raise ValueError(f"Unknown condition: {condition!r}")
 
-        return None
+        # Evaluation: single pulses, predetermined.
+        elif self.is_evaluation_stage(stage_name):
+            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            return {"trigger_offset": iti}
+
+        else:
+            raise ValueError(f"Unknown stage: {stage_name!r}")
 
     # ==================================================================
     # Calibration task
@@ -258,33 +273,28 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
-        if not self.is_calibrated:
-            return None
+        self.current_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
 
-        if not self.is_intervention_stage(stage_name):
-            return None
+        self.qc_window_good.append(self.current_pre is not None)
 
-        if self.condition_for_trial(stage_name, trial_in_stage) == "predetermined":
-            return None
+        if reference_time > self.trial_max_time:
+            print(f"Prime trial max time exceeded, triggering a pulse")
+            self.current_is_forced = True
 
-        pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
-        self.qc_window_good.append(pre is not None)
+            return {"trigger_offset": TRIGGER_OFFSET}
 
-        if not self.qc_passes():
-            print(f"Periodic check t={reference_time:.3f}s: REJECTED (recent-window QC)")
+        qc_passes = self.check_qc()
+        if not qc_passes:
+            print(f"Quality control check rejected")
             return None
 
         # QC passed, so the most recent window is good and pre is available.
-        probability, predict_ms = timed_ms(self.predictor.predict, pre)
-        print(
-            f"Periodic check t={reference_time:.3f}s: prediction={probability:.3f}  "
-            f"prediction_time={predict_ms:.1f}ms"
-        )
+        probability, predict_ms = timed_ms(self.predictor.predict, self.current_pre)
+        print(f"Prime prediction={probability:.3f}, prediction_time={predict_ms:.1f}ms")
         if probability < PREDICTION_THRESHOLD:
             return None
 
-        self.pending_pre = pre
-        print(f"Trigger scheduled at t={reference_time + TRIGGER_OFFSET:.3f}s")
+        print("Prime trigger scheduled")
 
         return {"trigger_offset": TRIGGER_OFFSET}
 
@@ -297,26 +307,21 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
-        if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
+        if stage_name == "baseline":
             return None
 
-        if stage_name == "calibration":
+        elif stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
             return None
 
-        if self.is_intervention_stage(stage_name):
+        elif self.is_intervention_stage(stage_name):
             condition = self.condition_for_trial(stage_name, trial_in_stage)
-
-            # Consume pending_pre for all PRIME-guided trials, including triplets
-            # and failed trials. It belongs only to the pulse that was just fired.
-            pending_pre = self.pending_pre
-            self.pending_pre = None
 
             success, label = self.analyze_tep(time_offsets, eeg_buffer)
 
             if not success:
-                print(f"Trial {trial_in_stage + 1} ({stage_name}) failed: post-stimulus processing failed")
+                print("Trial failed: post-stimulus processing failed")
                 return {"trial_invalid": True}
 
             assert label is not None
@@ -327,22 +332,28 @@ class Decider:
                 pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
 
                 if pre is None:
-                    print(
-                        f"Trial {trial_in_stage + 1} ({stage_name}) skipped finetuning: "
-                        "pre-stimulus processing failed"
-                    )
+                    print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
                     return None
 
                 self.predictor.finetune(pre, label)
 
             elif condition == "prime_single_pulse":
-                # pending_pre is set by process_periodic for PRIME-guided trials.
-                if pending_pre is None:
-                    raise RuntimeError("PRIME-guided single pulse trial missing pre-stimulus window")
+                # For non-forced PRIME singles, pre is the prediction window from process_periodic.
+                # For forced PRIME singles, pre is extracted from the pulse-aligned buffer.
+                if self.current_is_forced:
+                    pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
+                else:
+                    pre = self.current_pre
 
-                self.predictor.finetune(pending_pre, label)
+                # If preprocessing fails (can only happen for forced trials), skip finetuning. 
+                if pre is None:
+                    print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
+                    return None
+
+                self.predictor.finetune(pre, label)
 
             elif condition == "prime_triplet":
+                # Do not finetune on triplet trials.
                 pass
 
             else:
@@ -352,7 +363,11 @@ class Decider:
 
             return None
 
-        return None
+        elif self.is_evaluation_stage(stage_name):
+            return None
+
+        else:
+            raise ValueError(f"Unknown stage: {stage_name!r}")
 
     # ==================================================================
     # TEP analysis
