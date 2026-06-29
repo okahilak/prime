@@ -4,7 +4,12 @@ Implements protocols/prime.yaml (PRIME-TEP validation):
 
   1. Calibration stage (100 predetermined high-ITI trials):
      Accumulate trials via process_pulse, then batch-calibrate in calibrate_prime task.
-  2. Intervention blocks (75% PRIME-guided periodic, 25% predetermined high-ITI):
+  2. Intervention blocks (4 x 200 trials): one factor with three conditions per trial
+       - PERIODIC_TRIPLET       60%  (120/block)  PRIME-guided triplet (TBS)
+       - PERIODIC_SINGLE        30%  ( 60/block)  PRIME-guided single pulse
+       - PREDETERMINED_SINGLE   10%  ( 20/block)  predetermined single pulse (scheduled ITI)
+     Conditions are balanced within each 20-trial mini-block, so the predetermined
+     singles (used to track TEP amplitude trends over time) stay evenly spread.
      process_periodic: rolling-window QC + prediction; schedule pulse when excitable.
      process_pulse: post-stimulus preprocessing, dipole fit, label, finetune.
   3. Evaluation stages (predetermined low-ITI):
@@ -17,7 +22,6 @@ Requires:
 """
 
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
@@ -52,7 +56,7 @@ PREDICTION_THRESHOLD = 0.5
 TRIGGER_OFFSET = 0.01
 
 # TODO: Change for each subject to match the protocol specifications.
-AMPLITUDE_SINGLE_PULSE = 50   # % MSI, used for baseline / calibration / evaluation
+AMPLITUDE_SINGLE_PULSE = 50   # % MSI, used for baseline / calibration / evaluation / single-pulse intervention
 AMPLITUDE_TBS = 60            # % MSI, used for intervention triplets
 
 HIGH_ITI_MIN = 4.0
@@ -60,7 +64,19 @@ HIGH_ITI_MAX = 9.0
 LOW_ITI_MIN = 2.5
 LOW_ITI_MAX = 3.5
 
+# Intervention block structure (PRIME application session).
+INTERVENTION_BLOCK_TRIALS = 200
+MINI_BLOCK_SIZE = 20
+
 SEED = 42
+
+
+MINI_BLOCK_COMPOSITION = (
+    ["prime_triplet"] * 12
+    + ["prime_single_pulse"] * 6
+    + ["predetermined"] * 2
+)
+assert len(MINI_BLOCK_COMPOSITION) == MINI_BLOCK_SIZE
 
 
 def timed_ms(fn, /, *args, **kwargs):
@@ -98,18 +114,19 @@ class Decider:
         self.pending_pre: Optional[np.ndarray] = None
         self.last_qc_failure_time: float = -np.inf
 
-        # Pre-compute per-trial types for each intervention block.
-        # Each block has 10 mini-blocks of 20 trials; within each mini-block
-        # 15 are periodic and 5 are predetermined (75/25 split).
-        self.intervention_trial_types: dict[str, list[str]] = {}
-        mini_block = ["periodic"] * 15 + ["predetermined"] * 5
+        # Pre-compute the per-trial condition schedule for each intervention
+        # block. Done once here (deterministic, seeded) so that querying a
+        # trial's condition later — including arming the next trial early — is a
+        # pure lookup with no effect on the RNG stream.
+        self.intervention_conditions: dict[str, list[str]] = {}
+        n_mini_blocks = INTERVENTION_BLOCK_TRIALS // MINI_BLOCK_SIZE
         for block in range(1, 5):
-            types: list[str] = []
-            for _ in range(10):
-                shuffled = mini_block.copy()
-                self.rng.shuffle(shuffled)
-                types.extend(shuffled)
-            self.intervention_trial_types[f"intervention_block_{block}"] = types
+            conditions: list[str] = []
+            for _ in range(n_mini_blocks):
+                mini_block = MINI_BLOCK_COMPOSITION.copy()
+                self.rng.shuffle(mini_block)
+                conditions.extend(mini_block)
+            self.intervention_conditions[f"intervention_block_{block}"] = conditions
 
         global_backrotation = np.load(GLOBAL_BACKROTATION_PATH)
         self.predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
@@ -146,31 +163,48 @@ class Decider:
     def is_evaluation_stage(stage_name: str) -> bool:
         return stage_name.startswith("evaluation_")
 
+    def condition_for_trial(self, stage_name: str, trial_in_stage: int) -> str:
+        """The intervention condition for a given trial. Pure lookup."""
+        return self.intervention_conditions[stage_name][trial_in_stage]
+
     # ==================================================================
-    # Predetermined trial timing
+    # Trial preparation (timing + stimulator arming)
     # ==================================================================
 
     def prepare_trial(self, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        """Schedule trigger upfront for predetermined stages; return None for periodic.
-        Also arms the TMS device for the upcoming trial's pulse mode."""
+        """Arm the stimulator for the upcoming trial and, for predetermined
+        trials, schedule the trigger upfront by returning its ITI.
+
+        Returns None for PRIME-guided (periodic) trials, whose trigger is
+        scheduled later by process_periodic.
+        """
+        # Baseline / evaluation: single pulses, low ITI, brain-state-independent.
         if stage_name == "baseline" or self.is_evaluation_stage(stage_name):
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
-            iti = self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)
-            return {"trigger_offset": iti}
+            return {"trigger_offset": self.rng.uniform(LOW_ITI_MIN, LOW_ITI_MAX)}
 
+        # Calibration: single pulses, high ITI, brain-state-independent.
         if stage_name == "calibration":
             self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
-            iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
-            return {"trigger_offset": iti}
+            return {"trigger_offset": self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)}
 
+        # Intervention: look up this trial's condition and set the matching pulse type.
         if self.is_intervention_stage(stage_name):
-            # TODO: interleave single-pulse and TBS once the trial-type split is finalised.
-            # For now all intervention trials use TBS triplets.
-            self.tms.set_tbs(AMPLITUDE_TBS)
-            if self.intervention_trial_types[stage_name][trial_in_stage] == "predetermined":
-                iti = self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)
-                return {"trigger_offset": iti}
-            return None
+            condition = self.condition_for_trial(stage_name, trial_in_stage)
+            if condition == "prime_triplet":
+                self.tms.set_tbs(AMPLITUDE_TBS)
+                return None
+
+            elif condition == "prime_single_pulse":
+                self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+                return None
+
+            elif condition == "predetermined":
+                self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+                return {"trigger_offset": self.rng.uniform(HIGH_ITI_MIN, HIGH_ITI_MAX)}
+
+            else:
+                raise ValueError(f"Unknown condition: {condition!r}")
 
         return None
 
@@ -197,6 +231,9 @@ class Decider:
             return None
 
         if not self.is_intervention_stage(stage_name):
+            return None
+
+        if self.condition_for_trial(stage_name, trial_in_stage) == "predetermined":
             return None
 
         pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, online=True)
@@ -238,16 +275,26 @@ class Decider:
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
             return None
-        
+
         if self.is_intervention_stage(stage_name):
+            # pending_pre is set only by process_periodic, so it is present for
+            # PRIME-guided (periodic) trials and None for predetermined trials.
             pre = self.pending_pre
             self.pending_pre = None
 
-            if pre is None:
-                raise ValueError("process_pulse called without a valid pre-stimulus buffer")
-
             success, label = self.analyze_tep(time_offsets, eeg_buffer)
-            if success:
+
+            # TODO (next step): implement the finetuning rule from the protocol.
+            # Finetune PRIME only on *valid single-pulse* trials — PRIME-triggered,
+            # predetermined, and forced singles — and never on triplets. One thing
+            # this needs that isn't here yet:
+            #   (1) Predetermined singles must also finetune, but they
+            #       have no `pre` because they skip process_periodic. We need to
+            #       compute/store a prediction for them at fire time.
+            # For now we keep the prior behaviour: finetune whenever a PRIME
+            # prediction is available (i.e. periodic trials only). This still
+            # (incorrectly) finetunes periodic triplets — fixed in the next step.
+            if success and pre is not None:
                 self.predictor.finetune(pre, label)
 
             if not success:
@@ -259,11 +306,15 @@ class Decider:
                 "trial_invalid": not success,
             }
 
+        return None
+
     # ==================================================================
     # TEP analysis
     # ==================================================================
 
-    def analyze_tep(self, time_offsets: np.ndarray, eeg_buffer: np.ndarray) -> bool:
+    def analyze_tep(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+    ) -> tuple[bool, Optional[float]]:
         post_buffer, post_time_offsets = crop_eeg_buffer(
             eeg_buffer,
             time_offsets,
