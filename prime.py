@@ -279,25 +279,25 @@ class Decider:
             return None
 
         if self.is_intervention_stage(stage_name):
+            condition = self.condition_for_trial(stage_name, trial_in_stage)
+
+            # Consume pending_pre for all PRIME-guided trials, including triplets
+            # and failed trials. It belongs only to the pulse that was just fired.
+            pending_pre = self.pending_pre
+            self.pending_pre = None
+
             success, label = self.analyze_tep(time_offsets, eeg_buffer)
 
             if not success:
                 print(f"Trial {trial_in_stage + 1} ({stage_name}) failed: post-stimulus processing failed")
-
-                # TODO: Should this just move onto the next trial?
                 return {"trial_invalid": True}
 
-            condition = self.condition_for_trial(stage_name, trial_in_stage)
+            assert label is not None
+
             if condition == "predetermined":
                 # Predetermined trials skip process_periodic, so their pre-stimulus
                 # window is extracted here from the pulse-aligned buffer.
-                pre_buffer, pre_time_offsets = crop_eeg_buffer(
-                    eeg_buffer,
-                    time_offsets,
-                    self.qc_tmin,
-                    self.qc_tmax,
-                )
-                pre = self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, online=True)
+                pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
 
                 if pre is None:
                     print(
@@ -308,14 +308,18 @@ class Decider:
 
                 self.predictor.finetune(pre, label)
 
-            if condition == "prime_single_pulse":
+            elif condition == "prime_single_pulse":
                 # pending_pre is set by process_periodic for PRIME-guided trials.
-                pre = self.pending_pre
-                self.pending_pre = None
+                if pending_pre is None:
+                    raise RuntimeError("PRIME-guided single pulse trial missing pre-stimulus window")
 
-                assert pre is not None, "PRIME-guided single pulse trial missing pre-stimulus window"
+                self.predictor.finetune(pending_pre, label)
 
-                self.predictor.finetune(pre, label)
+            elif condition == "prime_triplet":
+                pass
+
+            else:
+                raise ValueError(f"Unknown condition: {condition!r}")
 
             print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
 
@@ -326,6 +330,18 @@ class Decider:
     # ==================================================================
     # TEP analysis
     # ==================================================================
+
+    def preprocess_pre_from_pulse(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+    ) -> Optional[np.ndarray]:
+        """Extract and preprocess the pre-stimulus QC window from a pulse-aligned buffer."""
+        pre_buffer, pre_time_offsets = crop_eeg_buffer(
+            eeg_buffer,
+            time_offsets,
+            self.qc_tmin,
+            self.qc_tmax,
+        )
+        return self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, online=True)
 
     def analyze_tep(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
