@@ -316,58 +316,63 @@ class Decider:
             return None
 
         elif self.is_intervention_stage(stage_name):
-            condition = self.condition_for_trial(stage_name, trial_in_stage)
-
-            success, label = self.analyze_tep(time_offsets, eeg_buffer)
-
-            if not success:
-                print("Trial failed: post-stimulus processing failed")
-                return None
-
-            assert label is not None
-
-            if condition == "predetermined":
-                # Predetermined trials skip process_periodic, so their pre-stimulus
-                # window is extracted here from the pulse-aligned buffer.
-                pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
-
-                if pre is None:
-                    print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
-                    return None
-
-                self.predictor.finetune(pre, label)
-
-            elif condition == "prime_single_pulse":
-                # For non-forced PRIME singles, pre is the prediction window from process_periodic.
-                # For forced PRIME singles, pre is extracted from the pulse-aligned buffer.
-                if self.current_is_forced:
-                    pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
-                else:
-                    pre = self.current_pre
-
-                # If preprocessing fails (can only happen for forced trials), skip finetuning. 
-                if pre is None:
-                    print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
-                    return None
-
-                self.predictor.finetune(pre, label)
-
-            elif condition == "prime_triplet":
-                # Do not finetune on triplet trials.
-                pass
-
-            else:
-                raise ValueError(f"Unknown condition: {condition!r}")
-
-            print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
-
-            return None
+            return self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
 
         elif self.is_evaluation_stage(stage_name):
             return None
 
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")
+
+    def process_intervention_pulse(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
+            stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+        condition = self.condition_for_trial(stage_name, trial_in_stage)
+
+        success, label = self.analyze_tep(time_offsets, eeg_buffer)
+
+        if not success:
+            print("Trial failed: post-stimulus processing failed")
+            return None
+
+        assert label is not None
+
+        if condition == "predetermined":
+            # Predetermined trials skip process_periodic, so their pre-stimulus
+            # window is extracted here from the pulse-aligned buffer.
+            pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
+
+            if pre is None:
+                print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
+                return None
+
+            self.predictor.finetune(pre, label)
+
+        elif condition == "prime_single_pulse":
+            # For non-forced PRIME singles, pre is the prediction window from process_periodic.
+            # For forced PRIME singles, pre is extracted from the pulse-aligned buffer.
+            if self.current_is_forced:
+                pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
+            else:
+                pre = self.current_pre
+
+            # If preprocessing fails (can only happen for forced trials), skip finetuning.
+            if pre is None:
+                print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
+                return None
+
+            self.predictor.finetune(pre, label)
+
+        elif condition == "prime_triplet":
+            # Do not finetune on triplet trials.
+            pass
+
+        else:
+            raise ValueError(f"Unknown condition: {condition!r}")
+
+        print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
+
+        return None
 
     # ==================================================================
     # TEP analysis
