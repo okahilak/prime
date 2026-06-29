@@ -213,9 +213,11 @@ class Decider:
     # ==================================================================
 
     def process_task(self, task_name: str) -> None:
-        if task_name != "calibrate_prime":
-            raise ValueError(f"Unknown task: {task_name!r}")
-        self.run_calibration()
+        if task_name == "calibrate_prime":
+            self.run_calibration()
+            return
+
+        raise ValueError(f"Unknown task: {task_name!r}")
 
     # ==================================================================
     # Periodic processing (PRIME-guided intervention)
