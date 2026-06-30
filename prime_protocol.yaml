@@ -1,8 +1,7 @@
 name: "PRIME-TEP Validation"
 description: >
   PRIME high-excitability protocol: calibration (100 brain-state-independent trials),
-  application (4 × 200 trials, 75% PRIME / 25% brain-state-independent), and evaluation
-  (100 pulses at 0, 15, 30, 60 min post-intervention).
+  application (4 × 200 trials), and evaluation (100 pulses at 0, 15, 30, 60 min post-intervention).
 
 safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
@@ -12,7 +11,7 @@ stages:
   - stage:
       name: "baseline"
       trials: 100
-      notes: "Baseline TEP assessment: 100 single pulses, 110% RMT."
+      notes: "Baseline TEP assessment: 100 single pulses."
 
   # --- Calibration stage ---
   - stage:
@@ -37,7 +36,7 @@ stages:
   - stage:
       name: "intervention_block_1"
       trials: 200
-      notes: "Intervention block 1: 75% PRIME-guided, 25% brain-state-independent (randomized order, handled by decider)"
+      notes: "Intervention block 1"
 
   - rest:
       duration: 60.0
