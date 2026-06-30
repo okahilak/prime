@@ -7,6 +7,10 @@ safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
 
 runtime_parameters:
+  is_open_loop_session:
+    label: Open-loop session
+    type: bool
+
   single_pulse_intensity:
     label: Single pulse intensity
     type: float

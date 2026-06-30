@@ -78,9 +78,17 @@ SEED = 42
 MINI_BLOCK_COMPOSITION = (
     ["prime_triplet"] * 12
     + ["prime_single_pulse"] * 6
-    + ["predetermined"] * 2
+    + ["predetermined_single"] * 2
 )
 assert len(MINI_BLOCK_COMPOSITION) == MINI_BLOCK_SIZE
+
+# Open-loop session: 120 predetermined triplets + 80 predetermined singles per block
+# (12 + 8 per mini-block), no PRIME-guided triggering.
+OPEN_LOOP_MINI_BLOCK_COMPOSITION = (
+    ["predetermined_triplet"] * 12
+    + ["predetermined_single"] * 8
+)
+assert len(OPEN_LOOP_MINI_BLOCK_COMPOSITION) == MINI_BLOCK_SIZE
 
 
 def timed_ms(fn, /, *args, **kwargs):
@@ -99,6 +107,7 @@ class Decider:
 
         self.single_pulse_intensity = runtime_params["single_pulse_intensity"]
         self.tbs_intensity = runtime_params["tbs_intensity"]
+        self.is_open_loop_session = runtime_params["is_open_loop_session"]
 
         self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
 
@@ -129,11 +138,12 @@ class Decider:
         # trial's condition later — including arming the next trial early — is a
         # pure lookup with no effect on the RNG stream.
         self.intervention_conditions: dict[str, list[str]] = {}
+        composition = OPEN_LOOP_MINI_BLOCK_COMPOSITION if self.is_open_loop_session else MINI_BLOCK_COMPOSITION
         n_mini_blocks = INTERVENTION_BLOCK_TRIALS // MINI_BLOCK_SIZE
         for block in range(1, 5):
             conditions: list[str] = []
             for _ in range(n_mini_blocks):
-                mini_block = MINI_BLOCK_COMPOSITION.copy()
+                mini_block = composition.copy()
                 self.rng.shuffle(mini_block)
                 conditions.extend(mini_block)
             self.intervention_conditions[f"intervention_block_{block}"] = conditions
@@ -146,12 +156,12 @@ class Decider:
         self.normalizer = TEPNormalizer()
 
         # Create results directory and trials CSV file.
-        self.results_dir = Path("results") / str(subject_id) / "prime"
+        self.results_dir = Path("results") / str(subject_id) / ("open_loop" if self.is_open_loop_session else "prime")
         if self.results_dir.exists():
             raise FileExistsError(
                 f"Results directory already exists: {self.results_dir} — "
-                "experiment may have already been run for this subject. "
-                "Delete the directory or use a different subject ID."
+                "experiment may have already been run for this subject and session type. "
+                "Delete the directory or use a different subject ID or session type."
             )
         self.results_dir.mkdir(parents=True)
         self.trials_csv = self.results_dir / "trials.csv"
@@ -274,8 +284,14 @@ class Decider:
                 self.tms.set_single_pulse(self.single_pulse_intensity)
                 return None
 
-            elif condition == "predetermined":
+            elif condition == "predetermined_single":
                 self.tms.set_single_pulse(self.single_pulse_intensity)
+                self.current_trial["iti"] = iti
+                self.current_trial["target_time"] = start_time + iti
+                return {"trigger_offset": iti}
+
+            elif condition == "predetermined_triplet":
+                self.tms.set_tbs(self.tbs_intensity)
                 self.current_trial["iti"] = iti
                 self.current_trial["target_time"] = start_time + iti
                 return {"trigger_offset": iti}
@@ -397,17 +413,7 @@ class Decider:
 
         assert label is not None
 
-        if condition == "predetermined":
-            # Predetermined trials skip process_periodic, so their pre-stimulus
-            # window is extracted here from the pulse-aligned buffer.
-            pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
-
-            if pre is not None:
-                self.predictor.finetune(pre, label)
-            else:
-                print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
-
-        elif condition == "prime_single_pulse":
+        if condition == "prime_single_pulse":
             # For non-forced PRIME singles, pre is the prediction window from process_periodic.
             # For forced PRIME singles, pre is extracted from the pulse-aligned buffer.
             if self.current_is_forced:
@@ -423,6 +429,21 @@ class Decider:
 
         elif condition == "prime_triplet":
             # Do not finetune on triplet trials.
+            pass
+
+        # Only train on predetermined trials on a prime session (not open loop session)
+        elif condition == "predetermined_single":
+            # PRIME session: open-loop singles are valid single-pulse trials → finetune.
+            # Open-loop session: clean control → never finetune.
+            if not self.is_open_loop_session:
+                pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
+                if pre is not None:
+                    self.predictor.finetune(pre, label)
+                else:
+                    print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
+
+        elif condition == "predetermined_triplet":
+            # Open-loop triplets: no finetuning.
             pass
 
         else:
