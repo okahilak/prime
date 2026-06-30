@@ -57,10 +57,6 @@ GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotat
 PREDICTION_THRESHOLD = 0.5
 TRIGGER_OFFSET = 0.01
 
-# TODO: Change for each subject to match the protocol specifications.
-AMPLITUDE_SINGLE_PULSE = 50   # % MSI, used for baseline / calibration / evaluation / single-pulse intervention
-AMPLITUDE_TBS = 60            # % MSI, used for intervention triplets
-
 ITI_MIN = 2.5
 ITI_MAX = 5.5
 
@@ -94,17 +90,15 @@ def timed_ms(fn, /, *args, **kwargs):
 
 
 class Decider:
-    def __init__(
-        self,
-        subject_id: int,
-        num_eeg_channels: int,
-        num_emg_channels: int,
-        sampling_frequency: int,
-    ):
+    def __init__(self, subject_id: int, num_eeg_channels: int, num_emg_channels: int, sampling_frequency: int,
+                 runtime_params: dict[str, Any]):
         self.subject_id = subject_id
         self.num_eeg_channels = num_eeg_channels
         self.num_emg_channels = num_emg_channels
         self.sampling_frequency = sampling_frequency
+
+        self.single_pulse_intensity = runtime_params["single_pulse_intensity"]
+        self.tbs_intensity = runtime_params["tbs_intensity"]
 
         self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
 
@@ -245,14 +239,14 @@ class Decider:
 
         # Baseline: single pulses, predetermined.
         if stage_name == "baseline":
-            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.tms.set_single_pulse(self.single_pulse_intensity)
             self.current_trial["iti"] = iti
             self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}
 
         # Calibration: single pulses, predetermined.
         elif stage_name == "calibration":
-            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.tms.set_single_pulse(self.single_pulse_intensity)
             self.current_trial["iti"] = iti
             self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}
@@ -265,17 +259,17 @@ class Decider:
             if condition == "prime_triplet":
                 self.trial_max_time = start_time + iti
                 self.current_trial["max_time"] = self.trial_max_time
-                self.tms.set_tbs(AMPLITUDE_TBS)
+                self.tms.set_tbs(self.tbs_intensity)
                 return None
 
             elif condition == "prime_single_pulse":
                 self.trial_max_time = start_time + iti
                 self.current_trial["max_time"] = self.trial_max_time
-                self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+                self.tms.set_single_pulse(self.single_pulse_intensity)
                 return None
 
             elif condition == "predetermined":
-                self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+                self.tms.set_single_pulse(self.single_pulse_intensity)
                 self.current_trial["iti"] = iti
                 self.current_trial["target_time"] = start_time + iti
                 return {"trigger_offset": iti}
@@ -285,7 +279,7 @@ class Decider:
 
         # Evaluation: single pulses, predetermined.
         elif self.is_evaluation_stage(stage_name):
-            self.tms.set_single_pulse(AMPLITUDE_SINGLE_PULSE)
+            self.tms.set_single_pulse(self.single_pulse_intensity)
             self.current_trial["iti"] = iti
             self.current_trial["target_time"] = start_time + iti
             return {"trigger_offset": iti}

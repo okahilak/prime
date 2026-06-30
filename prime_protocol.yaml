@@ -6,6 +6,21 @@ description: >
 safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
 
+runtime_parameters:
+  single_pulse_intensity:
+    label: Single pulse intensity
+    type: float
+    unit: "% MSO"
+    min: 0
+    max: 100
+
+  tbs_intensity:
+    label: TBS intensity
+    type: float
+    unit: "% MSO"
+    min: 0
+    max: 100
+
 stages:
   # --- Baseline stage ---
   - stage:
