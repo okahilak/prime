@@ -238,10 +238,6 @@ class Decider:
         Returns None for PRIME-guided (periodic) trials, whose trigger is
         scheduled later by process_periodic.
         """
-        print("=" * 60)
-        print(f"  Next trial: stage={stage_name!r}  trial={trial_in_stage}")
-        print("=" * 60)
-
         self.current_is_forced = False
         self.current_pre = None
         self.prime_attempt_count = 0
@@ -388,6 +384,7 @@ class Decider:
         label = None
 
         if stage_name == "baseline":
+            print(f"Baseline trial {trial_in_stage + 1} finished")
             pass
 
         elif stage_name == "calibration":
@@ -399,8 +396,10 @@ class Decider:
             if label is not None:
                 condition = self.current_trial.get("condition", "unknown")
                 print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: condition={condition} label={label:.3f}")
+            print(f"Intervention trial {trial_in_stage + 1} finished")
 
         elif self.is_evaluation_stage(stage_name):
+            print(f"Evaluation trial {trial_in_stage + 1} finished")
             pass
 
         else:
