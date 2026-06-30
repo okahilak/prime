@@ -16,9 +16,8 @@ stages:
   # --- Calibration stage ---
   - stage:
       name: "calibration"
-      trials: 100
+      trials: 125
       notes: "Brain-state-independent calibration. Goal: 100 valid trials."
-      max_failures: 25
 
   # --- Calibration task ---
   - task:
