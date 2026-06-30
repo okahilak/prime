@@ -171,7 +171,9 @@ class Decider:
         self.csv_fields = [
             "stage", "trial_in_stage", "condition", "iti",
             "trial_start_time", "target_time", "max_time",
-            "prediction_probability", "trigger_time", "is_forced", "pulse_time", "label",
+            "trigger_time", "is_forced", "pulse_time",
+            "preprocessing_failed", "postprocessing_failed",
+            "prediction_probability", "label",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
@@ -254,6 +256,8 @@ class Decider:
             "is_forced": None,
             "pulse_time": None,
             "label": None,
+            "preprocessing_failed": False,
+            "postprocessing_failed": False,
         }
 
         # Baseline: single pulses, predetermined.
@@ -417,6 +421,7 @@ class Decider:
 
         if not success:
             print("Trial failed: post-stimulus processing failed")
+            self.current_trial["postprocessing_failed"] = True
             return None
 
         assert label is not None
@@ -434,6 +439,7 @@ class Decider:
                 self.predictor.finetune(pre, label)
             else:
                 print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
+                self.current_trial["preprocessing_failed"] = True
 
         elif condition == "prime_triplet":
             # Do not finetune on triplet trials.
@@ -449,6 +455,7 @@ class Decider:
                     self.predictor.finetune(pre, label)
                 else:
                     print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
+                    self.current_trial["preprocessing_failed"] = True
 
         elif condition == "predetermined_triplet":
             # Open-loop triplets: no finetuning.
