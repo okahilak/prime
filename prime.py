@@ -363,7 +363,8 @@ class Decider:
 
         elif self.is_intervention_stage(stage_name):
             label = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
-            print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
+            if label is not None:
+                print(f"Trial {trial_in_stage + 1} ({stage_name}) finished: label={label:.3f}")
 
         elif self.is_evaluation_stage(stage_name):
             pass
