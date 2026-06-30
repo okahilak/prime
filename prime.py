@@ -91,6 +91,9 @@ OPEN_LOOP_MINI_BLOCK_COMPOSITION = (
 assert len(OPEN_LOOP_MINI_BLOCK_COMPOSITION) == MINI_BLOCK_SIZE
 
 
+BUFFER_TOLERANCE = 0.0004
+
+
 def timed_ms(fn, /, *args, **kwargs):
     t0 = time.perf_counter()
     result = fn(*args, **kwargs)
@@ -186,8 +189,8 @@ class Decider:
     def get_configuration(self) -> dict[str, Any]:
         return {
             "periodic_processing_interval": 0.01,
-            "sample_window": [-self.qc_window_size, 0.0],
-            "pulse_sample_window": [self.calibration_tmin, self.calibration_tmax],
+            "sample_window": [-self.qc_window_size - BUFFER_TOLERANCE, 0.0],
+            "pulse_sample_window": [self.calibration_tmin - BUFFER_TOLERANCE, self.calibration_tmax + BUFFER_TOLERANCE],
             "warm_up_rounds": 0,
         }
 
