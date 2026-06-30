@@ -238,6 +238,10 @@ class Decider:
         Returns None for PRIME-guided (periodic) trials, whose trigger is
         scheduled later by process_periodic.
         """
+        print("=" * 60)
+        print(f"  Next trial: stage={stage_name!r}  trial={trial_in_stage}")
+        print("=" * 60)
+
         self.current_is_forced = False
         self.current_pre = None
         self.prime_attempt_count = 0
