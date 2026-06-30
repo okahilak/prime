@@ -373,6 +373,12 @@ def crop_eeg_buffer(
     start = time_to_sample(tmin, float(time_offsets[0]), sfreq)
     stop = start + epoch_n_times(tmin, tmax, sfreq)
     if start < 0 or stop > eeg_buffer.shape[0]:
+        print(
+            f"crop_eeg_buffer: cannot crop [{tmin}, {tmax}] from buffer "
+            f"(start={start}, stop={stop}, buffer_len={eeg_buffer.shape[0]})\n"
+            f"  time_offsets: first={time_offsets[0]:.6f}, last={time_offsets[-1]:.6f}, "
+            f"n={len(time_offsets)}, sfreq={sfreq}"
+        )
         raise ValueError(
             f"cannot crop [{tmin}, {tmax}] from buffer "
             f"(start={start}, stop={stop}, buffer_len={eeg_buffer.shape[0]})"
