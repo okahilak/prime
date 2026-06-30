@@ -146,8 +146,14 @@ class Decider:
         self.normalizer = TEPNormalizer()
 
         # Create results directory and trials CSV file.
-        self.results_dir = Path("results") / str(subject_id)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir = Path("results") / str(subject_id) / "prime"
+        if self.results_dir.exists():
+            raise FileExistsError(
+                f"Results directory already exists: {self.results_dir} — "
+                "experiment may have already been run for this subject. "
+                "Delete the directory or use a different subject ID."
+            )
+        self.results_dir.mkdir(parents=True)
         self.trials_csv = self.results_dir / "trials.csv"
         self.csv_fields = [
             "stage", "trial_in_stage", "condition", "iti",
