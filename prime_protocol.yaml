@@ -12,13 +12,13 @@ stages:
   - stage:
       name: "baseline"
       trials: 100
-      notes: "Baseline TEP assessment: 100 single pulses, 110% RMT, ITI 3 ± 0.5 s."
+      notes: "Baseline TEP assessment: 100 single pulses, 110% RMT."
 
   # --- Calibration stage ---
   - stage:
       name: "calibration"
       trials: 100
-      notes: "Brain-state-independent calibration (ITI 6.5 ± 2.5 s). Goal: 100 valid trials."
+      notes: "Brain-state-independent calibration. Goal: 100 valid trials."
       max_failures: 25
 
   # --- Calibration task ---
@@ -71,7 +71,7 @@ stages:
   - stage:
       name: "evaluation_0min"
       trials: 100
-      notes: "Post-intervention evaluation at 0 min (ITI 3 ± 0.5 s, 110% RMT)"
+      notes: "Post-intervention evaluation at 0 min"
 
   - rest:
       wait_until:
