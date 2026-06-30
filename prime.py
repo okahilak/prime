@@ -11,7 +11,7 @@ Implements protocols/prime.yaml (PRIME-TEP validation):
      Conditions are balanced within each 20-trial mini-block, so the predetermined
      singles (used to track TEP amplitude trends over time) stay evenly spread.
      process_periodic: rolling-window QC + prediction; schedule pulse when excitable.
-     process_pulse: post-stimulus preprocessing, dipole fit, label, finetune.
+     process_pulse: post-stimulus preprocessing, dipole fit, tep_amplitude, finetune.
   3. Evaluation stages (predetermined low-ITI):
      Timed brain-state-independent pulses only (no finetuning).
 
@@ -174,7 +174,7 @@ class Decider:
             "trial_start_time", "target_time", "max_time",
             "trigger_time", "is_forced", "pulse_time",
             "preprocessing_failed", "postprocessing_failed",
-            "prediction_probability", "prime_attempts", "label",
+            "prediction_probability", "prime_attempts", "tep_amplitude",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
@@ -258,7 +258,7 @@ class Decider:
             "trigger_time": None,
             "is_forced": None,
             "pulse_time": None,
-            "label": None,
+            "tep_amplitude": None,
             "preprocessing_failed": False,
             "postprocessing_failed": False,
         }
@@ -381,7 +381,7 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
 
-        label = None
+        tep_amplitude = None
 
         if stage_name == "baseline":
             print(f"Baseline trial {trial_in_stage + 1} finished")
@@ -392,12 +392,12 @@ class Decider:
             print(f"Calibration trial {trial_in_stage + 1} collected")
 
         elif self.is_intervention_stage(stage_name):
-            label = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
-            if label is not None:
+            tep_amplitude = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            if tep_amplitude is not None:
                 condition = self.current_trial.get("condition", "unknown")
-                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} label={label:.3f}")
+                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude={tep_amplitude:.3f}")
             else:
-                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} label=failed")
+                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude=failed")
 
         elif self.is_evaluation_stage(stage_name):
             print(f"Evaluation trial {trial_in_stage + 1} finished")
@@ -409,7 +409,7 @@ class Decider:
         self.current_trial.update({
             "pulse_time": reference_time,
             "is_forced": self.current_is_forced,
-            "label": label,
+            "tep_amplitude": tep_amplitude,
         })
         self.write_trial_row()
         self.save_raw_buffers(
@@ -423,14 +423,14 @@ class Decider:
             stage_name: str, trial_in_stage: int) -> Optional[float]:
         condition = self.condition_for_trial(stage_name, trial_in_stage)
 
-        success, label = self.analyze_tep(time_offsets, eeg_buffer)
+        success, tep_amplitude = self.analyze_tep(time_offsets, eeg_buffer)
 
         if not success:
             print("Trial failed: post-stimulus processing failed")
             self.current_trial["postprocessing_failed"] = True
             return None
 
-        assert label is not None
+        assert tep_amplitude is not None
 
         if condition == "prime_single_pulse":
             # For non-forced PRIME singles, pre is the prediction window from process_periodic.
@@ -442,7 +442,7 @@ class Decider:
 
             # If preprocessing fails (can only happen for forced trials), skip finetuning.
             if pre is not None:
-                self.predictor.finetune(pre, label)
+                self.predictor.finetune(pre, tep_amplitude)
             else:
                 print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
                 self.current_trial["preprocessing_failed"] = True
@@ -458,7 +458,7 @@ class Decider:
             if not self.is_open_loop_session:
                 pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
                 if pre is not None:
-                    self.predictor.finetune(pre, label)
+                    self.predictor.finetune(pre, tep_amplitude)
                 else:
                     print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
                     self.current_trial["preprocessing_failed"] = True
@@ -470,7 +470,7 @@ class Decider:
         else:
             raise ValueError(f"Unknown condition: {condition!r}")
 
-        return label
+        return tep_amplitude
 
     # ==================================================================
     # Trial logging
@@ -527,9 +527,9 @@ class Decider:
             return False, None
 
         amplitude = self.dipole_fitter.fit_trial(post)
-        label = self.normalizer.transform(amplitude)
+        tep_amplitude = self.normalizer.transform(amplitude)
 
-        return True, label
+        return True, tep_amplitude
 
     # ==================================================================
     # Calibration
@@ -542,8 +542,8 @@ class Decider:
 
         model_buffers, dipole_buffers = self.preprocessor.calibrate()
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
-        labels = self.normalizer.calibrate(amplitudes)
-        self.predictor.calibrate(model_buffers, labels)
+        tep_amplitudes = self.normalizer.calibrate(amplitudes)
+        self.predictor.calibrate(model_buffers, tep_amplitudes)
         self.predictor.warm_up()
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
