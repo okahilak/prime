@@ -106,8 +106,6 @@ class PRIME(nn.Module):
             out = self.conv_block1(dummy_input)
             s4_features = out.shape[1]
             s4_input_length = out.shape[2]
-            print(f"PRIME: Sequence length entering S4 is {s4_input_length}")
-            print(f"PRIME: Features entering S4 is {s4_features}")
 
         n_s4_blocks = 1 # Hyperparameter to tune 
         self.s4_core = nn.Sequential(
