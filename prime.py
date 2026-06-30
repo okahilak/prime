@@ -340,8 +340,6 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
-        print(f"Periodic, reference time: {reference_time}, first time offset: {time_offsets[0]}, last time offset: {time_offsets[-1]}, length: {len(time_offsets)}")
-
         self.current_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, from_pulse=False)
 
         self.qc_window_good.append(self.current_pre is not None)
@@ -382,8 +380,6 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-
-        print(f"Pulse, reference time: {reference_time}, first time offset: {time_offsets[0]}, last time offset: {time_offsets[-1]}, length: {len(time_offsets)}")
 
         label = None
 
