@@ -108,9 +108,10 @@ class Decider:
         self.num_emg_channels = num_emg_channels
         self.sampling_frequency = sampling_frequency
 
+        self.mock_tms_device = runtime_params.get("mock_tms_device")
+        self.is_open_loop_session = runtime_params["is_open_loop_session"]
         self.single_pulse_intensity = runtime_params["single_pulse_intensity"]
         self.tbs_intensity = runtime_params["tbs_intensity"]
-        self.is_open_loop_session = runtime_params["is_open_loop_session"]
 
         self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
 
@@ -122,7 +123,7 @@ class Decider:
 
         self.rng = np.random.default_rng(SEED + subject_id)
 
-        self.tms = MagVentureTMS()
+        self.tms = MagVentureTMS() if not self.mock_tms_device else MockTMSDevice()
 
         self.is_calibrated = False
         self.current_pre: Optional[np.ndarray] = None
