@@ -37,7 +37,7 @@ from util.magventure_tms_mock import MockTMS
 ITI_MIN = 2.5
 ITI_MAX = 5.5
 
-SEED = 42
+SEED = 101
 
 BUFFER_TOLERANCE = 0.005
 
@@ -104,7 +104,6 @@ class Decider:
 
     def get_configuration(self) -> dict[str, Any]:
         return {
-            "periodic_processing_interval": 0.01,
             "sample_window": [-self.qc_window_size - BUFFER_TOLERANCE, 0.0],
             "pulse_sample_window": [self.calibration_tmin - BUFFER_TOLERANCE, self.calibration_tmax + BUFFER_TOLERANCE],
             "warm_up_rounds": 0,
@@ -133,17 +132,6 @@ class Decider:
 
         self.tms.set_single_pulse(self.single_pulse_intensity)
         return {"trigger_offset": iti}
-
-    # ==================================================================
-    # Periodic processing (unused: evaluation triggers are all predetermined)
-    # ==================================================================
-
-    def process_periodic(
-            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
-            eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
-            is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
-            is_warm_up: bool) -> dict[str, Any] | None:
-        return None
 
     # ==================================================================
     # Pulse processing
