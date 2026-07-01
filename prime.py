@@ -395,8 +395,8 @@ class Decider:
 
         elif self.is_intervention_stage(stage_name):
             tep_amplitude = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            condition = self.current_trial.get("condition", "unknown")
             if tep_amplitude is not None:
-                condition = self.current_trial.get("condition", "unknown")
                 print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude={tep_amplitude:.3f}")
             else:
                 print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude=failed")
