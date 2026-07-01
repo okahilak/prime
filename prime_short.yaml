@@ -29,6 +29,10 @@ runtime_parameters:
     label: Mock TMS device
     type: bool
 
+  overwrite_existing_results:
+    label: Overwrite existing results
+    type: bool
+
 stages:
   # --- Baseline stage ---
   - stage:

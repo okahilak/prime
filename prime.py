@@ -113,6 +113,7 @@ class Decider:
         self.is_open_loop_session = runtime_params["is_open_loop_session"]
         self.single_pulse_intensity = runtime_params["single_pulse_intensity"]
         self.tbs_intensity = runtime_params["tbs_intensity"]
+        self.overwrite_existing_results = runtime_params.get("overwrite_existing_results", False)
 
         self.calibration_tmin, self.calibration_tmax = get_calibration_time_range()
 
@@ -164,13 +165,13 @@ class Decider:
 
         # Create results directory and trials CSV file.
         self.results_dir = Path("results") / str(subject_id) / ("open_loop" if self.is_open_loop_session else "prime")
-        if self.results_dir.exists():
+        if self.results_dir.exists() and not self.overwrite_existing_results:
             raise FileExistsError(
                 f"Results directory already exists: {self.results_dir} — "
                 "experiment may have already been run for this subject and session type. "
                 "Delete the directory or use a different subject ID or session type."
             )
-        self.results_dir.mkdir(parents=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         self.trials_csv = self.results_dir / "trials.csv"
         self.csv_fields = [
             "stage", "trial_in_stage", "condition", "iti",
