@@ -39,6 +39,7 @@ from prime_core.prime_config import (
 )
 from prime_core.tep_normalizer import TEPNormalizer
 from util.magventure_tms import MagVentureTMS
+from util.mock_tms_device import MockTMSDevice
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup
