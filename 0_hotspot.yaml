@@ -6,5 +6,5 @@ safety:
 
 stages:
   - stage:
-      name: "hotspot search"
+      name: "hotspot"
       trials: 500
