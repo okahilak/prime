@@ -1,6 +1,6 @@
-"""PRIME decider module for NeuroSimo.
+"""PRIME intervention decider for NeuroSimo.
 
-Implements protocols/prime.yaml (PRIME-TEP validation):
+Implements protocols/prime_intervention.yaml (PRIME-TEP calibration + application):
 
   1. Calibration stage (100 predetermined high-ITI trials):
      Accumulate trials via process_pulse, then batch-calibrate in calibrate_prime task.
@@ -12,8 +12,10 @@ Implements protocols/prime.yaml (PRIME-TEP validation):
      singles (used to track TEP amplitude trends over time) stay evenly spread.
      process_periodic: rolling-window QC + prediction; schedule pulse when excitable.
      process_pulse: post-stimulus preprocessing, dipole fit, tep_amplitude, finetune.
-  3. Evaluation stages (predetermined low-ITI):
-     Timed brain-state-independent pulses only (no finetuning).
+
+Calibration and intervention run in a single session so the calibrated (and then
+finetuned) PRIME model persists in memory across both. Baseline and evaluation
+are separate protocols/deciders.
 
 Requires:
   - A pretrained PRIME model checkpoint (.pt)
@@ -165,14 +167,14 @@ class Decider:
 
         # Create results directory and trials CSV file.
         self.results_dir = Path("results") / str(subject_id) / ("open_loop" if self.is_open_loop_session else "prime")
-        if self.results_dir.exists() and not self.overwrite_existing_results:
-            raise FileExistsError(
-                f"Results directory already exists: {self.results_dir} — "
-                "experiment may have already been run for this subject and session type. "
-                "Delete the directory or use a different subject ID or session type."
-            )
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        self.trials_csv = self.results_dir / "trials.csv"
+        self.trials_csv = self.results_dir / "trials_intervention.csv"
+        if self.trials_csv.exists() and not self.overwrite_existing_results:
+            raise FileExistsError(
+                f"Intervention results already exist: {self.trials_csv} — "
+                "the intervention may have already been run for this subject and session type. "
+                "Delete the file or enable overwriting."
+            )
         self.csv_fields = [
             "stage", "trial_in_stage", "condition", "iti",
             "trial_start_time", "target_time", "max_time",
@@ -185,7 +187,7 @@ class Decider:
         self.current_trial: dict = {}
 
         print(
-            f"PRIME decider ready  subject={subject_id}  fs={sampling_frequency}  "
+            f"PRIME intervention decider ready  subject={subject_id}  fs={sampling_frequency}  "
             f"eeg={num_eeg_channels}  emg={num_emg_channels}"
         )
 
@@ -207,10 +209,6 @@ class Decider:
     @staticmethod
     def is_intervention_stage(stage_name: str) -> bool:
         return stage_name.startswith("intervention_block_")
-
-    @staticmethod
-    def is_evaluation_stage(stage_name: str) -> bool:
-        return stage_name.startswith("evaluation_")
 
     def condition_for_trial(self, stage_name: str, trial_in_stage: int) -> str:
         """The intervention condition for a given trial. Pure lookup."""
@@ -269,15 +267,8 @@ class Decider:
             "postprocessing_failed": False,
         }
 
-        # Baseline: single pulses, predetermined.
-        if stage_name == "baseline":
-            self.tms.set_single_pulse(self.single_pulse_intensity)
-            self.current_trial["iti"] = iti
-            self.current_trial["target_time"] = start_time + iti
-            return {"trigger_offset": iti}
-
         # Calibration: single pulses, predetermined.
-        elif stage_name == "calibration":
+        if stage_name == "calibration":
             self.tms.set_single_pulse(self.single_pulse_intensity)
             self.current_trial["iti"] = iti
             self.current_trial["target_time"] = start_time + iti
@@ -314,13 +305,6 @@ class Decider:
 
             else:
                 raise ValueError(f"Unknown condition: {condition!r}")
-
-        # Evaluation: single pulses, predetermined.
-        elif self.is_evaluation_stage(stage_name):
-            self.tms.set_single_pulse(self.single_pulse_intensity)
-            self.current_trial["iti"] = iti
-            self.current_trial["target_time"] = start_time + iti
-            return {"trigger_offset": iti}
 
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")
@@ -392,11 +376,7 @@ class Decider:
 
         tep_amplitude = None
 
-        if stage_name == "baseline":
-            print(f"Baseline trial {trial_in_stage + 1} finished")
-            pass
-
-        elif stage_name == "calibration":
+        if stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
 
@@ -407,10 +387,6 @@ class Decider:
                 print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude={tep_amplitude:.3f}")
             else:
                 print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude=failed")
-
-        elif self.is_evaluation_stage(stage_name):
-            print(f"Evaluation trial {trial_in_stage + 1} finished")
-            pass
 
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")

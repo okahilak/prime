@@ -1,7 +1,7 @@
-name: "PRIME-TEP Validation"
+name: "PRIME-TEP Intervention"
 description: >
-  PRIME high-excitability protocol: calibration (100 brain-state-independent trials),
-  application (4 × 200 trials), and evaluation (100 pulses at 0, 15, 30, 60 min post-intervention).
+  PRIME high-excitability protocol: calibration (100 brain-state-independent
+  trials) and application (4 × 200 trials).
 
 safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
@@ -29,13 +29,11 @@ runtime_parameters:
     label: Mock TMS device
     type: bool
 
-stages:
-  # --- Baseline stage ---
-  - stage:
-      name: "baseline"
-      trials: 100
-      notes: "Baseline TEP assessment: 100 single pulses."
+  overwrite_existing_results:
+    label: Overwrite existing results
+    type: bool
 
+stages:
   # --- Calibration stage ---
   - stage:
       name: "calibration"
@@ -83,46 +81,3 @@ stages:
       name: "intervention_block_4"
       trials: 200
       notes: "Intervention block 4"
-
-  - rest:
-      duration: 10.0
-      notes: "Short break before evaluation"
-
-  # --- Evaluation stage (0, 15, 30, 60 min post-intervention) ---
-  - stage:
-      name: "evaluation_0min"
-      trials: 100
-      notes: "Post-intervention evaluation at 0 min"
-
-  - rest:
-      wait_until:
-        anchor: "evaluation_0min"
-        offset: 900.0
-      notes: "Wait until 15 min after first evaluation started"
-
-  - stage:
-      name: "evaluation_15min"
-      trials: 100
-      notes: "Post-intervention evaluation at 15 min"
-
-  - rest:
-      wait_until:
-        anchor: "evaluation_0min"
-        offset: 1800.0
-      notes: "Wait until 30 min after first evaluation started"
-
-  - stage:
-      name: "evaluation_30min"
-      trials: 100
-      notes: "Post-intervention evaluation at 30 min"
-
-  - rest:
-      wait_until:
-        anchor: "evaluation_0min"
-        offset: 3600.0
-      notes: "Wait until 60 min after first evaluation started"
-
-  - stage:
-      name: "evaluation_60min"
-      trials: 100
-      notes: "Post-intervention evaluation at 60 min"

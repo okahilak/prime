@@ -1,0 +1,40 @@
+name: "PRIME-TEP Baseline"
+description: >
+  PRIME baseline TEP assessment: 100 single pulses (predetermined ITI).
+
+safety:
+  minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
+
+runtime_parameters:
+  is_open_loop_session:
+    label: Open-loop session
+    type: bool
+
+  single_pulse_intensity:
+    label: Single pulse intensity
+    type: float
+    unit: "% MSO"
+    min: 0
+    max: 100
+
+  tbs_intensity:
+    label: TBS intensity
+    type: float
+    unit: "% MSO"
+    min: 0
+    max: 100
+
+  mock_tms_device:
+    label: Mock TMS device
+    type: bool
+
+  overwrite_existing_results:
+    label: Overwrite existing results
+    type: bool
+
+stages:
+  # --- Baseline stage ---
+  - stage:
+      name: "baseline"
+      trials: 100
+      notes: "Baseline TEP assessment: 100 single pulses."
