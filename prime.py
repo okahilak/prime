@@ -130,6 +130,7 @@ class Decider:
         self.current_pre: Optional[np.ndarray] = None
         self.current_is_forced = False
         self.prime_attempt_count = 0
+        self.qc_fail_count = 0
 
         self.trial_max_time = None
 
@@ -176,7 +177,7 @@ class Decider:
             "trial_start_time", "target_time", "max_time",
             "trigger_time", "is_forced", "pulse_time",
             "preprocessing_failed", "postprocessing_failed",
-            "prediction_probability", "prime_attempts", "tep_amplitude",
+            "prediction_probability", "prime_attempts", "qc_failures", "tep_amplitude",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
@@ -243,6 +244,7 @@ class Decider:
         self.current_is_forced = False
         self.current_pre = None
         self.prime_attempt_count = 0
+        self.qc_fail_count = 0
         self.trial_max_time = None
 
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
@@ -257,6 +259,7 @@ class Decider:
             "max_time": None,
             "prediction_probability": None,
             "prime_attempts": None,
+            "qc_failures": None,
             "trigger_time": None,
             "is_forced": None,
             "pulse_time": None,
@@ -350,12 +353,14 @@ class Decider:
             print(f"Prime trial max time exceeded, triggering a pulse (prime_attempts={self.prime_attempt_count})")
             self.current_is_forced = True
             self.current_trial["prime_attempts"] = self.prime_attempt_count
+            self.current_trial["qc_failures"] = self.qc_fail_count
 
             return {"trigger_offset": TRIGGER_OFFSET}
 
         qc_passes = self.check_qc()
         if not qc_passes:
-            print(f"Quality control check rejected")
+            self.qc_fail_count += 1
+            print(f"Quality control check rejected (qc_failures={self.qc_fail_count})")
             return None
 
         # QC passed, so the most recent window is good and pre is available.
@@ -369,6 +374,7 @@ class Decider:
 
         self.current_trial["prediction_probability"] = probability
         self.current_trial["prime_attempts"] = self.prime_attempt_count
+        self.current_trial["qc_failures"] = self.qc_fail_count
         self.current_trial["trigger_time"] = reference_time
         self.current_trial["target_time"] = reference_time + TRIGGER_OFFSET
 
