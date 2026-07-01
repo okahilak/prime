@@ -41,3 +41,10 @@ class Decider:
         return {
             'trigger_offset': 3.0,
         }
+
+    def process_periodic(
+            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
+            eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
+            is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
+            is_warm_up: bool) -> dict[str, Any] | None:
+        pass
