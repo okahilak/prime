@@ -240,6 +240,9 @@ class Decider:
         Returns None for PRIME-guided (periodic) trials, whose trigger is
         scheduled later by process_periodic.
         """
+        if stage_name != "calibration" and not self.is_intervention_stage(stage_name):
+            raise ValueError("Incorrect protocol, must be 2_intervention.yaml for intervention")
+
         self.current_is_forced = False
         self.current_pre = None
         self.prime_attempt_count = 0

@@ -33,39 +33,11 @@ class Decider:
 
     def prepare_trial(self, start_time: float, stage_name: str, trial_in_stage: int):
         """Called once at the beginning of a new trial."""
+        if stage_name != "hotspot":
+            raise ValueError("Incorrect protocol, must be 0_hotspot.yaml for hotspot search")
+
         print(f"Preparing trial {trial_in_stage} in '{stage_name}'")
 
         return {
             'trigger_offset': 3.0,
         }
-
-    def process_periodic(
-            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
-            eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
-            is_coil_at_target: bool, stage_name: str, trial_in_stage: int, is_warm_up: bool) -> dict[str, Any] | None:
-        """Process EEG/EMG buffer periodically."""
-
-        # Trigger TMS device after 5ms delay relative to reference sample time
-        trigger_offset = 0.005
-
-        print(f"Creating trigger for +{trigger_offset * 1000:.1f} ms")
-
-        return {
-            'trigger_offset': trigger_offset,
-        }
-
-    def process_event(
-            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
-            eeg_buffer: np.ndarray, emg_buffer: np.ndarray, is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        """Process event."""
-        print(f"Event received at time {reference_time}.")
-        # This example doesn't process events, just log them
-        return None
-
-    def process_pulse(
-            self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
-            eeg_buffer: np.ndarray, emg_buffer: np.ndarray, is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        """Process pulse event."""
-        print(f"Pulse event received at time {reference_time}.")
-        # Add your pulse event handling logic here
-        return None

@@ -105,7 +105,7 @@ class Decider:
     def prepare_trial(self, start_time: float, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         """Arm the stimulator and schedule the predetermined trigger."""
         if stage_name != "baseline":
-            raise ValueError(f"Unknown stage: {stage_name!r}")
+            raise ValueError("Incorrect protocol, must be 1_baseline.yaml for baseline")
 
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
 
@@ -129,8 +129,6 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
-        if stage_name != "baseline":
-            raise ValueError(f"Unknown stage: {stage_name!r}")
 
         print(f"Baseline trial {trial_in_stage + 1} finished")
 
