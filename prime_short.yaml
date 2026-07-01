@@ -33,13 +33,13 @@ stages:
   # --- Baseline stage ---
   - stage:
       name: "baseline"
-      trials: 5
+      trials: 1
       notes: "Baseline TEP assessment: 100 single pulses."
 
   # --- Calibration stage ---
   - stage:
       name: "calibration"
-      trials: 10
+      trials: 3
       notes: "Brain-state-independent calibration. Goal: 100 valid trials."
 
   # --- Calibration task ---
@@ -51,41 +51,41 @@ stages:
   - rest:
       wait_until:
         anchor: "calibrate_prime"
-        offset: 15.0
+        offset: 5.0
       notes: "Wait 60s after the beginning of the calibration task"
 
   # --- Intervention stage (4 blocks × 200 trials) ---
   - stage:
       name: "intervention_block_1"
-      trials: 10
+      trials: 20
       notes: "Intervention block 1"
 
   - rest:
-      duration: 10.0
+      duration: 5.0
 
   - stage:
       name: "intervention_block_2"
-      trials: 10
+      trials: 20
       notes: "Intervention block 2"
 
   - rest:
-      duration: 10.0
+      duration: 5.0
 
   - stage:
       name: "intervention_block_3"
-      trials: 10
+      trials: 20
       notes: "Intervention block 3"
 
   - rest:
-      duration: 10.0
+      duration: 5.0
 
   - stage:
       name: "intervention_block_4"
-      trials: 10
+      trials: 20
       notes: "Intervention block 4"
 
   - rest:
-      duration: 10.0
+      duration: 5.0
       notes: "Short break before evaluation"
 
   # --- Evaluation stage (0, 15, 30, 60 min post-intervention) ---
