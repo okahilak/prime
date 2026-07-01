@@ -49,8 +49,8 @@ stages:
   - rest:
       wait_until:
         anchor: "calibrate_prime"
-        offset: 60.0
-      notes: "Wait 60s after the beginning of the calibration task"
+        offset: 10.0
+      notes: "Wait 10s after the beginning of the calibration task"
 
   # --- Intervention stage (4 blocks × 200 trials) ---
   - stage:
