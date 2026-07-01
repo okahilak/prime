@@ -7,10 +7,6 @@ safety:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
 
 runtime_parameters:
-  mock_tms_device:
-    label: Mock TMS device
-    type: bool
-
   is_open_loop_session:
     label: Open-loop session
     type: bool
@@ -28,6 +24,10 @@ runtime_parameters:
     unit: "% MSO"
     min: 0
     max: 100
+
+  mock_tms_device:
+    label: Mock TMS device
+    type: bool
 
 stages:
   # --- Baseline stage ---
