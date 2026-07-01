@@ -1,3 +1,3 @@
 #!/bin/bash
-cp prime_protocol* ../protocols
+cp prime*.yaml ../protocols
 echo "Done."
