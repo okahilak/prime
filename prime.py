@@ -39,7 +39,7 @@ from prime_core.prime_config import (
 )
 from prime_core.tep_normalizer import TEPNormalizer
 from util.magventure_tms import MagVentureTMS
-from util.mock_tms_device import MockTMSDevice
+from util.magventure_tms_mock import MockTMS
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup
@@ -124,7 +124,7 @@ class Decider:
 
         self.rng = np.random.default_rng(SEED + subject_id)
 
-        self.tms = MagVentureTMS() if not self.mock_tms_device else MockTMSDevice()
+        self.tms = MagVentureTMS() if not self.mock_tms_device else MockTMS()
 
         self.is_calibrated = False
         self.current_pre: Optional[np.ndarray] = None
