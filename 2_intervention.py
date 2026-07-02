@@ -523,7 +523,7 @@ class Decider:
     # Calibration
     # ==================================================================
 
-    def run_calibration(self) -> None:
+    def run_calibration(self) -> int:
         print("Running calibration...")
 
         t0 = time.perf_counter()
@@ -534,5 +534,21 @@ class Decider:
         self.predictor.calibrate(model_buffers, tep_amplitudes)
         self.predictor.warm_up()
 
+        # Number of calibration trials that survived preprocessing and were
+        # actually used to fit the PRIME model.
+        num_calibration_trials = int(model_buffers.shape[0])
+
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
+        print(f"Calibration used {num_calibration_trials} trials")
+        self.write_calibration_summary(num_calibration_trials)
+
         self.is_calibrated = True
+        return num_calibration_trials
+
+    def write_calibration_summary(self, num_calibration_trials: int) -> None:
+        """Record the number of trials used for calibration, separate from the trials CSV."""
+        summary_path = self.results_dir / "calibration_summary.csv"
+        with open(summary_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["num_calibration_trials"])
+            writer.writeheader()
+            writer.writerow({"num_calibration_trials": num_calibration_trials})
