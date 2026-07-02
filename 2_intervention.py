@@ -77,6 +77,10 @@ QC_MIN_GOOD_FRACTION = 0.80
 
 SEED = 201
 
+# Wall-clock latencies (ms) collected per call and flushed to profile_*.csv once
+# at teardown, so the hot path (process_periodic) never touches the filesystem.
+PROFILE_METRICS = ("predict", "check_qc", "finetune", "process_pulse")
+
 
 MINI_BLOCK_COMPOSITION = (
     ["prime_triplet"] * 12
@@ -185,6 +189,8 @@ class Decider:
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
         self.current_trial: dict = {}
+
+        self.profile_samples: dict[str, list[float]] = {name: [] for name in PROFILE_METRICS}
 
         print(
             f"PRIME intervention decider ready  subject={subject_id}  fs={sampling_frequency}  "
@@ -345,7 +351,8 @@ class Decider:
 
             return {"trigger_offset": TRIGGER_OFFSET}
 
-        qc_passes = self.check_qc()
+        qc_passes, qc_ms = timed_ms(self.check_qc)
+        self.record_profile("check_qc", qc_ms)
         if not qc_passes:
             self.qc_fail_count += 1
             print(f"Quality control check rejected (qc_failures={self.qc_fail_count})")
@@ -354,6 +361,7 @@ class Decider:
         # QC passed, so the most recent window is good and pre is available.
         self.prime_attempt_count += 1
         probability, predict_ms = timed_ms(self.predictor.predict, self.current_pre)
+        self.record_profile("predict", predict_ms)
         print(f"Prime prediction={probability:.3f}, prediction_time={predict_ms:.1f}ms, attempt={self.prime_attempt_count}")
         if probability < PREDICTION_THRESHOLD:
             return None
@@ -376,6 +384,7 @@ class Decider:
             self, reference_time: float, reference_index: int, time_offsets: np.ndarray,
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
+        t0 = time.perf_counter()
 
         tep_amplitude = None
 
@@ -406,6 +415,8 @@ class Decider:
             self.extract_raw_post_from_pulse(time_offsets, eeg_buffer),
         )
 
+        self.record_profile("process_pulse", (time.perf_counter() - t0) * 1000)
+
     def process_intervention_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
             stage_name: str, trial_in_stage: int) -> Optional[float]:
@@ -430,7 +441,8 @@ class Decider:
 
             # If preprocessing fails (can only happen for forced trials), skip finetuning.
             if pre is not None:
-                self.predictor.finetune(pre, tep_amplitude)
+                _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep_amplitude)
+                self.record_profile("finetune", finetune_ms)
             else:
                 print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
                 self.current_trial["preprocessing_failed"] = True
@@ -446,7 +458,8 @@ class Decider:
             if not self.is_open_loop_session:
                 pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
                 if pre is not None:
-                    self.predictor.finetune(pre, tep_amplitude)
+                    _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep_amplitude)
+                    self.record_profile("finetune", finetune_ms)
                 else:
                     print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
                     self.current_trial["preprocessing_failed"] = True
@@ -468,6 +481,29 @@ class Decider:
         row = {field: self.current_trial.get(field) for field in self.csv_fields}
         with open(self.trials_csv, "a", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writerow(row)
+
+    # ==================================================================
+    # Profiling
+    # ==================================================================
+
+    def record_profile(self, name: str, elapsed_ms: float) -> None:
+        """Buffer a single latency sample (ms) in memory. Cheap: no I/O, safe on
+        the hot path. Flushed to disk once by write_profile at teardown."""
+        self.profile_samples[name].append(elapsed_ms)
+
+    def write_profile(self) -> None:
+        """Write each metric's collected latencies to results/.../profile_<name>.csv,
+        one sample per line under a `duration_ms` header."""
+        for name, samples in self.profile_samples.items():
+            path = self.results_dir / f"profile_{name}.csv"
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["duration_ms"])
+                for elapsed_ms in samples:
+                    writer.writerow([f"{elapsed_ms:.3f}"])
+
+    def __del__(self) -> None:
+        self.write_profile()
 
     # ==================================================================
     # TEP analysis
