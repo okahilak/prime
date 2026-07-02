@@ -139,6 +139,12 @@ class Decider:
         self.prime_attempt_count = 0
         self.qc_fail_count = 0
 
+        # Track the current QC rejection streak so we only log when the state
+        # flips (start of rejecting / back to accepting) instead of every window.
+        self.qc_rejecting = False
+        self.qc_reject_start_time: float | None = None
+        self.qc_reject_streak_count = 0
+
         self.trial_max_time = None
 
         # Rolling good/bad result of the most recent pre-stimulus QC windows.
@@ -257,6 +263,9 @@ class Decider:
         self.current_pre = None
         self.prime_attempt_count = 0
         self.qc_fail_count = 0
+        self.qc_rejecting = False
+        self.qc_reject_start_time = None
+        self.qc_reject_streak_count = 0
         self.trial_max_time = None
 
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
@@ -359,8 +368,23 @@ class Decider:
         self.record_profile("check_qc", qc_ms)
         if not qc_passes:
             self.qc_fail_count += 1
-            print(f"Quality control check rejected (qc_failures={self.qc_fail_count})")
+            if not self.qc_rejecting:
+                self.qc_rejecting = True
+                self.qc_reject_start_time = reference_time
+                self.qc_reject_streak_count = 0
+                print("Quality control check started rejecting")
+            self.qc_reject_streak_count += 1
             return None
+
+        # QC passed. If we were in a rejection streak, report how long it lasted
+        # and how many windows failed.
+        if self.qc_rejecting:
+            duration = reference_time - self.qc_reject_start_time
+            print(
+                f"Quality control check accepting again after {duration:.3f}s "
+                f"and {self.qc_reject_streak_count} failure(s)"
+            )
+            self.qc_rejecting = False
 
         # QC passed, so the most recent window is good and pre is available.
         self.prime_attempt_count += 1
