@@ -4,8 +4,9 @@ description: >
   The operator starts this protocol manually at each post-intervention time
   point (0, 15, 30, 60 min). Each run writes to its own trials CSV.
 
-safety:
+execution:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
+  repeat_failed_trials: true    # if true, a failed trial is repeated; if false, move on to the next trial
 
 runtime_parameters:
   is_open_loop_session:

@@ -2,8 +2,9 @@ name: "PRIME-TEP Baseline"
 description: >
   PRIME baseline TEP assessment: 100 single pulses (predetermined ITI).
 
-safety:
+execution:
   minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
+  repeat_failed_trials: true    # if true, a failed trial is repeated; if false, move on to the next trial
 
 runtime_parameters:
   is_open_loop_session:
