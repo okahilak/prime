@@ -173,6 +173,10 @@ class Decider:
         self.results_dir = Path("results") / str(subject_id) / ("open_loop" if self.is_open_loop_session else "prime")
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.trials_csv = self.results_dir / "trials_intervention.csv"
+
+        # Count of intervention trials completed since calibration; used to name
+        # the per-trial classifier checkpoints (classifier_after_trial_<i>.pt).
+        self.post_calibration_trial_count = 0
         if self.trials_csv.exists() and not self.overwrite_existing_results:
             raise FileExistsError(
                 f"Intervention results already exist: {self.trials_csv} — "
@@ -409,6 +413,11 @@ class Decider:
             "tep_amplitude": tep_amplitude,
         })
         self.write_trial_row()
+        if self.is_intervention_stage(stage_name):
+            self.post_calibration_trial_count += 1
+            self.save_classifier_checkpoint(
+                f"classifier_after_trial_{self.post_calibration_trial_count}.pt"
+            )
         self.save_raw_buffers(
             stage_name, trial_in_stage,
             self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)[0],
@@ -476,6 +485,17 @@ class Decider:
     # ==================================================================
     # Trial logging
     # ==================================================================
+
+    def save_classifier_checkpoint(self, name: str) -> None:
+        """Persist the (finetuned) classifier weights under ``name``, unless
+        running open loop.
+
+        In an open-loop session the model is never calibrated or finetuned, so
+        there is nothing worth checkpointing.
+        """
+        if self.is_open_loop_session:
+            return
+        self.predictor.save_checkpoint(self.results_dir / name)
 
     def write_trial_row(self) -> None:
         row = {field: self.current_trial.get(field) for field in self.csv_fields}
@@ -579,6 +599,7 @@ class Decider:
         self.write_calibration_summary(num_calibration_trials)
 
         self.is_calibrated = True
+        self.save_classifier_checkpoint("classifier_after_calibration.pt")
         return num_calibration_trials
 
     def write_calibration_summary(self, num_calibration_trials: int) -> None:

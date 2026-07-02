@@ -186,6 +186,17 @@ class OnlinePredictor:
         for _ in range(n_calls):
             self.predict(dummy)
 
+    def save_checkpoint(self, path: Union[str, Path]) -> None:
+        """Persist the current model weights so they can be reloaded via model_path.
+
+        Saves in the same format expected by __init__ (a ``model_state_dict`` of
+        the wrapped model), so a checkpoint written here can be loaded back into a
+        fresh OnlinePredictor.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"model_state_dict": self.model.wrapped_model.state_dict()}, path)
+
     def predict(self, epoch_pre: np.ndarray) -> float:
         """
         Predict the probability for a single trial without side effects.
