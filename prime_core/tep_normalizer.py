@@ -88,3 +88,25 @@ class TEPNormalizer:
         detrended = values.iloc[-1] - ewma_trend.iloc[-1]
         normalized = (detrended - self._cal_mean) / self._cal_std
         return float(self._cdf_function(normalized))
+
+    def transform_verbose(self, amplitude: float) -> dict:
+        """Same arithmetic and same state mutation as transform(),
+        but returns every intermediate instead of only the final label."""
+        if not self.is_calibrated:
+            raise RuntimeError("Not calibrated yet. Call .calibrate() first.")
+
+        self._amplitudes.append(float(amplitude))
+        values = pd.Series(self._amplitudes) * self.scale_factor
+
+        ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
+        trend      = float(ewma_trend.iloc[-1])
+        detrended  = float(values.iloc[-1] - trend)
+        normalized = float((detrended - self._cal_mean) / self._cal_std)
+
+        return {
+            "raw":       float(amplitude),
+            "ewma":      trend,
+            "detrended": detrended,
+            "zscore":    normalized,
+            "label":     float(self._cdf_function(normalized)),
+        }

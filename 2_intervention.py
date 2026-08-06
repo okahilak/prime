@@ -195,12 +195,14 @@ class Decider:
             "trigger_time", "is_forced", "pulse_time",
             "preprocessing_failed", "postprocessing_failed",
             "prediction_probability", "prime_attempts", "qc_failures", "tep_amplitude",
+            "tep_amplitude_raw", "tep_ewma", "tep_detrended", "tep_zscore",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
         self.current_trial: dict = {}
 
         self.profile_samples: dict[str, list[float]] = {name: [] for name in PROFILE_METRICS}
+        self.prediction_log: list[dict] = []
 
         print(
             f"PRIME intervention decider ready  subject={subject_id}  fs={sampling_frequency}  "
@@ -285,6 +287,10 @@ class Decider:
             "is_forced": None,
             "pulse_time": None,
             "tep_amplitude": None,
+            "tep_amplitude_raw": None,
+            "tep_ewma": None,
+            "tep_detrended": None,
+            "tep_zscore": None,
             "preprocessing_failed": False,
             "postprocessing_failed": False,
         }
@@ -302,13 +308,13 @@ class Decider:
             self.current_trial["condition"] = condition
 
             if condition == "prime_triplet":
-                self.trial_max_time = start_time + iti
+                self.trial_max_time = start_time + ITI_MAX
                 self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_tbs(self.tbs_intensity)
                 return None
 
             elif condition == "prime_single_pulse":
-                self.trial_max_time = start_time + iti
+                self.trial_max_time = start_time + ITI_MAX
                 self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_single_pulse(self.single_pulse_intensity)
                 return None
@@ -362,6 +368,18 @@ class Decider:
             self.current_trial["prime_attempts"] = self.prime_attempt_count
             self.current_trial["qc_failures"] = self.qc_fail_count
 
+            self.prediction_log.append({
+                "stage": self.current_trial["stage"],
+                "trial_in_stage": self.current_trial["trial_in_stage"],
+                "condition": self.current_trial["condition"],
+                "attempt": self.prime_attempt_count + 1,
+                "probability": None,
+                "triggered": True,
+                "forced": True,
+                "qc_failures_so_far": self.qc_fail_count,
+                "t_since_trial_start": reference_time - self.current_trial["trial_start_time"],
+            })
+
             return {"trigger_offset": TRIGGER_OFFSET}
 
         qc_passes, qc_ms = timed_ms(self.check_qc)
@@ -391,8 +409,22 @@ class Decider:
         probability, predict_ms = timed_ms(self.predictor.predict, self.current_pre)
         self.record_profile("predict", predict_ms)
         print(f"Prime prediction={probability:.3f}, prediction_time={predict_ms:.1f}ms, attempt={self.prime_attempt_count}")
+
+        self.prediction_log.append({
+            "stage": self.current_trial["stage"],
+            "trial_in_stage": self.current_trial["trial_in_stage"],
+            "condition": self.current_trial["condition"],
+            "attempt": self.prime_attempt_count,
+            "probability": float(probability),
+            "triggered": bool(probability >= PREDICTION_THRESHOLD),
+            "forced": False,
+            "qc_failures_so_far": self.qc_fail_count,
+            "t_since_trial_start": reference_time - self.current_trial["trial_start_time"],
+        })
+
         if probability < PREDICTION_THRESHOLD:
             return None
+        
 
         print(f"Prime trigger scheduled after {self.prime_attempt_count} attempt(s)")
 
@@ -414,17 +446,22 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         t0 = time.perf_counter()
 
-        tep_amplitude = None
+        tep = {"label": None, "raw": None, "ewma": None,
+               "detrended": None, "zscore": None}
 
         if stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
             print(f"Calibration trial {trial_in_stage + 1} collected")
 
         elif self.is_intervention_stage(stage_name):
-            tep_amplitude = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            result = self.process_intervention_pulse(time_offsets, eeg_buffer, stage_name, trial_in_stage)
+            if result is not None:
+                tep = result
             condition = self.current_trial.get("condition", "unknown")
-            if tep_amplitude is not None:
-                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition}, TEP_amplitude={tep_amplitude:.3f}")
+            if tep["label"] is not None:
+                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition}, TEP_amplitude={tep['label']:.3f}")
+            elif tep["raw"] is not None:
+                print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition}, TEP_raw={tep['raw']:.3f} (triplet, not normalized)")
             else:
                 print(f"Intervention trial {trial_in_stage + 1} finished: condition={condition} TEP amplitude=failed")
 
@@ -434,7 +471,11 @@ class Decider:
         self.current_trial.update({
             "pulse_time": reference_time,
             "is_forced": self.current_is_forced,
-            "tep_amplitude": tep_amplitude,
+            "tep_amplitude":     tep["label"],
+            "tep_amplitude_raw": tep["raw"],
+            "tep_ewma":          tep["ewma"],
+            "tep_detrended":     tep["detrended"],
+            "tep_zscore":        tep["zscore"],
         })
         self.write_trial_row()
         if self.is_intervention_stage(stage_name):
@@ -455,14 +496,18 @@ class Decider:
             stage_name: str, trial_in_stage: int) -> Optional[float]:
         condition = self.condition_for_trial(stage_name, trial_in_stage)
 
-        success, tep_amplitude = self.analyze_tep(time_offsets, eeg_buffer)
+        success, tep = self.analyze_tep(
+            time_offsets, eeg_buffer,
+            update_normalizer=(condition != "prime_triplet"),
+        )
 
         if not success:
             print("Trial failed: post-stimulus processing failed")
             self.current_trial["postprocessing_failed"] = True
             return None
 
-        assert tep_amplitude is not None
+        if condition != "prime_triplet":
+            assert tep["label"] is not None
 
         if condition == "prime_single_pulse":
             # For non-forced PRIME singles, pre is the prediction window from process_periodic.
@@ -474,7 +519,7 @@ class Decider:
 
             # If preprocessing fails (can only happen for forced trials), skip finetuning.
             if pre is not None:
-                _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep_amplitude)
+                _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep["label"])
                 self.record_profile("finetune", finetune_ms)
             else:
                 print("Single pulse PRIME trial pre-stimulus preprocessing failed, skipping finetuning")
@@ -491,7 +536,7 @@ class Decider:
             if not self.is_open_loop_session:
                 pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
                 if pre is not None:
-                    _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep_amplitude)
+                    _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep["label"])
                     self.record_profile("finetune", finetune_ms)
                 else:
                     print("Predetermined trial pre-stimulus preprocessing failed: skipping finetuning")
@@ -504,7 +549,7 @@ class Decider:
         else:
             raise ValueError(f"Unknown condition: {condition!r}")
 
-        return tep_amplitude
+        return tep
 
     # ==================================================================
     # Trial logging
@@ -546,8 +591,22 @@ class Decider:
                 for elapsed_ms in samples:
                     writer.writerow([f"{elapsed_ms:.3f}"])
 
+    def write_prediction_log(self) -> None:
+        """One row per PRIME prediction attempt, written once at teardown."""
+        if not self.prediction_log:
+            return
+        fields = ["stage", "trial_in_stage", "condition", "attempt", "probability",
+                  "triggered", "forced", "qc_failures_so_far", "t_since_trial_start"]
+        path = self.results_dir / "prime_predictions.csv"
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(self.prediction_log)
+        print(f"Wrote {len(self.prediction_log)} prediction attempts to {path}")
+
     def __del__(self) -> None:
         self.write_profile()
+        self.write_prediction_log()
 
     # ==================================================================
     # TEP analysis
@@ -581,7 +640,8 @@ class Decider:
         np.save(self.results_dir / f"{stem}_post_raw.npy", raw_post)
 
     def analyze_tep(
-            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
+            update_normalizer: bool = True,
     ) -> tuple[bool, Optional[float]]:
         post_buffer, post_time_offsets = crop_eeg_buffer(
             eeg_buffer,
@@ -595,8 +655,12 @@ class Decider:
             return False, None
 
         amplitude = self.dipole_fitter.fit_trial(post)
-        tep_amplitude = self.normalizer.transform(amplitude)
 
+        if not update_normalizer:
+            return True, {"raw": float(amplitude), "ewma": None,
+                      "detrended": None, "zscore": None, "label": None}
+
+        tep_amplitude = self.normalizer.transform_verbose(amplitude)
         return True, tep_amplitude
 
     # ==================================================================
@@ -613,6 +677,10 @@ class Decider:
         tep_amplitudes = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, tep_amplitudes)
         self.predictor.warm_up()
+
+        np.save(self.results_dir / "calibration_bunble.npy",
+                self.preprocessor.calibration_params, allow_pickle=True)
+        print(f"Calibration parameters saved to {self.results_dir / 'calibration_bunble.npy'}")
 
         # Number of calibration trials that survived preprocessing and were
         # actually used to fit the PRIME model.
