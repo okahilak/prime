@@ -682,6 +682,10 @@ class Decider:
                 self.preprocessor.calibration_params, allow_pickle=True)
         print(f"Calibration parameters saved to {self.results_dir / 'calibration_bunble.npy'}")
 
+        np.save(self.results_dir / "dipole_fitting_info.npy",
+                self.dipole_fitter.fitting_info, allow_pickle=True)
+        print(f"Dipole fitting info saved to {self.results_dir / 'dipole_fitting_info.npy'}")
+
         # Number of calibration trials that survived preprocessing and were
         # actually used to fit the PRIME model.
         num_calibration_trials = int(model_buffers.shape[0])
