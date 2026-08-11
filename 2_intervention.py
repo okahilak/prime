@@ -71,6 +71,7 @@ MINI_BLOCK_SIZE = 20
 # one 200 ms window's good/bad result. A candidate stimulation is allowed only if
 #   1. the most recent 5 windows are all good, and
 #   2. at least 80% of the windows in the last 500 ms (50 windows) are good.
+# changing QC_HISTORY_WINDOWS length will alter ITI (2s + QC_HISTORY_WINDOWS * 10ms)
 QC_RECENT_WINDOWS = 5
 QC_HISTORY_WINDOWS = 50        # 500 ms / 10 ms step
 QC_MIN_GOOD_FRACTION = 0.80
@@ -147,10 +148,10 @@ class Decider:
 
         self.trial_max_time = None
 
-        # Rolling good/bad result of the most recent pre-stimulus QC windows.
-        # Holds the last 500 ms (one entry per 10 ms periodic call); older
-        # entries — including any post-pulse windows from the previous trial —
-        # fall out on their own.
+        # Rolling good/bad result of the current pre-stimulus QC windows.
+        # Holds the last 500 ms (one entry per 10 ms periodic call)
+        # entries from previous trials droppe; warmup period fills history 
+        # with 500ms fresh for each trial
         self.qc_window_good: deque[bool] = deque(maxlen=QC_HISTORY_WINDOWS)
 
         # Pre-compute the per-trial condition schedule for each intervention
@@ -235,7 +236,7 @@ class Decider:
     def check_qc(self) -> bool:
         """Whether the recent pre-stimulus windows allow stimulation."""
         history = self.qc_window_good
-        if len(history) < QC_RECENT_WINDOWS:
+        if len(history) < QC_HISTORY_WINDOWS:
             return False
 
         recent = list(history)
@@ -269,6 +270,9 @@ class Decider:
         self.qc_reject_start_time = None
         self.qc_reject_streak_count = 0
         self.trial_max_time = None
+
+        # drop previous trial's QC history
+        self.qc_window_good.clear()
 
         iti = self.rng.uniform(ITI_MIN, ITI_MAX)
 
@@ -381,6 +385,11 @@ class Decider:
             })
 
             return {"trigger_offset": TRIGGER_OFFSET}
+
+        # Warm-up: fills QC_HISTORY_WINDOWS
+        # no prediction / triggering, no loggin until 50 windows are filled 
+        if len(self.qc_window_good) < QC_HISTORY_WINDOWS:
+            return None
 
         qc_passes, qc_ms = timed_ms(self.check_qc)
         self.record_profile("check_qc", qc_ms)

@@ -4,7 +4,7 @@ description: >
   trials) and application (4 × 200 trials).
 
 execution:
-  minimum_trial_interval: 2.5   # minimum seconds between consecutive trials
+  minimum_trial_interval: 2.0   # min s between stimulations 2.5s (set in 2_intervention.py) 2s so qc checks start 500ms before min ITI for prime trials
   repeat_failed_trials: true    # if true, a failed trial is repeated; if false, move on to the next trial
 
 runtime_parameters:
