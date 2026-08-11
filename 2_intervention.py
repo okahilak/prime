@@ -692,6 +692,8 @@ class Decider:
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         print(f"Calibration used {num_calibration_trials} trials")
+        bad_channels = self.preprocessor.calibration_params['bad_channels']
+        print(f"Calibration detected {len(bad_channels)} bad channels: {', '.join(bad_channels) if bad_channels else 'none'}")
         self.write_calibration_summary(num_calibration_trials)
 
         self.is_calibrated = True
