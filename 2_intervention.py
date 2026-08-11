@@ -80,7 +80,7 @@ SEED = 201
 
 # Wall-clock latencies (ms) collected per call and flushed to profile_*.csv once
 # at teardown, so the hot path (process_periodic) never touches the filesystem.
-PROFILE_METRICS = ("predict", "check_qc", "finetune", "process_pulse")
+PROFILE_METRICS = ("predict", "check_qc", "finetune", "process_pulse", "preprocess_pre")
 
 
 MINI_BLOCK_COMPOSITION = (
@@ -362,7 +362,9 @@ class Decider:
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int,
             is_warm_up: bool) -> dict[str, Any] | None:
 
-        self.current_pre = self.preprocessor.preprocess_pre(eeg_buffer, time_offsets, from_pulse=False)
+        self.current_pre, pre_ms = timed_ms(
+            self.preprocessor.preprocess_pre, eeg_buffer, time_offsets, from_pulse=False)
+        self.record_profile("preprocess_pre", pre_ms)
 
         self.qc_window_good.append(self.current_pre is not None)
 
