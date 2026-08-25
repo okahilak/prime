@@ -148,6 +148,7 @@ class Decider:
         self.qc_fail_count = 0
         self.prediction_threshold = THRESHOLD_INIT
         self.search_start_time: float | None = None
+        self.trial_best_probability = 0.0
 
         # Track the current QC rejection streak so we only log when the state
         # flips (start of rejecting / back to accepting) instead of every window.
@@ -281,6 +282,7 @@ class Decider:
         self.qc_reject_streak_count = 0
         self.trial_max_time = None
         self.search_start_time = None
+        self.trial_best_probability = 0.0
 
         # drop previous trial's QC history
         self.qc_window_good.clear()
@@ -439,7 +441,8 @@ class Decider:
         self.prime_attempt_count += 1
         probability, predict_ms = timed_ms(self.predictor.predict, self.current_pre)
         self.record_profile("predict", predict_ms)
-        print(f"Prime prediction={probability:.3f}, prediction_time={predict_ms:.1f}ms, attempt={self.prime_attempt_count}")
+        if probability > self.trial_best_probability:
+            self.trial_best_probability = probability
 
         self.prediction_log.append({
             "stage": self.current_trial["stage"],
@@ -457,8 +460,10 @@ class Decider:
         if probability < self.prediction_threshold:
             return None
         
-
-        print(f"Prime trigger scheduled after {self.prime_attempt_count} attempt(s)")
+        print(f"Prime trigger: p={probability:.3f} >= thr={self.prediction_threshold:.3f} "
+              f"after {self.prime_attempt_count} attempt(s), "
+              f"{reference_time - self.search_start_time:.2f}s, "
+              f"{self.qc_fail_count} qc rejection(s)")
 
         self.current_trial["prediction_probability"] = probability
         self.current_trial["prime_attempts"] = self.prime_attempt_count
