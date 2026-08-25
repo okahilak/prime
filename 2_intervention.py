@@ -57,7 +57,14 @@ GLOBAL_BACKROTATION_PATH = Path("offline_results") / "train" / "global_backrotat
 # Protocol parameters
 # ---------------------------------------------------------------------------
 
-PREDICTION_THRESHOLD = 0.5
+# Adaptive threshold 
+THRESHOLD_INIT = 0.75
+THRESHOLD_GAIN = 0.02     # probability units per second away from TARGET_WAIT
+THRESHOLD_MIN = 0.50
+THRESHOLD_MAX = 0.95
+TARGET_WAIT = 1.0         # s
+PERIODIC_INTERVAL = 0.01  # must match periodic_processing_interval in get_configuration()
+
 TRIGGER_OFFSET = 0.01
 
 ITI_MIN = 2.5
@@ -139,6 +146,8 @@ class Decider:
         self.current_is_forced = False
         self.prime_attempt_count = 0
         self.qc_fail_count = 0
+        self.prediction_threshold = THRESHOLD_INIT
+        self.search_start_time: float | None = None
 
         # Track the current QC rejection streak so we only log when the state
         # flips (start of rejecting / back to accepting) instead of every window.
@@ -197,6 +206,7 @@ class Decider:
             "preprocessing_failed", "postprocessing_failed",
             "prediction_probability", "prime_attempts", "qc_failures", "tep_amplitude",
             "tep_amplitude_raw", "tep_ewma", "tep_detrended", "tep_zscore",
+            "threshold", "search_time",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
@@ -270,6 +280,7 @@ class Decider:
         self.qc_reject_start_time = None
         self.qc_reject_streak_count = 0
         self.trial_max_time = None
+        self.search_start_time = None
 
         # drop previous trial's QC history
         self.qc_window_good.clear()
@@ -297,6 +308,8 @@ class Decider:
             "tep_zscore": None,
             "preprocessing_failed": False,
             "postprocessing_failed": False,
+            "threshold": None,
+            "search_time": None,
         }
 
         # Calibration: single pulses, predetermined.
@@ -373,6 +386,8 @@ class Decider:
             self.current_is_forced = True
             self.current_trial["prime_attempts"] = self.prime_attempt_count
             self.current_trial["qc_failures"] = self.qc_fail_count
+            self.current_trial["trigger_time"] = reference_time
+            self.current_trial["threshold"] = self.prediction_threshold
 
             self.prediction_log.append({
                 "stage": self.current_trial["stage"],
@@ -382,6 +397,7 @@ class Decider:
                 "probability": None,
                 "triggered": True,
                 "forced": True,
+                "threshold": self.prediction_threshold,
                 "qc_failures_so_far": self.qc_fail_count,
                 "t_since_trial_start": reference_time - self.current_trial["trial_start_time"],
             })
@@ -392,6 +408,10 @@ class Decider:
         # no prediction / triggering, no loggin until 50 windows are filled 
         if len(self.qc_window_good) < QC_HISTORY_WINDOWS:
             return None
+
+        # after warm-up, search window starts 
+        if self.search_start_time is None:
+            self.search_start_time = reference_time
 
         qc_passes, qc_ms = timed_ms(self.check_qc)
         self.record_profile("check_qc", qc_ms)
@@ -427,13 +447,14 @@ class Decider:
             "condition": self.current_trial["condition"],
             "attempt": self.prime_attempt_count,
             "probability": float(probability),
-            "triggered": bool(probability >= PREDICTION_THRESHOLD),
+            "triggered": bool(probability >= self.prediction_threshold),
             "forced": False,
+            "threshold": self.prediction_threshold,
             "qc_failures_so_far": self.qc_fail_count,
             "t_since_trial_start": reference_time - self.current_trial["trial_start_time"],
         })
 
-        if probability < PREDICTION_THRESHOLD:
+        if probability < self.prediction_threshold:
             return None
         
 
@@ -444,6 +465,7 @@ class Decider:
         self.current_trial["qc_failures"] = self.qc_fail_count
         self.current_trial["trigger_time"] = reference_time
         self.current_trial["target_time"] = reference_time + TRIGGER_OFFSET
+        self.current_trial["threshold"] = self.prediction_threshold
 
         return {"trigger_offset": TRIGGER_OFFSET}
 
@@ -478,6 +500,10 @@ class Decider:
 
         else:
             raise ValueError(f"Unknown stage: {stage_name!r}")
+
+        if self.is_intervention_stage(stage_name) and self.condition_for_trial(
+                stage_name, trial_in_stage) in ("prime_triplet", "prime_single_pulse"):
+            self.update_threshold(reference_time)
 
         self.current_trial.update({
             "pulse_time": reference_time,
@@ -577,6 +603,27 @@ class Decider:
             return
         self.predictor.save_checkpoint(self.results_dir / name)
 
+    def update_threshold(self, pulse_time: float) -> None:
+        """ Move trigger threshold based on search time 
+
+        triggered faster than TARGET_WAIT → increase threshold
+        triggered slower than TARGET_WAIT → decrease threshold
+
+        Update is proportional to deviation in search time from TARGET_WAIT, scaled by THRESHOLD_GAIN.
+        Forced trial is largest deviation, thus largest update to threshold.
+        QC-rejected windows are subtracted from elapsed time; Subtract QC rejections from elapsed time in csv log. 
+
+        Runs once per PRIME_trial within process_pulse, not in process_periodic. 
+        """
+        if self.search_start_time is None:
+            return
+        elapsed= pulse_time - self.search_start_time
+        self.current_trial["search_time"] = elapsed
+        active = max(0.0, elapsed - self.qc_fail_count * PERIODIC_INTERVAL)
+        self.prediction_threshold = min(max(
+            self.prediction_threshold + THRESHOLD_GAIN * (TARGET_WAIT - active),
+            THRESHOLD_MIN), THRESHOLD_MAX)
+
     def write_trial_row(self) -> None:
         row = {field: self.current_trial.get(field) for field in self.csv_fields}
         with open(self.trials_csv, "a", newline="") as f:
@@ -607,7 +654,8 @@ class Decider:
         if not self.prediction_log:
             return
         fields = ["stage", "trial_in_stage", "condition", "attempt", "probability",
-                  "triggered", "forced", "qc_failures_so_far", "t_since_trial_start"]
+                  "triggered", "forced", "qc_failures_so_far", "t_since_trial_start",
+                  "threshold"]
         path = self.results_dir / "prime_predictions.csv"
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
