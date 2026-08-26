@@ -383,7 +383,8 @@ class Decider:
 
         self.qc_window_good.append(self.current_pre is not None)
 
-        if reference_time > self.trial_max_time:
+        # if reaches 5.49s -> force trigger at 5.5s 
+        if reference_time > self.trial_max_time - TRIGGER_OFFSET - PERIODIC_INTERVAL / 2:
             print(f"Prime trial max time exceeded, triggering a pulse (prime_attempts={self.prime_attempt_count})")
             self.current_is_forced = True
             self.current_trial["prime_attempts"] = self.prime_attempt_count
