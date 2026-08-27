@@ -579,6 +579,7 @@ class Decider:
             if not self.is_open_loop_session:
                 pre = self.preprocess_pre_from_pulse(time_offsets, eeg_buffer)
                 if pre is not None:
+                    self.current_trial["prediction_probability"] = self.predictor.predict(pre)     # predict on predetermined trials to assess PRIME perf.
                     _, finetune_ms = timed_ms(self.predictor.finetune, pre, tep["label"])
                     self.record_profile("finetune", finetune_ms)
                 else:
