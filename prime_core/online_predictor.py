@@ -167,6 +167,9 @@ class OnlinePredictor:
         if model_path is not None:
             checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
             self.model.wrapped_model.load_state_dict(checkpoint["model_state_dict"])
+            if checkpoint.get("alignment_transform") is not None:
+                self.model.alignment_transform_torch = \
+                    checkpoint["alignment_transform"].to(self.device)
 
         # Setup finetuning optimizer and history buffers
         self._optimizer: Optional[torch.optim.Optimizer] = None
@@ -195,7 +198,8 @@ class OnlinePredictor:
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_state_dict": self.model.wrapped_model.state_dict()}, path)
+        torch.save({"model_state_dict": self.model.wrapped_model.state_dict(),
+                    "alignment_transform": self.model.alignment_transform_torch}, path)
 
     def predict(self, epoch_pre: np.ndarray) -> float:
         """
