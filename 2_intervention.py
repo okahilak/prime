@@ -532,6 +532,8 @@ class Decider:
             self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)[0],
             self.extract_raw_post_from_pulse(time_offsets, eeg_buffer),
             self.current_post,
+            self.extract_raw_trial_from_pulse(time_offsets, eeg_buffer)
+                if stage_name == "calibration" else None,
         )
 
         self.record_profile("process_pulse", (time.perf_counter() - t0) * 1000)
@@ -699,16 +701,27 @@ class Decider:
         )
         return raw_post
 
+    def extract_raw_trial_from_pulse(
+            self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
+    ) -> np.ndarray:
+        raw_trial, _ = crop_eeg_buffer(
+            eeg_buffer, time_offsets, self.calibration_tmin, self.calibration_tmax
+        )
+        return raw_trial
+
     def save_raw_buffers(
             self, stage_name: str, trial_in_stage: int,
             raw_pre: np.ndarray, raw_post: np.ndarray,
             post_proc: Optional[np.ndarray] = None,
+            raw_trial: Optional[np.ndarray] = None,
     ) -> None:
         stem = f"{stage_name}_{trial_in_stage:04d}"
         np.save(self.results_dir / f"{stem}_pre_raw.npy", raw_pre)
         np.save(self.results_dir / f"{stem}_post_raw.npy", raw_post)
         if post_proc is not None:
             np.save(self.results_dir / f"{stem}_post_proc.npy", post_proc)
+        if raw_trial is not None:
+            np.save(self.results_dir / f"{stem}_trial_raw.npy", raw_trial)
 
     def analyze_tep(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
