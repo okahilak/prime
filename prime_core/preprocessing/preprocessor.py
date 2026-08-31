@@ -501,7 +501,12 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
 
     ica.apply(post_epochs)
 
+    kept = np.arange(len(qc_epochs))
+
+    bad_ocular_post = np.asarray(bad_ocular_post, dtype=int)
+    dropped_ocular = kept[bad_ocular_post]
     qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_ocular_post)
+    kept = np.delete(kept, bad_ocular_post)
     qc_epochs.set_eeg_reference('average', projection=False, verbose=False)
 
     bad_qc, stats_qc = _find_bad_trials(
@@ -512,7 +517,10 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
         False,
     )
     calibration_params['good_trial_stats_qc'] = stats_qc
+    bad_qc = np.asarray(bad_qc, dtype=int)
+    dropped_qc = kept[bad_qc]
     qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_qc)
+    kept = np.delete(kept, bad_qc)
 
     post_epochs.apply_baseline(cfg.baseline).set_eeg_reference('average', projection=False, verbose=False)
     post_tmin, post_tmax = get_post_time_range()
@@ -565,9 +573,23 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
         False,
     )
     calibration_params['good_trial_stats_post'] = stats_post
+    bad_post = np.asarray(bad_post, dtype=int)
+    dropped_post = kept[bad_post]
     qc_epochs, post_epochs = _drop_bad_trials([qc_epochs, post_epochs], bad_post)
+    kept = np.delete(kept, bad_post)
 
     n_successful_trials = qc_epochs.get_data(copy=True).shape[0]
+
+    assert len(kept) == n_successful_trials, (
+        f"survivor tracking disagrees with epochs"
+    )
+
+    calibration_params['trials_kept'] = kept
+    calibration_params['trials_dropped'] = {
+        'ocular': dropped_ocular,
+        'qc': dropped_qc,
+        'post': dropped_post
+    }
 
     model_tmin, model_tmax = get_model_time_range()
     dipole_tmin, dipole_tmax = get_dipole_time_range()
