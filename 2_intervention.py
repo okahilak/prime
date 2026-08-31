@@ -329,7 +329,7 @@ class Decider:
             if condition == "prime_triplet":
                 self.trial_max_time = start_time + ITI_MAX
                 self.current_trial["max_time"] = self.trial_max_time
-                self.tms.set_tbs(self.tbs_intensity, burst_pulses=3, burst_frequency=10)
+                self.tms.set_tbs(self.tbs_intensity, burst_pulses=3, ipi_ms=10)
                 return None
 
             elif condition == "prime_single_pulse":
@@ -345,7 +345,7 @@ class Decider:
                 return {"trigger_offset": iti}
 
             elif condition == "predetermined_triplet":
-                self.tms.set_tbs(self.tbs_intensity, burst_pulses=3, burst_frequency=10)
+                self.tms.set_tbs(self.tbs_intensity, burst_pulses=3, ipi_ms=10)
                 self.current_trial["iti"] = iti
                 self.current_trial["target_time"] = start_time + iti
                 return {"trigger_offset": iti}
