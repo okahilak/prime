@@ -65,7 +65,7 @@ THRESHOLD_INIT = 0.75
 THRESHOLD_GAIN = 0.02     # probability units per second away from TARGET_WAIT
 THRESHOLD_MIN = 0.50
 THRESHOLD_MAX = 0.95
-TARGET_WAIT = 1.0         # s
+TARGET_WAIT = 0.65        # s
 PERIODIC_INTERVAL = 0.01  # must match periodic_processing_interval in get_configuration()
 
 TRIGGER_OFFSET = 0.01
