@@ -214,7 +214,7 @@ class Decider:
             "preprocessing_failed", "postprocessing_failed",
             "prediction_probability", "prime_attempts", "qc_failures", "tep_amplitude",
             "tep_amplitude_raw", "tep_ewma", "tep_detrended", "tep_zscore",
-            "threshold", "search_time",
+            "threshold", "search_time", "post_reject_reason",
         ]
         with open(self.trials_csv, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=self.csv_fields).writeheader()
@@ -319,6 +319,7 @@ class Decider:
             "tep_zscore": None,
             "preprocessing_failed": False,
             "postprocessing_failed": False,
+            "post_reject_reason": None,
             "threshold": None,
             "search_time": None,
         }
@@ -750,6 +751,7 @@ class Decider:
         )
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
         self.current_post = self.preprocessor.last_post_full
+        self.current_trial["post_reject_reason"] = self.preprocessor.last_post_reject_reason
 
         if post is None:
             return False, None

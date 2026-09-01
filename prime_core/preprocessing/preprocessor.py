@@ -645,9 +645,10 @@ class Preprocessor:
         self.post_epochs = None
         self._calibration_params = None
 
-        self.keep_full_epochs = False   # opt-in to keep full windows from preprocess_pre/_post
-        self.last_pre_full = None       # (n_channels, 201) over [qc_tmin, qc_tmax]
-        self.last_post_full = None      # (n_channels, 100) over [post_tmin, post_tmax]
+        self.keep_full_epochs = False        # opt-in to keep full windows from preprocess_pre/_post
+        self.last_pre_full = None            # (n_channels, 201) over [qc_tmin, qc_tmax]
+        self.last_post_full = None           # (n_channels, 100) over [post_tmin, post_tmax]
+        self.last_post_reject_reason = None  # None / 'ocular' / 'global_mad' / 'local_mad'
 
     # ------------------------------------------------------------------
     # Public API
@@ -880,6 +881,7 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self.last_post_full = None
+        self.last_post_reject_reason = None
 
         post_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
@@ -916,6 +918,7 @@ class Preprocessor:
 
         ica = calibration_params["ica"]
 
+        ocular_rejected = False
         # Check ocular ICA components
         source_time_course = ica.get_sources(epoch_post)
         source_data = source_time_course.get_data(copy=True)
@@ -932,7 +935,8 @@ class Preprocessor:
                 - component_info["mean"]
             ) / component_info["std"]
             if np.median(z_comp) > trial_reject_opts["ocular"]["z_threshold"]:
-                return None
+                ocular_rejected = True
+                break
 
         ica.apply(epoch_post)
 
@@ -980,6 +984,10 @@ class Preprocessor:
         if self.keep_full_epochs:
             self.last_post_full = epoch_post.get_data(copy=True)[0]
 
+        if ocular_rejected:
+            self.last_post_reject_reason = "ocular"
+            return None
+
         # Global MAD check
         reject_data = epoch_post.copy().crop(
             self._cfg.reject_range[0], self._cfg.reject_range[1]
@@ -990,12 +998,14 @@ class Preprocessor:
         ) / calibration_params["good_trial_stats_post"]["mads_std"]
         threshold = trial_reject_opts["post"]["global_zscore_threshold"]
         if z_mad < threshold[0] or z_mad > threshold[1]:
+            self.last_post_reject_reason = "global_mad"
             return None
 
         # Local MAD check
         local_mad = median_abs_deviation(reject_data, axis=2)
         z_local = zscore(local_mad, axis=1)
         if np.any(np.abs(z_local) > trial_reject_opts["post"]["local_zscore_threshold"]):
+            self.last_post_reject_reason = "local_mad"
             return None
 
         cropped = epoch_post.crop(self._dipole_tmin, self._dipole_tmax, include_tmax=True).get_data(copy=False)
