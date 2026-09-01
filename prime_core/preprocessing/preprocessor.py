@@ -648,6 +648,7 @@ class Preprocessor:
         self.keep_full_epochs = False        # opt-in to keep full windows from preprocess_pre/_post
         self.last_pre_full = None            # (n_channels, 201) over [qc_tmin, qc_tmax]
         self.last_post_full = None           # (n_channels, 100) over [post_tmin, post_tmax]
+        self.last_post_baselines = None      # (2, n_channels): rows = apply_baseline calls
         self.last_post_reject_reason = None  # None / 'ocular' / 'global_mad' / 'local_mad'
 
     # ------------------------------------------------------------------
@@ -881,6 +882,7 @@ class Preprocessor:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
         self.last_post_full = None
+        self.last_post_baselines = None
         self.last_post_reject_reason = None
 
         post_buffer, _ = crop_eeg_buffer(
@@ -899,7 +901,12 @@ class Preprocessor:
         dicts = self._cfg.to_dicts()
         trial_reject_opts = dicts["trial_reject_opts"]
 
-        epoch_post.apply_baseline(self._cfg.baseline)
+        if self.keep_full_epochs:
+            _before = epoch_post.get_data(copy=True)[0]
+            epoch_post.apply_baseline(self._cfg.baseline)
+            _b1 = (_before - epoch_post.get_data(copy=False)[0])[:,0]
+        else:
+            epoch_post.apply_baseline(self._cfg.baseline)
         epoch_post = mne.preprocessing.fix_stim_artifact(
             epoch_post,
             tmin=self._cfg.artifact_window_1[0],
@@ -940,9 +947,16 @@ class Preprocessor:
 
         ica.apply(epoch_post)
 
-        epoch_post.apply_baseline(self._cfg.baseline).set_eeg_reference(
-            "average", projection=False, verbose=False
-        )
+        if self.keep_full_epochs:
+            _before = epoch_post.get_data(copy=True)[0]
+            epoch_post.apply_baseline(self._cfg.baseline)
+            _b2 = (_before - epoch_post.get_data(copy=False)[0])[:,0]
+            self.last_post_baselines = np.vstack([_b1, _b2])
+            epoch_post.set_eeg_reference("average", projection=False, verbose=False)
+        else:
+            epoch_post.apply_baseline(self._cfg.baseline).set_eeg_reference(
+                "average", projection=False, verbose=False
+            )
         epoch_post.crop(self._post_tmin, self._post_tmax, include_tmax=True)
 
         # Apply SOUND

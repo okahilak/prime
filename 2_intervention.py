@@ -155,6 +155,7 @@ class Decider:
         self.prediction_threshold = THRESHOLD_INIT
         self.search_start_time: float | None = None
         self.trial_best_probability = 0.0
+        self.current_baselines = None
 
         # Track the current QC rejection streak so we only log when the state
         # flips (start of rejecting / back to accepting) instead of every window.
@@ -292,6 +293,7 @@ class Decider:
         self.trial_max_time = None
         self.search_start_time = None
         self.trial_best_probability = 0.0
+        self.current_baselines = None
 
         # drop previous trial's QC history
         self.qc_window_good.clear()
@@ -541,9 +543,10 @@ class Decider:
             stage_name, trial_in_stage,
             self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)[0],
             self.extract_raw_post_from_pulse(time_offsets, eeg_buffer),
-            self.current_pre_full,
-            self.current_post,
-            self.extract_raw_trial_from_pulse(time_offsets, eeg_buffer)
+            pre_proc=self.current_pre_full,
+            post_proc=self.current_post,
+            baselines=self.current_baselines,
+            raw_trial=self.extract_raw_trial_from_pulse(time_offsets, eeg_buffer)
                 if stage_name == "calibration" else None,
         )
 
@@ -728,6 +731,7 @@ class Decider:
             pre_proc: Optional[np.ndarray] = None,
             post_proc: Optional[np.ndarray] = None,
             raw_trial: Optional[np.ndarray] = None,
+            baselines: Optional[np.ndarray] = None,
     ) -> None:
         stem = f"{stage_name}_{trial_in_stage:04d}"
         np.save(self.results_dir / f"{stem}_pre_raw.npy", raw_pre)
@@ -738,6 +742,8 @@ class Decider:
             np.save(self.results_dir / f"{stem}_post_proc.npy", post_proc)
         if raw_trial is not None:
             np.save(self.results_dir / f"{stem}_trial_raw.npy", raw_trial)
+        if baselines is not None:
+            np.save(self.results_dir / f"{stem}_baseline.npy", baselines)
 
     def analyze_tep(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
@@ -751,6 +757,7 @@ class Decider:
         )
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
         self.current_post = self.preprocessor.last_post_full
+        self.current_baselines = self.preprocessor.last_post_baselines
         self.current_trial["post_reject_reason"] = self.preprocessor.last_post_reject_reason
 
         if post is None:
