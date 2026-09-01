@@ -25,18 +25,16 @@ from prime_core.prime_config import (
 )
 from util.magventure_tms import MagVentureTMS
 from util.magventure_tms_mock import MockTMS
+from util.iti import sample_iti
 
 # ---------------------------------------------------------------------------
 # Protocol parameters
 # ---------------------------------------------------------------------------
-
-ITI_MIN = 2.5
-ITI_MAX = 5.5
-
 SEED = 1
 
 BUFFER_TOLERANCE = 0.005
 
+# ITI is set in util/iti.py, and is then imported
 
 class Decider:
     def __init__(self, subject_id: int, num_eeg_channels: int, num_emg_channels: int, sampling_frequency: int,
@@ -107,7 +105,7 @@ class Decider:
         if stage_name != "baseline":
             raise ValueError("Incorrect protocol, must be 1_baseline.yaml for baseline")
 
-        iti = self.rng.uniform(ITI_MIN, ITI_MAX)
+        iti = sample_iti(self.rng)
 
         self.current_trial = {
             "stage": stage_name,

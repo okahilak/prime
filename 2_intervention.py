@@ -45,6 +45,7 @@ from prime_core.prime_config import (
 from prime_core.tep_normalizer import TEPNormalizer
 from util.magventure_tms import MagVentureTMS
 from util.magventure_tms_mock import MockTMS
+from util.iti import sample_iti
 
 # ---------------------------------------------------------------------------
 # Paths — adjust per setup
@@ -65,13 +66,13 @@ THRESHOLD_INIT = 0.75
 THRESHOLD_GAIN = 0.02     # probability units per second away from TARGET_WAIT
 THRESHOLD_MIN = 0.50
 THRESHOLD_MAX = 0.95
-TARGET_WAIT = 0.65        # s
+TARGET_WAIT = 0.65        # s; after 2.5
+PRIME_MAX_WAIT = 5.5      # s
 PERIODIC_INTERVAL = 0.01  # must match periodic_processing_interval in get_configuration()
 
 TRIGGER_OFFSET = 0.01
 
-ITI_MIN = 2.5
-ITI_MAX = 5.5
+# ITI is set in util/iti.py, and is then imported
 
 # Intervention block structure (PRIME application session).
 INTERVENTION_BLOCK_TRIALS = 200
@@ -298,7 +299,7 @@ class Decider:
         # drop previous trial's QC history
         self.qc_window_good.clear()
 
-        iti = self.rng.uniform(ITI_MIN, ITI_MAX)
+        iti = sample_iti(self.rng)
 
         self.current_trial = {
             "stage": stage_name,
@@ -339,13 +340,13 @@ class Decider:
             self.current_trial["condition"] = condition
 
             if condition == "prime_triplet":
-                self.trial_max_time = start_time + ITI_MAX
+                self.trial_max_time = start_time + PRIME_MAX_WAIT
                 self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_tbs(self.tbs_intensity, burst_pulses=3, ipi_ms=10)
                 return None
 
             elif condition == "prime_single_pulse":
-                self.trial_max_time = start_time + ITI_MAX
+                self.trial_max_time = start_time + PRIME_MAX_WAIT
                 self.current_trial["max_time"] = self.trial_max_time
                 self.tms.set_single_pulse(self.single_pulse_intensity)
                 return None
