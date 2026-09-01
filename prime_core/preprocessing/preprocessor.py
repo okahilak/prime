@@ -645,6 +645,10 @@ class Preprocessor:
         self.post_epochs = None
         self._calibration_params = None
 
+        self.keep_full_epochs = False   # opt-in to keep full windows from preprocess_pre/_post
+        self.last_pre_full = None       # (n_channels, 201) over [qc_tmin, qc_tmax]
+        self.last_post_full = None      # (n_channels, 100) over [post_tmin, post_tmax]
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -780,6 +784,8 @@ class Preprocessor:
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
 
+        self.last_pre_full = None
+
         timestamps = np.asarray(timestamps, dtype=np.float64)
         if not from_pulse:
             timestamps = timestamps + self._qc_tmax
@@ -820,6 +826,8 @@ class Preprocessor:
         trial_reject_opts = self._opts['trial_reject_opts']
 
         trial = data[0]
+        if self.keep_full_epochs:
+            self.last_pre_full = trial.copy()
         qc_stats = self._calibration_params['good_trial_stats_qc']
         pre_reject = trial_reject_opts['pre']
         workspace = self._mad_workspace
@@ -870,6 +878,8 @@ class Preprocessor:
         """
         if self._calibration_params is None:
             raise RuntimeError("calibrate() must be called before preprocessing trials.")
+
+        self.last_post_full = None
 
         post_buffer, _ = crop_eeg_buffer(
             eeg_buffer,
@@ -966,6 +976,9 @@ class Preprocessor:
             mode="window",
         )
         epoch_post.set_eeg_reference("average", projection=False, verbose=False)
+
+        if self.keep_full_epochs:
+            self.last_post_full = epoch_post.get_data(copy=True)[0]
 
         # Global MAD check
         reject_data = epoch_post.copy().crop(

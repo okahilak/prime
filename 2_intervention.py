@@ -38,6 +38,9 @@ from prime_core.prime_config import (
     get_calibration_time_range,
     get_qc_time_range,
     get_post_initial_time_range,
+    get_post_time_range,
+    get_processed_sfreq,
+    get_dipole_time_range,
 )
 from prime_core.tep_normalizer import TEPNormalizer
 from util.magventure_tms import MagVentureTMS
@@ -136,14 +139,16 @@ class Decider:
         self.qc_window_size = self.qc_tmax - self.qc_tmin
 
         self.post_initial_tmin, self.post_initial_tmax = get_post_initial_time_range()
-
+        self.post_tmin, self.post_tmax = get_post_time_range()
+        self.dipole_tmin, self.dipole_tmax = get_dipole_time_range()
         self.rng = np.random.default_rng(SEED + subject_id)
 
         self.tms = MagVentureTMS() if not self.mock_tms_device else MockTMS()
 
         self.is_calibrated = False
-        self.current_pre: Optional[np.ndarray] = None
-        self.current_post: Optional[np.ndarray] = None
+        self.current_pre = None
+        self.current_pre_full = None
+        self.current_post = None
         self.current_is_forced = False
         self.prime_attempt_count = 0
         self.qc_fail_count = 0
@@ -184,6 +189,7 @@ class Decider:
         self.predictor = OnlinePredictor(global_backrotation, model_path=PRETRAINED_MODEL_PATH, seed=SEED)
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
+        self.preprocessor.keep_full_epochs = True           # opt-in to keep full windows from preprocess_pre/_post
         self.dipole_fitter = DipoleFitter(FORWARD_PATH)
         self.normalizer = TEPNormalizer()
 
@@ -276,6 +282,8 @@ class Decider:
 
         self.current_is_forced = False
         self.current_pre = None
+        self.current_pre_full = None
+        self.current_post = None
         self.prime_attempt_count = 0
         self.qc_fail_count = 0
         self.qc_rejecting = False
@@ -380,6 +388,7 @@ class Decider:
 
         self.current_pre, pre_ms = timed_ms(
             self.preprocessor.preprocess_pre, eeg_buffer, time_offsets, from_pulse=False)
+        self.current_pre_full = self.preprocessor.last_pre_full
         self.record_profile("preprocess_pre", pre_ms)
 
         self.qc_window_good.append(self.current_pre is not None)
@@ -531,6 +540,7 @@ class Decider:
             stage_name, trial_in_stage,
             self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)[0],
             self.extract_raw_post_from_pulse(time_offsets, eeg_buffer),
+            self.current_pre_full,
             self.current_post,
             self.extract_raw_trial_from_pulse(time_offsets, eeg_buffer)
                 if stage_name == "calibration" else None,
@@ -686,7 +696,9 @@ class Decider:
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
     ) -> Optional[np.ndarray]:
         pre_buffer, pre_time_offsets = self.extract_raw_pre_from_pulse(time_offsets, eeg_buffer)
-        return self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, from_pulse=True)
+        pre = self.preprocessor.preprocess_pre(pre_buffer, pre_time_offsets, from_pulse=True)
+        self.current_pre_full = self.preprocessor.last_pre_full
+        return pre
 
     def extract_raw_pre_from_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray
@@ -712,12 +724,15 @@ class Decider:
     def save_raw_buffers(
             self, stage_name: str, trial_in_stage: int,
             raw_pre: np.ndarray, raw_post: np.ndarray,
+            pre_proc: Optional[np.ndarray] = None,
             post_proc: Optional[np.ndarray] = None,
             raw_trial: Optional[np.ndarray] = None,
     ) -> None:
         stem = f"{stage_name}_{trial_in_stage:04d}"
         np.save(self.results_dir / f"{stem}_pre_raw.npy", raw_pre)
         np.save(self.results_dir / f"{stem}_post_raw.npy", raw_post)
+        if pre_proc is not None:
+            np.save(self.results_dir / f"{stem}_pre_proc.npy", pre_proc)
         if post_proc is not None:
             np.save(self.results_dir / f"{stem}_post_proc.npy", post_proc)
         if raw_trial is not None:
@@ -734,7 +749,7 @@ class Decider:
             self.post_initial_tmax,
         )
         post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
-        self.current_post = post
+        self.current_post = self.preprocessor.last_post_full
 
         if post is None:
             return False, None
@@ -762,6 +777,16 @@ class Decider:
         tep_amplitudes = self.normalizer.calibrate(amplitudes)
         self.predictor.calibrate(model_buffers, tep_amplitudes)
         self.predictor.warm_up()
+
+        np.save(self.results_dir / "proc_info.npy", {
+            "ch_names": list(self.preprocessor._info_processed["ch_names"]),
+            "sfreq": get_processed_sfreq(),
+            "pre":  {"tmin": self.qc_tmin, "tmax": self.qc_tmax},
+            "post": {"tmin": self.post_tmin, "tmax": self.post_tmax},
+            "dipole": {"tmin": self.dipole_tmin, "tmax": self.dipole_tmax},
+            "proc_shape": ("n_channels", "n_times"),
+            "units": "as received from the acquisition stream (microvolt-scale, uncalibrated)",
+        }, allow_pickle=True)
 
         np.save(self.results_dir / "calibration_bunble.npy",
                 self.preprocessor.calibration_params, allow_pickle=True)
