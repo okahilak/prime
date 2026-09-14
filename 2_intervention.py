@@ -798,9 +798,9 @@ class Decider:
             "units": "as received from the acquisition stream (microvolt-scale, uncalibrated)",
         }, allow_pickle=True)
 
-        np.save(self.results_dir / "calibration_bunble.npy",
+        np.save(self.results_dir / "calibration_bundle.npy",
                 self.preprocessor.calibration_params, allow_pickle=True)
-        print(f"Calibration parameters saved to {self.results_dir / 'calibration_bunble.npy'}")
+        print(f"Calibration parameters saved to {self.results_dir / 'calibration_bundle.npy'}")
 
         np.save(self.results_dir / "dipole_fitting_info.npy",
                 self.dipole_fitter.fitting_info, allow_pickle=True)
