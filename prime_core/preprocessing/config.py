@@ -225,7 +225,7 @@ def get_default_config() -> PreprocConfig:
             fixed_max_iterations=False,
         ),
         ssp_sir_opts=SSPSIROpts(
-            timerange=['automatic', 50],
+            timerange=['automatic', 40],
             method=['threshold', 0.99],
         ),
         trial_reject_opts=TrialRejectOpts(
