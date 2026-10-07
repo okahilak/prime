@@ -41,7 +41,13 @@ weight_decay_finetune: 0.0
 
 # --- Sampling rates (Hz) ---
 raw_sfreq: 5000        # incoming EEG from the acquisition pipeline
-processed_sfreq: 1000  # after online preprocessing resampling (model input)
+processed_sfreq: 1000  # QC + model window (PRIME input). Needs retraining to change.
+ica_sfreq: 1000        # calibration ICA window (fit + ICLabel)
+post_sfreq: 5000       # post-stimulus window, calibration and every pulse
+
+# --- Dipole sub-window search (seconds; converted with post_sfreq) ---
+dipole_min_window: 0.003   # was min_window_size=3 samples at 1 kHz
+dipole_max_window: 0.006   # was max_window_size=6 samples at 1 kHz
 
 # --- Calibration window (covers ICA, QC, and post-stimulus windows) ---
 calibration_tmin: -1.1

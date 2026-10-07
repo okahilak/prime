@@ -12,7 +12,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 import mne
-from prime_core.prime_config import epoch_n_times, get_dipole_time_range, get_processed_sfreq
+from prime_core.prime_config import (
+    epoch_n_times, get_dipole_time_range, get_post_sfreq, get_dipole_window_limits,
+)
 
 
 def dipoles_for_indices(evoked_data, forward):
@@ -197,6 +199,9 @@ COMMON_CHANNELS = [
 ]
 
 
+_FROM_CONFIG = object()   # default: take the window limit from prime.yaml (seconds)
+
+
 class DipoleFitter:
     """Fits a dipole to calibration-trial evoked data.
 
@@ -206,15 +211,26 @@ class DipoleFitter:
         Path to the forward solution.
     min_window_size : int
         Minimum window size (sample indices) for ``determine_optimal_index_range``.
+        Default: ``dipole_min_window`` (s) from prime.yaml at ``sfreq`` (3 samples at 1 kHz).
     max_window_size : int or None
         Maximum window size.  ``None`` means unconstrained.
+        Default: ``dipole_max_window`` (s) from prime.yaml at ``sfreq`` (6 samples at 1 kHz).
     window_size_exponent : float
         Exponent for window size scoring.
+    sfreq : float, keyword-only
+        Sampling rate of the dipole buffers. Default: ``post_sfreq`` from prime.yaml.
     """
 
     def __init__(self, forward_path,
-                 min_window_size=3, max_window_size=6, window_size_exponent=1.5):
+                 min_window_size=_FROM_CONFIG, max_window_size=_FROM_CONFIG,
+                 window_size_exponent=1.5, *, sfreq=None):
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
+        self._sfreq = float(sfreq) if sfreq is not None else get_post_sfreq()
+        min_s, max_s = get_dipole_window_limits()
+        if min_window_size is _FROM_CONFIG:
+            min_window_size = int(round(min_s * self._sfreq))
+        if max_window_size is _FROM_CONFIG:
+            max_window_size = int(round(max_s * self._sfreq))
 
 		# TODO: Is this necessary? Note that it's not done in the preprocessor.
         self._forward = self._forward.pick_channels(COMMON_CHANNELS, ordered=True)
@@ -224,9 +240,8 @@ class DipoleFitter:
         self._window_size_exponent = window_size_exponent
         self._fitting_info = None
         self._dipole_tmin, self._dipole_tmax = get_dipole_time_range()
-        self._processed_sfreq = get_processed_sfreq()
         self._post_n_times = epoch_n_times(
-            self._dipole_tmin, self._dipole_tmax, self._processed_sfreq
+            self._dipole_tmin, self._dipole_tmax, self._sfreq
         )
 
     def calibrate(self, dipole_buffers):
@@ -271,7 +286,11 @@ class DipoleFitter:
         self._fitting_info = {
             'position_index': position_index,
             'orientation': orientation,
-            'index_range': index_range,
+            'index_range': index_range,          # samples from dipole_tmin, at 'sfreq'
+            'sfreq': self._sfreq,
+            'dipole_tmin': self._dipole_tmin,
+            'index_range_s': (self._dipole_tmin + index_range[0] / self._sfreq,
+                              self._dipole_tmin + (index_range[1] - 1) / self._sfreq),
         }
         calibration_amplitudes = np.array([
             self.fit_trial(epochs[i]) for i in range(len(epochs))
@@ -322,6 +341,14 @@ class DipoleFitter:
                 "fitting_info must be set before calling fit_trial(). "
                 "Call calibrate() or use from_fitting_info()."
             )
+        # index_range is in samples: refuse a fitting_info made at another rate.
+        # Legacy files (pilot001-005) carry no 'sfreq' and were made at 1 kHz.
+        info_sfreq = float(self._fitting_info.get('sfreq', 1000.0))
+        if abs(info_sfreq - self._sfreq) > 1e-6:
+            raise ValueError(
+                f"fitting_info was made at {info_sfreq} Hz but this DipoleFitter "
+                f"runs at {self._sfreq} Hz; construct it with sfreq={info_sfreq}"
+            )
         if orientation == 'fixed':
             ori_vector = self._fitting_info['orientation']
         else:
@@ -336,3 +363,7 @@ class DipoleFitter:
     def fitting_info(self):
         """Fitting parameters dict (available after ``fit()`` is called)."""
         return self._fitting_info
+
+    @property
+    def sfreq(self):
+        return self._sfreq

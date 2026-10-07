@@ -40,6 +40,7 @@ from prime_core.prime_config import (
     get_post_initial_time_range,
     get_post_time_range,
     get_processed_sfreq,
+    get_raw_sfreq,
     get_dipole_time_range,
 )
 from prime_core.tep_normalizer import TEPNormalizer
@@ -126,6 +127,13 @@ class Decider:
         self.num_eeg_channels = num_eeg_channels
         self.num_emg_channels = num_emg_channels
         self.sampling_frequency = sampling_frequency
+        # Every crop and every MNE info is built from raw_sfreq in prime.yaml, never from the
+        # stream; at post_sfreq == raw_sfreq nothing downstream would notice a mismatch.
+        if abs(float(sampling_frequency) - get_raw_sfreq()) > 1e-6:
+            raise ValueError(
+                f"Stream runs at {sampling_frequency} Hz, but raw_sfreq in "
+                f"configs/prime.yaml is {get_raw_sfreq()} Hz"
+            )
 
         self.mock_tms_device = runtime_params.get("mock_tms_device")
         self.is_open_loop_session = runtime_params["is_open_loop_session"]
@@ -192,7 +200,7 @@ class Decider:
 
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.preprocessor.keep_full_epochs = True           # opt-in to keep full windows from preprocess_pre/_post
-        self.dipole_fitter = DipoleFitter(FORWARD_PATH)
+        self.dipole_fitter = DipoleFitter(FORWARD_PATH, sfreq=self.preprocessor.post_sfreq)
         self.normalizer = TEPNormalizer()
 
         # Create results directory and trials CSV file.
@@ -690,6 +698,9 @@ class Decider:
         print(f"Wrote {len(self.prediction_log)} prediction attempts to {path}")
 
     def __del__(self) -> None:
+        # __init__ can now stop early (stream-rate check); nothing to flush in that case.
+        if not hasattr(self, "prediction_log"):
+            return
         self.write_profile()
         self.write_prediction_log()
 
@@ -790,10 +801,15 @@ class Decider:
 
         np.save(self.results_dir / "proc_info.npy", {
             "ch_names": list(self.preprocessor._info_processed["ch_names"]),
-            "sfreq": get_processed_sfreq(),
-            "pre":  {"tmin": self.qc_tmin, "tmax": self.qc_tmax},
-            "post": {"tmin": self.post_tmin, "tmax": self.post_tmax},
-            "dipole": {"tmin": self.dipole_tmin, "tmax": self.dipole_tmax},
+            # One rate per window. The old top-level "sfreq" is gone on purpose: stale
+            # analysis code should fail rather than read 1000 Hz for the post window.
+            "pre":    {"tmin": self.qc_tmin, "tmax": self.qc_tmax,
+                       "sfreq": get_processed_sfreq()},
+            "post":   {"tmin": self.post_tmin, "tmax": self.post_tmax,
+                       "sfreq": self.preprocessor.post_sfreq},
+            "dipole": {"tmin": self.dipole_tmin, "tmax": self.dipole_tmax,
+                       "sfreq": self.preprocessor.post_sfreq},
+            "ica_sfreq": self.preprocessor.ica_sfreq,
             "proc_shape": ("n_channels", "n_times"),
             "units": "as received from the acquisition stream (microvolt-scale, uncalibrated)",
         }, allow_pickle=True)

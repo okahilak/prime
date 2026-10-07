@@ -62,9 +62,28 @@ def get_raw_sfreq() -> float:
 
 
 def get_processed_sfreq() -> float:
-    """Sampling rate (Hz) after online preprocessing resampling."""
+    """Sampling rate (Hz) of the QC / model (pre-stimulus) window -- the PRIME input."""
     cfg = load_prime_config()
     return float(cfg.processed_sfreq)
+
+
+def get_ica_sfreq() -> float:
+    """Sampling rate (Hz) of the calibration ICA window (falls back to processed_sfreq)."""
+    cfg = load_prime_config()
+    return float(cfg.get("ica_sfreq", cfg.processed_sfreq))
+
+
+def get_post_sfreq() -> float:
+    """Sampling rate (Hz) of the post-stimulus window (falls back to processed_sfreq)."""
+    cfg = load_prime_config()
+    return float(cfg.get("post_sfreq", cfg.processed_sfreq))
+
+
+def get_dipole_window_limits() -> tuple[float, float]:
+    """Min / max dipole sub-window length in seconds (defaults = 3 / 6 samples at 1 kHz)."""
+    cfg = load_prime_config()
+    return (float(cfg.get("dipole_min_window", 0.003)),
+            float(cfg.get("dipole_max_window", 0.006)))
 
 
 def time_to_sample(time: float, first_time: float, sfreq: float) -> int:

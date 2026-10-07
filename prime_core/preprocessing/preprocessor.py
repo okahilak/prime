@@ -31,6 +31,8 @@ from prime_core.prime_config import (
     get_ica_time_range,
     get_model_time_range,
     get_processed_sfreq,
+    get_ica_sfreq,
+    get_post_sfreq,
     get_post_initial_time_range,
     get_post_time_range,
     get_raw_sfreq,
@@ -76,6 +78,14 @@ def _mne_info_from_forward(forward: mne.Forward) -> mne.Info:
     info.set_montage(montage)
     _require_info_sfreq(info, raw_sfreq)
     return info
+
+
+def _info_with_sfreq(info: mne.Info, sfreq: float) -> mne.Info:
+    """Copy of ``info`` stamped with ``sfreq`` (one per processing rate)."""
+    out = info.copy()
+    with out._unlock():
+        out["sfreq"] = float(sfreq)
+    return out
 
 
 warnings.filterwarnings(
@@ -608,7 +618,9 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
 class Preprocessor:
     """Accumulates raw trials and produces calibration parameters on demand."""
 
-    def __init__(self, forward_path):
+    def __init__(self, forward_path, *, ica_sfreq=None, post_sfreq=None):
+        """``ica_sfreq`` / ``post_sfreq`` default to configs/prime.yaml; pass 1000.0 to
+        reproduce the pre-5-kHz pipeline (e.g. to replay a legacy session)."""
         cfg = get_default_config()
         raw_sfreq = get_raw_sfreq()
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
@@ -635,10 +647,12 @@ class Preprocessor:
         self._dipole_tmin = dipole_tmin
         self._dipole_tmax = dipole_tmax
         self._opts = cfg.to_dicts()
-        self._processed_sfreq = get_processed_sfreq()
-        self._info_processed = self._info.copy()
-        with self._info_processed._unlock():
-            self._info_processed["sfreq"] = self._processed_sfreq
+        self._processed_sfreq = get_processed_sfreq()          # QC + model window
+        self._ica_sfreq = float(ica_sfreq) if ica_sfreq is not None else get_ica_sfreq()
+        self._post_sfreq = float(post_sfreq) if post_sfreq is not None else get_post_sfreq()
+        self._info_processed = _info_with_sfreq(self._info, self._processed_sfreq)
+        self._info_ica = _info_with_sfreq(self._info, self._ica_sfreq)
+        self._info_post = _info_with_sfreq(self._info, self._post_sfreq)
 
         self.qc_epochs = None
         self.ica_epochs = None
@@ -647,7 +661,7 @@ class Preprocessor:
 
         self.keep_full_epochs = False        # opt-in to keep full windows from preprocess_pre/_post
         self.last_pre_full = None            # (n_channels, 201) over [qc_tmin, qc_tmax]
-        self.last_post_full = None           # (n_channels, 100) over [post_tmin, post_tmax]
+        self.last_post_full = None           # (n_channels, 100 @1 kHz / 496 @5 kHz) over [post_tmin, post_tmax]
         self.last_post_baselines = None      # (2, n_channels): rows = apply_baseline calls
         self.last_post_reject_reason = None  # None / 'ocular' / 'global_mad' / 'local_mad'
 
@@ -691,13 +705,14 @@ class Preprocessor:
             self._post_initial_tmax,
         )
 
+        # Each window at its own rate. Equal rates -> copy, no filtering (no anti-alias smear).
         qc_buffer = resample_buffer_polyphase(qc_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        ica_buffer = resample_buffer_polyphase(ica_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
-        post_buffer = resample_buffer_polyphase(post_buffer, sfreq_from=raw_sfreq, sfreq_to=processed_sfreq)
+        ica_buffer = resample_buffer_polyphase(ica_buffer, sfreq_from=raw_sfreq, sfreq_to=self._ica_sfreq)
+        post_buffer = resample_buffer_polyphase(post_buffer, sfreq_from=raw_sfreq, sfreq_to=self._post_sfreq)
 
         qc_trial = _numpy_to_epochs_array(qc_buffer, self._info_processed, self._qc_tmin)
-        ica_trial = _numpy_to_epochs_array(ica_buffer, self._info_processed, self._ica_tmin)
-        post_trial = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_initial_tmin)
+        ica_trial = _numpy_to_epochs_array(ica_buffer, self._info_ica, self._ica_tmin)
+        post_trial = _numpy_to_epochs_array(post_buffer, self._info_post, self._post_initial_tmin)
 
         if self.qc_epochs is None:
             self.qc_epochs = qc_trial
@@ -733,7 +748,13 @@ class Preprocessor:
                 self._forward,
             )
         )
+        # Record the rates in the bundle: the SSP-SIR kernel and the blink-check
+        # indices count in samples and are only valid at these rates.
+        calibration_params['sfreq_qc'] = self._processed_sfreq
+        calibration_params['sfreq_ica'] = self._ica_sfreq
+        calibration_params['sfreq_post'] = self._post_sfreq
         self._calibration_params = calibration_params
+        self._check_bundle_matches_rates(calibration_params)
         qc_shape = self.qc_epochs.get_data(copy=False).shape
         self._mad_workspace = SingleTrialMadWorkspace(qc_shape[1], qc_shape[2])
 
@@ -747,15 +768,69 @@ class Preprocessor:
 
         return model_buffers, dipole_buffers
 
+    @staticmethod
+    def bundle_post_sfreq(calibration_params) -> float:
+        """Post rate a bundle was calibrated at.
+
+        New bundles carry a 'sfreq_post' stamp. Unstamped bundles (pilot001-005, or offline
+        benchmarks made before the stamp existed) are identified by matching the SSP-SIR kernel
+        length against the two rates the post window has ever run at; anything else raises.
+        """
+        if 'sfreq_post' in calibration_params:
+            return float(calibration_params['sfreq_post'])
+        post_tmin, post_tmax = get_post_time_range()
+        n = np.asarray(calibration_params['sspsir_filter_kernel']).shape[-1]
+        for candidate in (get_processed_sfreq(), get_raw_sfreq()):
+            if epoch_n_times(post_tmin, post_tmax, candidate) == n:
+                return float(candidate)
+        raise ValueError(
+            f"unstamped bundle: a {n}-sample SSP-SIR kernel matches neither processed_sfreq nor "
+            f"raw_sfreq over [{post_tmin}, {post_tmax}] s"
+        )
+
+    def _check_bundle_matches_rates(self, calibration_params) -> None:
+        """Fail loudly if sample-indexed bundle entries do not fit this instance's post rate."""
+        n_post = epoch_n_times(self._post_tmin, self._post_tmax, self._post_sfreq)
+        n_post_initial = epoch_n_times(self._post_initial_tmin, self._post_initial_tmax,
+                                       self._post_sfreq)
+        kernel = np.asarray(calibration_params['sspsir_filter_kernel'])
+        if kernel.shape[-1] != n_post:
+            raise ValueError(
+                f"sspsir_filter_kernel has {kernel.shape[-1]} samples, post window needs {n_post} "
+                f"at {self._post_sfreq} Hz -- bundle and post_sfreq disagree"
+            )
+        for comp, info in calibration_params['ocular_threshold_post'].items():
+            idx = np.asarray(info['time_indices_of_interest'])
+            if idx.size and idx.max() >= n_post_initial:
+                raise ValueError(f"ocular indices of IC {comp} exceed the {n_post_initial}-sample post epoch")
+
     @classmethod
     def from_bundle(cls, calibration_params, forward_path):
-        """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk)."""
-        instance = cls(forward_path)
+        """Create a calibrated Preprocessor from pre-computed params (e.g. loaded from disk).
+
+        The post / ICA rates are taken from the bundle, not from the config, so legacy 1 kHz
+        bundles (pilot001-005) keep replaying exactly while new sessions run at 5 kHz.
+        """
+        post_sfreq = cls.bundle_post_sfreq(calibration_params)
+        ica_sfreq = float(calibration_params.get('sfreq_ica', post_sfreq))
+        instance = cls(forward_path, ica_sfreq=ica_sfreq, post_sfreq=post_sfreq)
+        qc_sfreq = float(calibration_params.get('sfreq_qc', instance._processed_sfreq))
+        if abs(qc_sfreq - instance._processed_sfreq) > 1e-6:
+            raise ValueError(f"bundle QC rate {qc_sfreq} != processed_sfreq {instance._processed_sfreq}")
+        instance._check_bundle_matches_rates(calibration_params)
         instance._calibration_params = calibration_params
         n_channels = len(instance._info["ch_names"])
         n_times = epoch_n_times(instance._qc_tmin, instance._qc_tmax, instance._processed_sfreq)
         instance._mad_workspace = SingleTrialMadWorkspace(n_channels, n_times)
         return instance
+
+    @property
+    def post_sfreq(self) -> float:
+        return self._post_sfreq
+
+    @property
+    def ica_sfreq(self) -> float:
+        return self._ica_sfreq
 
     def preprocess_pre(
         self,
@@ -894,9 +969,9 @@ class Preprocessor:
         post_buffer = resample_buffer_polyphase(
             post_buffer,
             sfreq_from=self._info["sfreq"],
-            sfreq_to=self._processed_sfreq,
+            sfreq_to=self._post_sfreq,          # 5 kHz: plain copy, no anti-alias filter
         )
-        epoch_post = _numpy_to_epochs_array(post_buffer, self._info_processed, self._post_initial_tmin)
+        epoch_post = _numpy_to_epochs_array(post_buffer, self._info_post, self._post_initial_tmin)
         calibration_params = self._calibration_params
         dicts = self._cfg.to_dicts()
         trial_reject_opts = dicts["trial_reject_opts"]

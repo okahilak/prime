@@ -40,7 +40,8 @@ def resample_buffer_polyphase(
 ) -> np.ndarray:
     """Resample (n_samples, n_channels) using scipy polyphase."""
     if abs(sfreq_from - sfreq_to) < 1e-9:
-        return data
+        # Never hand back the caller's array: downstream MNE steps work in place.
+        return data.copy()
 
     up, down = _cached_resample_up_down(str(sfreq_from), str(sfreq_to))
     if up == down == 1:
