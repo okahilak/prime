@@ -79,6 +79,12 @@ def get_post_sfreq() -> float:
     return float(cfg.get("post_sfreq", cfg.processed_sfreq))
 
 
+def get_post_lowpass() -> bool:
+    """Low-pass the 5 kHz post window at 500 Hz (falls back to off, as before the low-pass)."""
+    cfg = load_prime_config()
+    return bool(cfg.get("post_lowpass", False))
+
+
 def get_dipole_window_limits() -> tuple[float, float]:
     """Min / max dipole sub-window length in seconds (defaults = 3 / 6 samples at 1 kHz)."""
     cfg = load_prime_config()

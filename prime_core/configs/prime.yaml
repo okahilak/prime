@@ -45,6 +45,9 @@ processed_sfreq: 1000  # QC + model window (PRIME input). Needs retraining to ch
 ica_sfreq: 1000        # calibration ICA window (fit + ICLabel)
 post_sfreq: 5000       # post-stimulus window, calibration and every pulse
 
+# --- Post-stimulus low-pass (500 Hz, 31-tap zero-phase FIR right after the first artifact blank) ---
+post_lowpass: true     # 5 kHz only; saved in the calibration bundle, which replay follows
+
 # --- Dipole sub-window search (seconds; converted with post_sfreq) ---
 dipole_min_window: 0.003   # was min_window_size=3 samples at 1 kHz
 dipole_max_window: 0.006   # was max_window_size=6 samples at 1 kHz

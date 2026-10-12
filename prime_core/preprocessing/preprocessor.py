@@ -33,6 +33,7 @@ from prime_core.prime_config import (
     get_processed_sfreq,
     get_ica_sfreq,
     get_post_sfreq,
+    get_post_lowpass,
     get_post_initial_time_range,
     get_post_time_range,
     get_raw_sfreq,
@@ -55,6 +56,7 @@ from prime_core.preprocessing.utils.mad import (
     local_mad_zscore_rejected,
 )
 from prime_core.preprocessing.utils.resampling import resample_buffer_polyphase
+from prime_core.preprocessing.utils.post_lowpass import lowpass_post
 from prime_core.preprocessing.config import get_default_config
 
 DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "offline_data"
@@ -426,11 +428,12 @@ def crop_mne_trial_to_buffer(
 # ==================== Calibration pipeline ====================
 
 
-def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forward):
+def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forward, post_lowpass=False):
     """Full calibration preprocessing pipeline for qc, ica, and post epochs.
 
     Returns ``(calibration_params, n_successful_trials, model_buffers, dipole_buffers)``
     where the last two arrays are cropped to the model and dipole time windows.
+    ``post_lowpass`` low-passes the post epochs at 500 Hz right after the first blank.
     """
     channel_reject_opts = opts['channel_reject_opts']
     ica_opts = opts['ica_opts']
@@ -449,6 +452,12 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
         tmax=cfg.artifact_window_1[1],
         mode='window',
     )
+    if post_lowpass:
+        # After the blank, so only its edge is smeared, never the TMS pulse (post_lowpass.py).
+        post_data = lowpass_post(post_epochs.get_data(copy=True), post_epochs.info['sfreq'])
+        post_epochs = mne.EpochsArray(
+            post_data, info=post_epochs.info, events=post_epochs.events, tmin=post_epochs.times[0],
+        )
 
     bad_channels_qc, qc_filter = _detect_bad_channels_qc(
         qc_epochs, channel_reject_opts['pre'], filter_opts,
@@ -618,9 +627,11 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
 class Preprocessor:
     """Accumulates raw trials and produces calibration parameters on demand."""
 
-    def __init__(self, forward_path, *, ica_sfreq=None, post_sfreq=None):
+    def __init__(self, forward_path, *, ica_sfreq=None, post_sfreq=None, post_lowpass=None):
         """``ica_sfreq`` / ``post_sfreq`` default to configs/prime.yaml; pass 1000.0 to
-        reproduce the pre-5-kHz pipeline (e.g. to replay a legacy session)."""
+        reproduce the pre-5-kHz pipeline (e.g. to replay a legacy session).
+        ``post_lowpass`` (True / False) also defaults to configs/prime.yaml; only calibrate()
+        reads it and saves it in the bundle."""
         cfg = get_default_config()
         raw_sfreq = get_raw_sfreq()
         self._forward = mne.read_forward_solution(str(forward_path), verbose=False)
@@ -650,6 +661,7 @@ class Preprocessor:
         self._processed_sfreq = get_processed_sfreq()          # QC + model window
         self._ica_sfreq = float(ica_sfreq) if ica_sfreq is not None else get_ica_sfreq()
         self._post_sfreq = float(post_sfreq) if post_sfreq is not None else get_post_sfreq()
+        self._post_lowpass = bool(post_lowpass) if post_lowpass is not None else get_post_lowpass()
         self._info_processed = _info_with_sfreq(self._info, self._processed_sfreq)
         self._info_ica = _info_with_sfreq(self._info, self._ica_sfreq)
         self._info_post = _info_with_sfreq(self._info, self._post_sfreq)
@@ -738,6 +750,8 @@ class Preprocessor:
         if self.qc_epochs is None:
             raise RuntimeError("No trials have been added yet.")
 
+        # Post low-pass only at 5 kHz: at 1 kHz the resampler already low-passes at 500 Hz.
+        post_lowpass = self._post_lowpass and self._post_sfreq == 5000.0
         calibration_params, n_successful_trials, model_buffers, dipole_buffers = (
             preprocess_calibration(
                 self.qc_epochs.copy(),
@@ -746,6 +760,7 @@ class Preprocessor:
                 self._cfg,
                 self._opts,
                 self._forward,
+                post_lowpass=post_lowpass,
             )
         )
         # Record the rates in the bundle: the SSP-SIR kernel and the blink-check
@@ -753,6 +768,7 @@ class Preprocessor:
         calibration_params['sfreq_qc'] = self._processed_sfreq
         calibration_params['sfreq_ica'] = self._ica_sfreq
         calibration_params['sfreq_post'] = self._post_sfreq
+        calibration_params['post_lowpass'] = post_lowpass   # preprocess_post follows the bundle
         self._calibration_params = calibration_params
         self._check_bundle_matches_rates(calibration_params)
         qc_shape = self.qc_epochs.get_data(copy=False).shape
@@ -988,6 +1004,15 @@ class Preprocessor:
             tmax=self._cfg.artifact_window_1[1],
             mode="window",
         )
+        if calibration_params.get("post_lowpass", False):     # absent in older bundles
+            data = lowpass_post(epoch_post.get_data(copy=True), self._post_sfreq)
+            epoch_post = mne.EpochsArray(
+                data,
+                epoch_post.info,
+                events=epoch_post.events,
+                tmin=epoch_post.times[0],
+                verbose=False,
+            )
 
         if calibration_params["bad_channels"]:
             epoch_post, _ = _interpolate_bad_channels(

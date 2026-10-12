@@ -810,6 +810,7 @@ class Decider:
             "dipole": {"tmin": self.dipole_tmin, "tmax": self.dipole_tmax,
                        "sfreq": self.preprocessor.post_sfreq},
             "ica_sfreq": self.preprocessor.ica_sfreq,
+            "post_lowpass": self.preprocessor.calibration_params["post_lowpass"],  # 500 Hz, after the first blank
             "proc_shape": ("n_channels", "n_times"),
             "units": "as received from the acquisition stream (microvolt-scale, uncalibrated)",
         }, allow_pickle=True)
@@ -828,6 +829,7 @@ class Decider:
 
         print(f"Calibration took {time.perf_counter() - t0:.2f} seconds")
         print(f"Calibration used {num_calibration_trials} trials")
+        print(f"Post low-pass (500 Hz): {'on' if self.preprocessor.calibration_params['post_lowpass'] else 'off'}")
         bad_channels = self.preprocessor.calibration_params['bad_channels']
         print(f"Calibration detected {len(bad_channels)} bad channels: {', '.join(bad_channels) if bad_channels else 'none'}")
         self.write_calibration_summary(num_calibration_trials)
