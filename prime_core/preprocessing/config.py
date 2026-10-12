@@ -192,9 +192,9 @@ def get_default_config() -> PreprocConfig:
     freq_range = [30, 47]
 
     return PreprocConfig(
-        baseline=[-0.025, -0.015],
+        baseline=[-0.015, -0.005],
         reject_range=[0.02, 0.06],
-        artifact_window_1=[-0.014, 0.014],
+        artifact_window_1=[-0.002, 0.014],
         artifact_window_2=[None, 0.015],
         freq_range=freq_range,
         channel_reject_opts=ChannelRejectOpts(
