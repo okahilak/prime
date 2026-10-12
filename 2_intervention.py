@@ -796,6 +796,15 @@ class Decider:
         model_buffers, dipole_buffers = self.preprocessor.calibrate()
         amplitudes = self.dipole_fitter.calibrate(dipole_buffers)
         tep_amplitudes = self.normalizer.calibrate(amplitudes)
+        # save normalizer at calibration
+        self.preprocessor.calibration_params["normalizer"] = {
+            "scale_factor": self.normalizer.scale_factor,
+            "ewma_span": self.normalizer.ewma_span,
+            "cal_mean": float(self.normalizer._cal_mean),
+            "cal_std": float(self.normalizer._cal_std),
+            "cal_amplitudes": np.asarray(amplitudes, dtype=float),
+            "cal_labels": np.asarray(tep_amplitudes, dtype=float),
+        }
         self.predictor.calibrate(model_buffers, tep_amplitudes)
         self.predictor.warm_up()
 
