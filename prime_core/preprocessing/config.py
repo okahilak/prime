@@ -230,7 +230,7 @@ def get_default_config() -> PreprocConfig:
         ),
         trial_reject_opts=TrialRejectOpts(
             ocular=OcularRejectOpts(
-                z_threshold=2.5,
+                z_threshold=3.0,
                 pre_timerange_min=-0.1,
                 post_timerange=[0.015, None],
             ),
