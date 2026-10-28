@@ -296,7 +296,11 @@ def _find_bad_trials_once(epochs, global_z_threshold, local_z_threshold, psd_thr
 
 
 def _detect_ocular_trials(ica, epochs, tmin, tmax, ocular_component_indices, z_threshold):
-    """Detect trials with ocular artifacts from ICA source time courses."""
+    """Detect trials with ocular artifacts from ICA source time courses.
+
+    Reference mean and SD are pooled over [30, 60] ms of all calibration trials per IC;
+    a trial's score is the median of z over [30, 60] ms.
+    """
     sources = ica.get_sources(epochs)
     source_data = sources.get_data(copy=True)
 
@@ -310,23 +314,52 @@ def _detect_ocular_trials(ica, epochs, tmin, tmax, ocular_component_indices, z_t
     thresholds = {}
 
     for component_idx in ocular_component_indices:
-        abs_time_course = np.abs(source_data[:, component_idx, :])
+        abs_time_course = np.abs(source_data[:, component_idx, time_mask])  # window samples only
         n_trials, n_times = abs_time_course.shape
-        flat_time_course = abs_time_course.ravel()
-        z_scored = zscore(flat_time_course).reshape(n_trials, n_times)
+        flat_time_course = abs_time_course.ravel()                          # pooled over trials
+        mean = np.mean(flat_time_course)
+        std = np.std(flat_time_course)
+        z_scored = ((flat_time_course - mean) / std).reshape(n_trials, n_times)
 
         assert z_scored.shape == (n_trials, n_times)
 
-        median_z = np.median(z_scored[:, time_mask], axis=1)
+        median_z = np.median(z_scored, axis=1)
         bad_now = np.where(median_z > z_threshold)[0]
         thresholds[component_idx] = {
-            'std': np.std(flat_time_course),
-            'mean': np.mean(flat_time_course),
+            'std': std,
+            'mean': mean,
             'time_indices_of_interest': time_mask,
         }
         bad_trials = np.union1d(bad_trials, bad_now)
 
     return list(bad_trials.astype(int)), thresholds
+
+
+# check ocular gate: warn when more than this fraction of calibration trials dropped.
+_OCULAR_CALIBRATION_WARN_FRACTION = 0.15
+
+
+def _check_ocular_gate_calibration(calibration_params, n_trials):
+    """Print the ocular gate's calibration summary;
+    warning if no IC component found or if more than 15 % of the calibration trials were dropped.
+    """
+    eye_ics = [int(c) for c in calibration_params['ocular_threshold_post']]
+    n_dropped = len(calibration_params['trials_dropped']['ocular'])
+    percent = 100.0 * n_dropped / n_trials
+    print(
+        f"Ocular gate: {len(eye_ics)} eye IC(s) {eye_ics}; dropped {n_dropped} of {n_trials} "
+        f"calibration trials ({percent:.1f} %)"
+    )
+    if not eye_ics:
+        print(
+            "WARNING: ICLabel found no eye-blink IC in the calibration block, so no "
+            "ocular gate will run online."
+        )
+    if n_dropped > _OCULAR_CALIBRATION_WARN_FRACTION * n_trials:
+        print(
+            f"WARNING: the ocular gate dropped {percent:.1f} % of the calibration trials, "
+            f"more than {100 * _OCULAR_CALIBRATION_WARN_FRACTION:.0f} % (pilots: ~5 %)"
+        )
 
 
 def _drop_bad_trials(epoch_list, bad_indices):
@@ -763,6 +796,9 @@ class Preprocessor:
                 post_lowpass=post_lowpass,
             )
         )
+        # Prints the eye-IC count and the calibration trials the ocular gate dropped;
+        # warns if there is no eye IC (no ocular gate online) or more than 15 % are dropped.
+        _check_ocular_gate_calibration(calibration_params, self.n_trials)
         # Record the rates in the bundle: the SSP-SIR kernel and the blink-check
         # indices count in samples and are only valid at these rates.
         calibration_params['sfreq_qc'] = self._processed_sfreq
