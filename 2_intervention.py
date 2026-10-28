@@ -223,7 +223,7 @@ class Decider:
             "trigger_time", "is_forced", "pulse_time",
             "preprocessing_failed", "postprocessing_failed",
             "prediction_probability", "prime_attempts", "qc_failures", "tep_amplitude",
-            "tep_amplitude_raw", "tep_ewma", "tep_detrended", "tep_zscore",
+            "tep_amplitude_raw", "tep_ewma", "tep_detrended",
             "threshold", "search_time", "post_reject_reason",
         ]
         with open(self.trials_csv, "w", newline="") as f:
@@ -327,7 +327,6 @@ class Decider:
             "tep_amplitude_raw": None,
             "tep_ewma": None,
             "tep_detrended": None,
-            "tep_zscore": None,
             "preprocessing_failed": False,
             "postprocessing_failed": False,
             "post_reject_reason": None,
@@ -508,7 +507,7 @@ class Decider:
         t0 = time.perf_counter()
 
         tep = {"label": None, "raw": None, "ewma": None,
-               "detrended": None, "zscore": None}
+               "detrended": None}
 
         if stage_name == "calibration":
             self.preprocessor.add_trial(eeg_buffer, time_offsets)
@@ -540,7 +539,6 @@ class Decider:
             "tep_amplitude_raw": tep["raw"],
             "tep_ewma":          tep["ewma"],
             "tep_detrended":     tep["detrended"],
-            "tep_zscore":        tep["zscore"],
         })
         self.write_trial_row()
         if self.is_intervention_stage(stage_name):
@@ -779,7 +777,7 @@ class Decider:
 
         if not update_normalizer:
             return True, {"raw": float(amplitude), "ewma": None,
-                      "detrended": None, "zscore": None, "label": None}
+                      "detrended": None, "label": None}
 
         tep_amplitude = self.normalizer.transform_verbose(amplitude)
         return True, tep_amplitude
@@ -800,8 +798,6 @@ class Decider:
         self.preprocessor.calibration_params["normalizer"] = {
             "scale_factor": self.normalizer.scale_factor,
             "ewma_span": self.normalizer.ewma_span,
-            "cal_mean": float(self.normalizer._cal_mean),
-            "cal_std": float(self.normalizer._cal_std),
             "cal_amplitudes": np.asarray(amplitudes, dtype=float),
             "cal_labels": np.asarray(tep_amplitudes, dtype=float),
         }

@@ -9,6 +9,10 @@ class TEPNormalizer:
     A stateful normalizer that learns from a calibration set and applies transformations
     causally to generate soft, probabilistic labels.
 
+    Label = ECDF of the EWMA-detrended amplitude 
+    EWMA continuously updated 
+    ECDF frozen after calibration
+
     Usage:
         normalizer = TEPNormalizer()
         cal_labels = normalizer.calibrate(cal_amplitudes)
@@ -23,8 +27,6 @@ class TEPNormalizer:
         self.ewma_span = ewma_span
         self.warmup_period = ewma_span
         self.is_calibrated = False
-        self._cal_mean = 0.0
-        self._cal_std = 1.0
         self._cdf_function = None
         self._amplitudes: list = []
 
@@ -49,17 +51,10 @@ class TEPNormalizer:
         detrended = values - ewma_trend
 
         stable_detrended = detrended[self.warmup_period:]
-        self._cal_mean = np.nanmean(stable_detrended)
-        self._cal_std = np.nanstd(stable_detrended)
-        if self._cal_std < 1e-9:
-            self._cal_std = 1.0
-
-        normalized = (stable_detrended - self._cal_mean) / self._cal_std
-        self._cdf_function = ecdf(normalized.dropna()).cdf.evaluate
+        self._cdf_function = ecdf(stable_detrended.dropna()).cdf.evaluate
         self.is_calibrated = True
 
-        all_normalized = (detrended - self._cal_mean) / self._cal_std
-        return all_normalized.apply(self._cdf_function).values
+        return detrended.apply(self._cdf_function).values
 
     def transform(self, amplitude: float) -> float:
         """
@@ -86,8 +81,7 @@ class TEPNormalizer:
 
         ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
         detrended = values.iloc[-1] - ewma_trend.iloc[-1]
-        normalized = (detrended - self._cal_mean) / self._cal_std
-        return float(self._cdf_function(normalized))
+        return float(self._cdf_function(detrended))
 
     def transform_verbose(self, amplitude: float) -> dict:
         """Same arithmetic and same state mutation as transform(),
@@ -101,12 +95,10 @@ class TEPNormalizer:
         ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
         trend      = float(ewma_trend.iloc[-1])
         detrended  = float(values.iloc[-1] - trend)
-        normalized = float((detrended - self._cal_mean) / self._cal_std)
 
         return {
             "raw":       float(amplitude),
             "ewma":      trend,
             "detrended": detrended,
-            "zscore":    normalized,
-            "label":     float(self._cdf_function(normalized)),
+            "label":     float(self._cdf_function(detrended)),
         }
