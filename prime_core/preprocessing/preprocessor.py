@@ -129,25 +129,40 @@ def _apply_filter(data, coeffs, pad_time, fs):
 # ==================== Bad Channel Detection ====================
 
 def _get_bad_channels_epoched(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
-    """Iteratively detect bad channels using multiple metrics."""
-    bad_channels = _get_bad_channels_epoched_once(
+    """Iteratively detect bad channels using multiple metrics.
+
+    Returns the bad channel names and ``reasons``: channel name -> list of the metrics
+    that flagged it ('mad', 'power', 'autocorr', 'auc').
+    """
+    reasons = {}
+
+    def _add_reasons(per_metric):
+        for metric, names in per_metric.items():
+            for name in names:
+                reasons.setdefault(str(name), []).append(metric)
+
+    bad_channels, per_metric = _get_bad_channels_epoched_once(
         epochs.copy().set_eeg_reference('average', projection=False, verbose=False),
         z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold
     )
+    _add_reasons(per_metric)
     if len(bad_channels) > 0:
         while True:
             remaining = epochs.copy().drop_channels(bad_channels).set_eeg_reference('average', projection=False, verbose=False)
-            new_bad = _get_bad_channels_epoched_once(remaining, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold)
+            new_bad, per_metric = _get_bad_channels_epoched_once(remaining, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold)
+            _add_reasons(per_metric)
             if len(new_bad) == 0:
                 break
             bad_channels = list(np.union1d(bad_channels, new_bad))
-    return bad_channels
+    return bad_channels, reasons
 
 
 def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, freq_range, z_autocorr_threshold, z_auc_threshold):
+    """One detection pass. Returns the bad channel names and ``per_metric``: metric -> names it flagged."""
     data = epochs.get_data(copy=True)
     n_trials, n_channels, _ = data.shape
     bad_indices = np.array([])
+    per_metric = {}
 
     if z_mad_threshold:
         flattened = data.swapaxes(0, 1).reshape(n_channels, -1)
@@ -155,6 +170,7 @@ def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, f
         z_mad = zscore(mad_vals)
         bad_mad = np.where((z_mad > z_mad_threshold[1]) | (z_mad < z_mad_threshold[0]))[0]
         bad_indices = np.union1d(bad_indices, bad_mad)
+        per_metric['mad'] = [epochs.ch_names[i] for i in bad_mad]
 
     if z_power_threshold:
         psds, _ = mne.time_frequency.psd_array_multitaper(data, epochs.info['sfreq'], fmin=freq_range[0], fmax=freq_range[1], verbose=False)
@@ -162,12 +178,14 @@ def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, f
         z_psd = zscore(mean_psd)
         bad_power = np.where(z_psd > z_power_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_power)
+        per_metric['power'] = [epochs.ch_names[i] for i in bad_power]
 
     if z_autocorr_threshold:
         autocorrelations = [np.mean([np.corrcoef(data[t, c, :-1], data[t, c, 1:])[0, 1] for t in range(n_trials)]) for c in range(n_channels)]
         z_autocorr = np.abs(zscore(autocorrelations))
         bad_autocorr = np.where(z_autocorr > z_autocorr_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_autocorr)
+        per_metric['autocorr'] = [epochs.ch_names[i] for i in bad_autocorr]
 
     if z_auc_threshold:
         evoked = np.mean(data, axis=0)
@@ -175,19 +193,20 @@ def _get_bad_channels_epoched_once(epochs, z_mad_threshold, z_power_threshold, f
         z_auc = zscore(auc_vals)
         bad_auc = np.where(z_auc > z_auc_threshold)[0]
         bad_indices = np.union1d(bad_indices, bad_auc)
+        per_metric['auc'] = [epochs.ch_names[i] for i in bad_auc]
 
     bad_indices = bad_indices.astype(int)
-    return [epochs.ch_names[i] for i in bad_indices]
+    return [epochs.ch_names[i] for i in bad_indices], per_metric
 
 
 def _detect_bad_channels_qc(epochs, options, filter_opts):
     data = epochs.get_data(copy=True)
     data, filter_coefficients = _butter_filter(data, filter_opts['cutoff'], filter_opts['btype'], epochs.info['sfreq'], filter_opts['order'], filter_opts['pad_time'])
     filtered_epochs = mne.EpochsArray(data, epochs.info, epochs.events, tmin=epochs.times[0])
-    bad_channels = _get_bad_channels_epoched(filtered_epochs, options['z_score_threshold_mad'],
+    bad_channels, reasons = _get_bad_channels_epoched(filtered_epochs, options['z_score_threshold_mad'],
                                         options['z_score_threshold_power'], options['fmin_fmax'],
                                         options['z_score_threshold_autocorr'], False)
-    return bad_channels, filter_coefficients
+    return bad_channels, filter_coefficients, reasons
 
 
 def _detect_bad_channels_post(epochs, options, time_range):
@@ -492,13 +511,19 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
             post_data, info=post_epochs.info, events=post_epochs.events, tmin=post_epochs.times[0],
         )
 
-    bad_channels_qc, qc_filter = _detect_bad_channels_qc(
+    bad_channels_qc, qc_filter, reasons_qc = _detect_bad_channels_qc(
         qc_epochs, channel_reject_opts['pre'], filter_opts,
     )
-    bad_channels_post = _detect_bad_channels_post(
+    bad_channels_post, reasons_post = _detect_bad_channels_post(
         post_epochs, channel_reject_opts['post'], cfg.reject_range,
     )
     bad_channels = list(np.union1d(bad_channels_qc, bad_channels_post))
+    # Why each bad channel was rejected, as 'window:metric' ('qc' = pre-stim QC window).
+    bad_channel_reasons = {
+        str(ch): [f"qc:{m}" for m in reasons_qc.get(str(ch), [])]
+        + [f"post:{m}" for m in reasons_post.get(str(ch), [])]
+        for ch in bad_channels
+    }
 
     if bad_channels:
         qc_epochs, interpolation_info = _interpolate_bad_channels(qc_epochs, bad_channels, None)
@@ -509,6 +534,7 @@ def preprocess_calibration(qc_epochs, ica_epochs, post_epochs, cfg, opts, forwar
 
     calibration_params['qc_filter'] = qc_filter
     calibration_params['bad_channels'] = bad_channels
+    calibration_params['bad_channel_reasons'] = bad_channel_reasons
     calibration_params['channel_interpolation_info'] = interpolation_info
 
     ica_data = ica_epochs.get_data(copy=True)
