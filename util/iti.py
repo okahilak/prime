@@ -8,7 +8,7 @@ import numpy as np
 ITI_MIN = 2.5
 ITI_MAX = 5.5
 
-TARGET_MEAN = 3.15       # s, mean of the whole mixture
+TARGET_MEAN = 3.00       # s, mean of the whole mixture
 SPIKE_VALUE = 5.5        # s, the point mass
 SPIKE_WEIGHT = 0.02     # fraction of draws at the spike
 CONCENTRATION = 5.0      # Beta concentration; below ~6.5 the mode sits at ITI_MIN
