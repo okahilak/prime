@@ -10,7 +10,8 @@ class TEPNormalizer:
     causally to generate soft, probabilistic labels.
 
     Label = ECDF of the EWMA-detrended amplitude 
-    EWMA continuously updated 
+    EWMA updated online, but only by amplitudes passed with update_trend=True;
+    every amplitude is part of its own trend, as in calibrate()
     ECDF frozen after calibration
 
     Usage:
@@ -56,17 +57,21 @@ class TEPNormalizer:
 
         return detrended.apply(self._cdf_function).values
 
-    def transform(self, amplitude: float) -> float:
+    def transform(self, amplitude: float, update_trend: bool = True) -> float:
         """
         Transform a single amplitude into a soft label.
 
-        Appends the amplitude to the internal history and recomputes
-        the EWMA-based label using the full sequence.
+        Computes the EWMA over the stored history plus this amplitude, so the
+        amplitude is part of its own trend, as in calibrate(). The amplitude is
+        then kept in the history only if update_trend is True.
 
         Parameters
         ----------
         amplitude : float
             A single TEP amplitude value.
+        update_trend : bool
+            Keep the amplitude in the EWMA history (default). If False, the
+            amplitude is labelled but does not move the trend for later trials.
 
         Returns
         -------
@@ -76,25 +81,27 @@ class TEPNormalizer:
         if not self.is_calibrated:
             raise RuntimeError("Not calibrated yet. Call .calibrate() first.")
 
-        self._amplitudes.append(float(amplitude))
-        values = pd.Series(self._amplitudes) * self.scale_factor
+        values = pd.Series(self._amplitudes + [float(amplitude)]) * self.scale_factor
 
         ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
         detrended = values.iloc[-1] - ewma_trend.iloc[-1]
+        if update_trend:
+            self._amplitudes.append(float(amplitude))
         return float(self._cdf_function(detrended))
 
-    def transform_verbose(self, amplitude: float) -> dict:
+    def transform_verbose(self, amplitude: float, update_trend: bool = True) -> dict:
         """Same arithmetic and same state mutation as transform(),
         but returns every intermediate instead of only the final label."""
         if not self.is_calibrated:
             raise RuntimeError("Not calibrated yet. Call .calibrate() first.")
 
-        self._amplitudes.append(float(amplitude))
-        values = pd.Series(self._amplitudes) * self.scale_factor
+        values = pd.Series(self._amplitudes + [float(amplitude)]) * self.scale_factor
 
         ewma_trend = values.ewm(span=self.ewma_span, adjust=True).mean()
         trend      = float(ewma_trend.iloc[-1])
         detrended  = float(values.iloc[-1] - trend)
+        if update_trend:
+            self._amplitudes.append(float(amplitude))
 
         return {
             "raw":       float(amplitude),

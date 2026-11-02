@@ -110,6 +110,13 @@ OPEN_LOOP_MINI_BLOCK_COMPOSITION = (
 )
 assert len(OPEN_LOOP_MINI_BLOCK_COMPOSITION) == MINI_BLOCK_SIZE
 
+# TEP label (prime_core/tep_normalizer.py): frozen calibration ECDF of amplitude - EWMA trend.
+# Only predetermined singles enter EWMA. Trials detrended with itself in trend.
+# EWMA_SPAN 20 per block in the PRIME session, 80 per block in the open-loop session
+EWMA_SPAN = 20
+LABELLED_CONDITIONS = ("prime_single_pulse", "predetermined_single")
+TREND_CONDITIONS = ("predetermined_single",)
+
 
 BUFFER_TOLERANCE = 0.005
 
@@ -201,7 +208,7 @@ class Decider:
         self.preprocessor = Preprocessor(FORWARD_PATH)
         self.preprocessor.keep_full_epochs = True           # opt-in to keep full windows from preprocess_pre/_post
         self.dipole_fitter = DipoleFitter(FORWARD_PATH, sfreq=self.preprocessor.post_sfreq)
-        self.normalizer = TEPNormalizer()
+        self.normalizer = TEPNormalizer(ewma_span=EWMA_SPAN)
 
         # Create results directory and trials CSV file.
         self.results_dir = Path("results") / str(subject_id) / ("open_loop" if self.is_open_loop_session else "prime")
@@ -566,7 +573,8 @@ class Decider:
 
         success, tep = self.analyze_tep(
             time_offsets, eeg_buffer,
-            update_normalizer=(condition != "prime_triplet"),
+            normalize=(condition in LABELLED_CONDITIONS),
+            update_trend=(condition in TREND_CONDITIONS),
         )
 
         if not success:
@@ -574,7 +582,7 @@ class Decider:
             self.current_trial["postprocessing_failed"] = True
             return None
 
-        if condition != "prime_triplet":
+        if condition in LABELLED_CONDITIONS:
             assert tep["label"] is not None
 
         if condition == "prime_single_pulse":
@@ -757,7 +765,8 @@ class Decider:
 
     def analyze_tep(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
-            update_normalizer: bool = True,
+            normalize: bool = True,
+            update_trend: bool = True,
     ) -> tuple[bool, Optional[float]]:
         post_buffer, post_time_offsets = crop_eeg_buffer(
             eeg_buffer,
@@ -775,11 +784,11 @@ class Decider:
 
         amplitude = self.dipole_fitter.fit_trial(post)
 
-        if not update_normalizer:
+        if not normalize:
             return True, {"raw": float(amplitude), "ewma": None,
                       "detrended": None, "label": None}
 
-        tep_amplitude = self.normalizer.transform_verbose(amplitude)
+        tep_amplitude = self.normalizer.transform_verbose(amplitude, update_trend=update_trend)
         return True, tep_amplitude
 
     # ==================================================================
@@ -798,6 +807,7 @@ class Decider:
         self.preprocessor.calibration_params["normalizer"] = {
             "scale_factor": self.normalizer.scale_factor,
             "ewma_span": self.normalizer.ewma_span,
+            "trend_conditions": list(TREND_CONDITIONS),
             "cal_amplitudes": np.asarray(amplitudes, dtype=float),
             "cal_labels": np.asarray(tep_amplitudes, dtype=float),
         }
