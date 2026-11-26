@@ -283,6 +283,39 @@ class DipoleFitter:
         position_index, orientation = determine_optimal_ori_and_pos(
             dipoles_in_index_range, self._forward
         )
+
+        #statistics of the chosen window (computed as in determine_optimal_index_range)
+        start, end = index_range
+        window_size = end - start
+        amplitudes = np.array([dipole['amplitude'] for dipole in dipoles_in_index_range])
+        amplitude_score = np.min(amplitudes)
+
+        # Position stability
+        positions_in_window = np.array([dipole['position'] for dipole in dipoles_in_index_range])
+        mean_pos = np.mean(positions_in_window, axis=0)
+        pos_stability = np.mean(np.linalg.norm(positions_in_window - mean_pos, axis=1))
+
+        # Orientation stability
+        orientations_in_window = np.array([dipole['orientation'] for dipole in dipoles_in_index_range])
+        mean_ori = np.mean(orientations_in_window, axis=0)
+        mean_ori /= np.linalg.norm(mean_ori)
+        dot_products = np.dot(orientations_in_window, mean_ori)
+        ori_stability = np.mean(np.degrees(np.arccos(np.clip(dot_products, -1.0, 1.0))))
+
+        #R2 of the final dipole: free orientation at position_index, best sample in index_range (as in fit_trial)
+        L = self._forward['sol']['data'] - np.mean(self._forward['sol']['data'], axis=0) #leadfield in average reference
+        position_now = position_index*3
+        leadfield_at_pos = L[:,position_now:position_now+3] #leadfield of the final position
+        leadfield_at_pos_pinv = np.linalg.pinv(leadfield_at_pos)
+        best_r2 = -np.inf #initialize best r2 value
+        for time_index in range(start, end):
+            data_measured = evoked[:, time_index] #get the data at the current sample index
+            dipole_moment = np.matmul(leadfield_at_pos_pinv,data_measured) #Q = pinv(L(r))y
+            data_predicted = np.matmul(leadfield_at_pos, dipole_moment) #y_predicted = LQ
+            r2_now = r2_score(data_measured, data_predicted) #coefficient of determination of the dipole fit
+            if r2_now > best_r2:
+                best_r2 = r2_now
+
         self._fitting_info = {
             'position_index': position_index,
             'orientation': orientation,
@@ -291,6 +324,11 @@ class DipoleFitter:
             'dipole_tmin': self._dipole_tmin,
             'index_range_s': (self._dipole_tmin + index_range[0] / self._sfreq,
                               self._dipole_tmin + (index_range[1] - 1) / self._sfreq),
+            'r2': best_r2,
+            'window_size': window_size,          # samples, at 'sfreq'
+            'min_amplitude': amplitude_score,
+            'pos_stability': pos_stability,      # m
+            'ori_stability': ori_stability,      # degrees
         }
         calibration_amplitudes = np.array([
             self.fit_trial(epochs[i]) for i in range(len(epochs))
