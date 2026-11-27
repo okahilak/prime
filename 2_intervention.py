@@ -92,7 +92,8 @@ SEED = 201
 
 # Wall-clock latencies (ms) collected per call and flushed to profile_*.csv once
 # at teardown, so the hot path (process_periodic) never touches the filesystem.
-PROFILE_METRICS = ("predict", "check_qc", "finetune", "process_pulse", "preprocess_pre")
+PROFILE_METRICS = ("predict", "check_qc", "finetune", "process_pulse", "preprocess_pre",
+                   "preprocess_post", "dipole_fit")
 
 
 MINI_BLOCK_COMPOSITION = (
@@ -238,6 +239,9 @@ class Decider:
         self.current_trial: dict = {}
 
         self.profile_samples: dict[str, list[float]] = {name: [] for name in PROFILE_METRICS}
+        # Post-stimulus step times of each process_pulse call, in the same order as its samples.
+        self.pulse_parts: list[dict[str, float]] = []
+        self.current_parts: dict[str, float] = {}
         self.prediction_log: list[dict] = []
 
         print(
@@ -512,6 +516,7 @@ class Decider:
             eeg_buffer: np.ndarray, emg_buffer: np.ndarray,
             is_coil_at_target: bool, stage_name: str, trial_in_stage: int) -> dict[str, Any] | None:
         t0 = time.perf_counter()
+        self.current_parts = {}
 
         tep = {"label": None, "raw": None, "ewma": None,
                "detrended": None}
@@ -565,6 +570,7 @@ class Decider:
         )
 
         self.record_profile("process_pulse", (time.perf_counter() - t0) * 1000)
+        self.pulse_parts.append(self.current_parts)
 
     def process_intervention_pulse(
             self, time_offsets: np.ndarray, eeg_buffer: np.ndarray,
@@ -680,14 +686,20 @@ class Decider:
 
     def write_profile(self) -> None:
         """Write each metric's collected latencies to results/.../profile_<name>.csv,
-        one sample per line under a `duration_ms` header."""
+        one sample per line under a `duration_ms` header. profile_process_pulse.csv
+        also lists the post-stimulus steps of each call (empty if a step did not run)."""
         for name, samples in self.profile_samples.items():
             path = self.results_dir / f"profile_{name}.csv"
+            parts = ("preprocess_post", "dipole_fit") if name == "process_pulse" else ()
             with open(path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["duration_ms"])
-                for elapsed_ms in samples:
-                    writer.writerow([f"{elapsed_ms:.3f}"])
+                writer.writerow(["duration_ms"] + [f"{part}_ms" for part in parts])
+                for i, elapsed_ms in enumerate(samples):
+                    row = [f"{elapsed_ms:.3f}"]
+                    for part in parts:
+                        part_ms = self.pulse_parts[i].get(part)
+                        row.append("" if part_ms is None else f"{part_ms:.3f}")
+                    writer.writerow(row)
 
     def write_prediction_log(self) -> None:
         """One row per PRIME prediction attempt, written once at teardown."""
@@ -774,7 +786,10 @@ class Decider:
             self.post_initial_tmin,
             self.post_initial_tmax,
         )
-        post = self.preprocessor.preprocess_post(post_buffer, post_time_offsets)
+        post, post_ms = timed_ms(
+            self.preprocessor.preprocess_post, post_buffer, post_time_offsets)
+        self.record_profile("preprocess_post", post_ms)
+        self.current_parts["preprocess_post"] = post_ms
         self.current_post = self.preprocessor.last_post_full
         self.current_baselines = self.preprocessor.last_post_baselines
         self.current_trial["post_reject_reason"] = self.preprocessor.last_post_reject_reason
@@ -782,7 +797,9 @@ class Decider:
         if post is None:
             return False, None
 
-        amplitude = self.dipole_fitter.fit_trial(post)
+        amplitude, fit_ms = timed_ms(self.dipole_fitter.fit_trial, post)
+        self.record_profile("dipole_fit", fit_ms)
+        self.current_parts["dipole_fit"] = fit_ms
 
         if not normalize:
             return True, {"raw": float(amplitude), "ewma": None,
